@@ -85,7 +85,7 @@ class AssetContainer:
 
         container_info = []
         for data in container_data:
-            structure = await StructureManager.get_structure(data[2], ac_token= await character.ac_token)
+            structure = await StructureManager.get_structure(data[2], ac_token=character.ac_token)
             if not structure:
                 continue
             info = dict(structure)

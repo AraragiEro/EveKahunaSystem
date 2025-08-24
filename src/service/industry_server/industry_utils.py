@@ -61,7 +61,7 @@ class IdsUtils:
         character_id = UserManager.get_main_character_id(owner_qq)
         character = CharacterManager.get_character_by_id(character_id)
         structure_id = IndustryConfigManager.allocate_structure(child_id, st_matcher)
-        structure = await StructureManager.get_structure(structure_id, await character.ac_token)
+        structure = await StructureManager.get_structure(structure_id, character.ac_token)
         eiv_cost_eff = IndustryConfigManager.get_structure_EIV_cost_eff(structure.type_id)
 
         sys_manu_cost, sys_reac_cost = await SystemCost.get_system_cost(structure.solar_system_id)
@@ -80,7 +80,7 @@ class IdsUtils:
         character_id = UserManager.get_main_character_id(owner_qq)
         character = CharacterManager.get_character_by_id(character_id)
         structure_id = IndustryConfigManager.allocate_structure(child_id, st_matcher)
-        structure = await StructureManager.get_structure(structure_id, await character.ac_token)
+        structure = await StructureManager.get_structure(structure_id, character.ac_token)
 
         return [child_id, structure, quantity]
 

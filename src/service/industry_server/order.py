@@ -6,7 +6,7 @@ from ..evesso_server import eveesi
 from ..log_server import logger
 from ..character_server.character_manager import Character, CharacterManager
 from ..user_server.user_manager import User, UserManager
-from ..evesso_server.eveutils import find_max_page, get_multipages_result, parse_iso_datetime
+from ..evesso_server.eveutils import parse_iso_datetime
 from ..sde_service import SdeUtils
 from ..market_server.marker import FRT_4H_STRUCTURE_ID, JITA_TRADE_HUB_STRUCTURE_ID, MarketHistory, REGION_VALE_ID, REGION_FORGE_ID
 from ..market_server.market_manager import MarketManager
@@ -22,7 +22,7 @@ class OrderManager:
         pass
 
     async def get_character_orders(self, character: Character):
-        results = await eveesi.characters_character_orders(await character.ac_token, character.character_id)
+        results = await eveesi.characters_character_orders(character.ac_token, character.character_id)
         if not results:
             return []
         for res in results:
@@ -47,20 +47,10 @@ class OrderManager:
 
     async def refresh_character_order_history(self, character: Character):
         logger.info(f"开始刷新角色 {character.character_name} 的订单历史")
-        max_page = await find_max_page(
-            eveesi.characters_character_orders_history,
-            await character.ac_token,
-            character.character_id,
-            begin_page=1,
-            interval=2
-        )
-        results = await get_multipages_result(
-            eveesi.characters_character_orders_history,
-            max_page,
-            await character.ac_token,
+        results = await eveesi.characters_character_orders_history(
+            character.ac_token,
             character.character_id
         )
-
         for result in results:
             for data in result:
                 data.update({
@@ -73,9 +63,10 @@ class OrderManager:
                         'is_buy_order': False,
                         'min_volume': 0
                     })
-            await OrderHistoryDBUtils.insert_many_ignore_conflict(result)
+            if result:
+                await OrderHistoryDBUtils.insert_many_ignore_conflict(result)
 
-        logger.info(f'{character.character_name} 刷新订单 {max_page} 页')
+        logger.info(f'{character.character_name} 刷新订单 {len(results)} 页')
 
     async def refresh_order_history_of_user(self, user: User, force=False):
         if not force and not await RefreshDataDBUtils.out_of_day_interval(f'order_history_{user.user_qq}', 1):

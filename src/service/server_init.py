@@ -10,6 +10,7 @@ from .industry_server.structure import StructureManager
 from .industry_server.order import order_manager
 from .market_server.market_manager import MarketManager
 from .user_server.user_manager import UserManager
+from .evesso_server.esi_req_manager import init_esi_manager
 from .log_server import logger
 from .industry_server.providers import init_providers
 from .database_server.sqlalchemy.connect_manager import database_manager as dbm
@@ -31,6 +32,7 @@ async def init_server_service(log: bool = True):
     await IndustryConfigManager.init()
     MarketManager.init()
     await init_providers()
+    await init_esi_manager()
 
     global init_flag
     init_flag = True

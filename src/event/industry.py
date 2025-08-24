@@ -111,7 +111,7 @@ class AssetEvent():
 
         main_character_id = UserManager.get_main_character_id(user_qq)
         main_character = CharacterManager.get_character_by_id(main_character_id)
-        container = await AssetManager.add_container(target_qq, location_id, location_flag, container_name, user_qq, await main_character.ac_token)
+        container = await AssetManager.add_container(target_qq, location_id, location_flag, container_name, user_qq, main_character.ac_token)
         print_info = (f"已授权 {target_qq} 使用属于 {user_qq} 的库存: {location_id}。\n")
         return event.plain_result(print_info)
 
@@ -264,7 +264,7 @@ class IndsEvent:
                 matcher_key = SdeUtils.get_name_by_id(SdeUtils.get_id_by_name(matcher_key))
 
             character = CharacterManager.get_character_by_id(UserManager.get_main_character_id(user_qq))
-            structure = await StructureManager.get_structure(structure_id, await character.ac_token)
+            structure = await StructureManager.get_structure(structure_id, character.ac_token)
             if not structure:
                 return event.plain_result("获取建筑信息失败")
 
@@ -326,7 +326,7 @@ class IndsEvent:
     async def structure_info(event: AstrMessageEvent, structure_id: int):
         user_qq = get_user(event)
         character = CharacterManager.get_character_by_id(UserManager.get_main_character_id(user_qq))
-        structure = await StructureManager.get_structure(structure_id, await character.ac_token)
+        structure = await StructureManager.get_structure(structure_id, character.ac_token)
         return event.plain_result(
             f"name: {structure.name}\n"
             f"id: {structure.structure_id}\n"
@@ -343,7 +343,7 @@ class IndsEvent:
             return event.plain_result("rig_level must be 0, 1 or 2")
         user_qq = get_user(event)
         character = CharacterManager.get_character_by_id(UserManager.get_main_character_id(user_qq))
-        structrue = await StructureManager.get_structure(structure_id, await character.ac_token)
+        structrue = await StructureManager.get_structure(structure_id, character.ac_token)
         structrue.mater_rig_level = mater_rig_level
         structrue.time_rig_level = time_rig_level
         await structrue.insert_to_db()

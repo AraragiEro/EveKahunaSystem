@@ -1,6 +1,7 @@
 import logging
 
 from astrbot.core import logger as astrbot_logger
+from tqdm.asyncio import tqdm
 
 # 创建一个名为 'project_logger' 的 logger
 logger = logging.getLogger('kahuna_bot')
@@ -26,3 +27,20 @@ logger.addHandler(console_handler)
 # logger.addHandler(file_handler)
 
 logger = astrbot_logger
+
+def tqdm_emit(self, record):
+    try:
+        msg = self.format(record)
+        tqdm.write(msg)
+        self.flush()
+    except Exception:
+        self.handleError(record)
+
+# 假设 logger 已经有了一个 StreamHandler
+if not logger.handlers:
+    logger.addHandler(logging.StreamHandler())
+
+# 修改现有 handler 的 emit 方法
+for h in logger.handlers:
+    if isinstance(h, logging.StreamHandler):
+        h.emit = tqdm_emit.__get__(h, logging.StreamHandler)

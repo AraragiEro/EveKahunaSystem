@@ -93,7 +93,7 @@ class StructureManager():
         return structure
 
     @classmethod
-    async def get_new_structure_info(cls, structure_id: int, ac_token: str = None) -> dict|None:
+    async def get_new_structure_info(cls, structure_id: int, ac_token=None) -> dict|None:
         """
         "name": "4-HWWF - WinterCo. Central Station",
         "owner_id": 98599770,

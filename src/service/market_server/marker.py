@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 from ..evesso_server.eveesi import markets_region_orders
 from ..evesso_server.eveesi import markets_structures
 from ..evesso_server import eveesi
-from ..evesso_server.eveutils import find_max_page, get_multipages_result
 from ..database_server.sqlalchemy.kahuna_database_utils import (
     MarkerOrderDBUtils, MarketOrderCacheDBUtils,
     RefreshDataDBUtils,
@@ -77,11 +76,12 @@ class Market:
     async def get_market_order(self):
         if self.market_type == "jita":
             await self.get_jita_order()
+            await self.get_plex_order()
         if self.market_type == "frt":
             await self.get_frt_order()
 
     async def check_structure_access(self):
-        res = await eveesi.markets_structures(1, await self.access_character.ac_token, FRT_4H_STRUCTURE_ID, log=True)
+        res = await eveesi.markets_structures(self.access_character.ac_token, FRT_4H_STRUCTURE_ID, test=True, log=True)
         if not res:
             return False
         return True
@@ -89,10 +89,7 @@ class Market:
     async def get_frt_order(self):
         if not self.access_character:
             return
-        ac_token = await self.access_character.ac_token
-        max_page = await find_max_page(eveesi.markets_structures, ac_token, FRT_4H_STRUCTURE_ID, begin_page=20, interval=10)
-        # with db.atomic() as txn:
-        results = await get_multipages_result(eveesi.markets_structures, max_page, await self.access_character.ac_token, FRT_4H_STRUCTURE_ID)
+        results = await eveesi.markets_structures(self.access_character.ac_token, FRT_4H_STRUCTURE_ID)
 
         await MarkerOrderDBUtils.delete_order_by_location_id(FRT_4H_STRUCTURE_ID)
         with tqdm(total=len(results), desc=f"写入{MarkerOrderDBUtils.cls_model.__tablename__}数据", unit="page", ascii='=-') as pbar:
@@ -101,10 +98,9 @@ class Market:
                 pbar.update()
 
     async def get_jita_order(self):
-        max_page = await find_max_page(eveesi.markets_region_orders, REGION_FORGE_ID, begin_page=350, interval=50)
         # with db.atomic() as txn:
         logger.info("请求市场。")
-        results = await get_multipages_result(eveesi.markets_region_orders, max_page, REGION_FORGE_ID)
+        results = await eveesi.markets_region_orders(REGION_FORGE_ID)
 
         await MarkerOrderDBUtils.delete_order_by_location_id(JITA_TRADE_HUB_STRUCTURE_ID)
         with tqdm(total=len(results), desc="写入数据库", unit="page", ascii='=-') as pbar:
@@ -145,10 +141,8 @@ class Market:
                     pbar.update()
 
     async def get_plex_order(self):
-        max_page = await find_max_page(eveesi.markets_region_orders, REGION_PLEX_ID, begin_page=350, interval=50)
-        # with db.atomic() as txn:
-        logger.info("请求市场。")
-        results = await get_multipages_result(eveesi.markets_region_orders, max_page, REGION_PLEX_ID)
+        logger.info("请求plex市场。")
+        results = await eveesi.markets_region_orders(REGION_PLEX_ID)
 
         await MarkerOrderDBUtils.delete_order_by_type_id(PLEX_ID)
         with tqdm(total=len(results), desc="写入数据库", unit="page", ascii='=-') as pbar:
@@ -237,8 +231,12 @@ class Market:
         else:
             target_location = FRT_4H_STRUCTURE_ID
 
-        buy_order = await MarketOrderCacheDBUtils.select_5_buy_order_by_type_id_and_location_id(type_id, target_location)
-        sell_order = await MarketOrderCacheDBUtils.select_5_sell_order_by_type_id_and_location_id(type_id, target_location)
+        if type_id == PLEX_ID:
+            buy_order = await MarketOrderCacheDBUtils.select_5_buy_order_by_type_id(type_id)
+            sell_order = await MarketOrderCacheDBUtils.select_5_sell_order_by_type_id(type_id)
+        else:
+            buy_order = await MarketOrderCacheDBUtils.select_5_buy_order_by_type_id_and_location_id(type_id, target_location)
+            sell_order = await MarketOrderCacheDBUtils.select_5_sell_order_by_type_id_and_location_id(type_id, target_location)
 
         res = {
             'sell_order': {

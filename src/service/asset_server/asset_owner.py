@@ -7,7 +7,6 @@ from ..evesso_server.eveesi import (characters_character_assets,
                                     corporations_corporation_assets,
                                     characters_character_id_blueprints,
                                     corporations_corporation_id_blueprints)
-from ..evesso_server.eveutils import find_max_page, get_multipages_result
 from ..character_server.character import Character
 
 from ..database_server.sqlalchemy.kahuna_database_utils import (
@@ -52,10 +51,11 @@ class AssetOwner():
 
     @property
     async def token_accessable(self):
+        res = None
         if self.owner_type == "character":
-            res = await characters_character_assets(1, await self.access_character.ac_token, self.owner_id)
+            res = await characters_character_assets(self.access_character.ac_token, self.owner_id, test=True)
         elif self.owner_type == "corp":
-            res = await corporations_corporation_assets(1, await self.access_character.ac_token, self.owner_id)
+            res = await corporations_corporation_assets(self.access_character.ac_token, self.owner_id, test=True)
         if not res:
             return False
         return True
@@ -85,24 +85,7 @@ class AssetOwner():
             await self.get_owner_bp_asset(corporations_corporation_id_blueprints, self.owner_id)
 
     async def get_owner_asset(self, asset_esi, owner_id):
-        if not self.access_character:
-            return
-        ac_token = await self.access_character.ac_token
-        if self.owner_type == "character":
-            begin_page = 10
-            interval = 20
-        else:
-            begin_page = 20
-            interval = 40
-        max_page = await find_max_page(asset_esi, ac_token, owner_id, begin_page=begin_page, interval=interval)
-        if max_page == 0:
-            logger.warning(
-                f"find max page = 0 when use {asset_esi.__name__} "
-                f"with {self.access_character.character_name} as type {self.owner_type}"
-            )
-            return
-
-        results = await get_multipages_result(asset_esi, max_page, ac_token, owner_id)
+        results = await asset_esi(self.access_character.ac_token, owner_id)
 
         await AssetDBUtils.delete_asset_by_ownerid_and_owner_type(self.owner_id, self.owner_type)
         # 批量写入
@@ -120,10 +103,7 @@ class AssetOwner():
     async def get_owner_bp_asset(self, asset_esi, owner_id):
         if not self.access_character:
             return
-        ac_token = await self.access_character.ac_token
-        max_page = await find_max_page(asset_esi, ac_token, owner_id, begin_page=1, interval=5)
-
-        results = await get_multipages_result(asset_esi, max_page, ac_token, owner_id)
+        results = await asset_esi(self.access_character.ac_token, owner_id)
 
         # 删除owner的bp资产
         await BluerprintAssetDBUtils.delete_blueprint_asset_by_owner_id_and_owner_type(self.owner_id, self.owner_type)
@@ -135,7 +115,7 @@ class AssetOwner():
                 pbar.update()
 
     async def asset_item_count(self):
-        return sync_run(AssetCacheDBUtils.owner_id_asset_item_count(self.owner_id))
+        return await AssetCacheDBUtils.owner_id_asset_item_count(self.owner_id)
 
     def asset_valuation(self):
         pass

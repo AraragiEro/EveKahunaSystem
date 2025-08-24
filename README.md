@@ -250,9 +250,17 @@ esi-mail.organize_mail.v1 = true
 
 👉 [小卡bot初级使用指南](https://conscious-cord-0d1.notion.site/bot-1920b0a9ac1b80998d71c4349b241145)
 
+## TODO LIST
+ - [x] QQbot开发
+ - [ ] 网站开发
+   - [ ] 前端开发
+     - [ ] 框架
+   - [ ] esi访问队列控制
+   - [ ] 数据库重构
+
 ## 🌟 支持一下
 求个star。
 觉得好用的话，给孩子打点ISK呗~ 
 
-`ID: Alero AraragiEro`
+`EVE_ID: Alero AraragiEro`
 

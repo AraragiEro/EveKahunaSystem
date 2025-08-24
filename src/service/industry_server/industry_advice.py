@@ -447,7 +447,7 @@ class IndustryAdvice:
         main_character_id = UserManager.get_main_character_id(user_qq)
         main_character = CharacterManager.get_character_by_id(main_character_id)
         for structure_id, data in structure_asset_dict.items():
-            structure = await StructureManager.get_structure(structure_id, ac_token=await main_character.ac_token)
+            structure = await StructureManager.get_structure(structure_id, ac_token=main_character.ac_token)
             if structure:
                 structure_name = structure.name
             else:

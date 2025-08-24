@@ -5,6 +5,7 @@ from .common import api
 from .common.client_utils import excol as excol
 from .common.spreadsheets import Spreadsheets
 from .common.client_utils import (get_spreadsheet_token_by_name)
+from ..log_server.kahuna_logger import logger
 
 class LinkShareEntity():
     tenant_readable = 'tenant_readable'
@@ -40,7 +41,10 @@ class FeiShuClient:
     def __init__(self, app_id, secret_id):
         self.app_id = app_id
         self.secret_id = secret_id
-        self.get_access_token()
+        try:
+            self.get_access_token()
+        except Exception as e:
+            logger.error(f"飞书 get_access_token error: {e}")
 
     def get_access_token(self):
         res = api.post_tenant_access_token(self.app_id, self.secret_id)

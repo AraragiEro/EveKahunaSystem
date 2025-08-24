@@ -114,7 +114,7 @@ class AssetManager():
         return await AssetCacheDBUtils.select_asset_in_container_list(container_list)
 
     @classmethod
-    async def add_container(cls, owner_qq: int, location_id: int, location_type: str, asset_name: str, operate_qq: int, ac_token: str):
+    async def add_container(cls, owner_qq: int, location_id: int, location_type: str, asset_name: str, operate_qq: int, ac_token):
         if location_type == 'Hangar':
             raise KahunaException("个人机库根目录暂不支持加入容器")
         # 权限校验

@@ -6,7 +6,6 @@ from ..database_server.sqlalchemy.kahuna_database_utils import (
 )
 from ..character_server.character import Character
 from ..evesso_server.eveesi import characters_character_id_industry_jobs, corporations_corporation_id_industry_jobs
-from ..evesso_server.eveutils import find_max_page, get_multipages_result
 # from ..database_server.connect import DatabaseConectManager
 
 # kahuna logger
@@ -16,7 +15,7 @@ class RunningJobOwner:
     @classmethod
     async def refresh_character_running_job(cls, character: Character):
         logger.info(f"开始刷新 {character.character_name} job")
-        character_running_job = await characters_character_id_industry_jobs(await character.ac_token, character.character_id)
+        character_running_job = await characters_character_id_industry_jobs(character.ac_token, character.character_id)
         if not character_running_job:
             return
 
@@ -29,10 +28,8 @@ class RunningJobOwner:
 
     @classmethod
     async def refresh_corp_running_job(cls, corp_id, character: Character):
-        max_page = await find_max_page(corporations_corporation_id_industry_jobs, await character.ac_token, corp_id,
-                                 begin_page=1, interval=2)
         logger.info(f"开始刷新 corp {corp_id} job。")
-        results = await get_multipages_result(corporations_corporation_id_industry_jobs, max_page, await character.ac_token, corp_id)
+        results = await corporations_corporation_id_industry_jobs(character.ac_token, corp_id)
         await IndustryJobsDBUtils.delete_jobs_by_owner_id(corp_id)
         for result in results:
             for data in result:

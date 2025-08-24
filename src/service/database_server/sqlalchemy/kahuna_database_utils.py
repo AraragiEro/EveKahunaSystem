@@ -568,6 +568,30 @@ class MarketOrderCacheDBUtils(MarkerOrderDBUtils, CommonCacheUtils):
                 result = await session.execute(stmt)
                 return result.scalars().all()
 
+    @classmethod
+    async def select_5_buy_order_by_type_id(cls, type_id):
+        async_session = dbm.async_session(cls.cls_model)
+        async with async_session() as session:
+            async with session.begin():
+                stmt = select(cls.cls_model).where(
+                    (cls.cls_model.type_id == type_id) &
+                    (cls.cls_model.is_buy_order == True)
+                ).order_by(cls.cls_model.price.desc()).limit(5)
+                result = await session.execute(stmt)
+                return result.scalars().all()
+
+    @classmethod
+    async def select_5_sell_order_by_type_id(cls, type_id):
+        async_session = dbm.async_session(cls.cls_model)
+        async with async_session() as session:
+            async with session.begin():
+                stmt = select(cls.cls_model).where(
+                    (cls.cls_model.type_id == type_id) &
+                    (cls.cls_model.is_buy_order == False)
+                ).order_by(cls.cls_model.price.asc()).limit(5)
+                result = await session.execute(stmt)
+                return result.scalars().all()
+
 class MarketPriceDBUtils(CommonUtils):
     cls_model = MarketPrice
 

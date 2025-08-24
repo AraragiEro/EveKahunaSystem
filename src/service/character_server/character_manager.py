@@ -87,7 +87,7 @@ class CharacterManager():
 
     @classmethod
     async def is_character_corp_directer(cls, character):
-        role_info = await corporations_corporation_id_roles(await character.ac_token, character.corp_id)
+        role_info = await corporations_corporation_id_roles(character.ac_token, character.corp_id)
         if not role_info:
             return False
 
