@@ -501,55 +501,55 @@ class IndsEvent:
     async def rp_plan(event: AstrMessageEvent, plan_name: str):
         if await try_acquire_lock(calculate_lock, 1):
             try:
-                if AssetManager.refresh_flag:
+                if AssetManager.refresh_flag.locked():
                     yield event.plain_result('资产表正在刷新。刷新完成后会自动开始计算。请稍等。')
-                    while AssetManager.refresh_flag:
+                    while AssetManager.refresh_flag.locked():
                         await asyncio.sleep(1)
-                    AssetManager.refresh_flag = False
-                user_qq = get_user(event)
+                async with AssetManager.refresh_flag:
+                    user_qq = get_user(event)
 
-                user = UserManager.get_user(user_qq)
-                if plan_name not in user.user_data.plan:
-                    raise KahunaException(f"plan {plan_name} not exist")
+                    user = UserManager.get_user(user_qq)
+                    if plan_name not in user.user_data.plan:
+                        raise KahunaException(f"plan {plan_name} not exist")
 
-                analyser = IndustryAnalyser.get_analyser_by_plan(user, plan_name)
-                analyser.bp_block_level = 2
-                report = await analyser.get_work_tree_data()
+                    analyser = IndustryAnalyser.get_analyser_by_plan(user, plan_name)
+                    analyser.bp_block_level = 2
+                    report = await analyser.get_work_tree_data()
 
-                spreadsheet = FeiShuKahuna.create_user_plan_spreadsheet(user_qq, plan_name)
-                FeiShuKahuna.create_default_spreadsheet(spreadsheet)
-                work_tree_sheet = FeiShuKahuna.get_worktree_sheet(spreadsheet)
-                FeiShuKahuna.output_work_tree(work_tree_sheet, report['work'])
-                material_sheet = FeiShuKahuna.get_material_sheet(spreadsheet)
-                FeiShuKahuna.output_material_tree(material_sheet, report['material'])
-                work_flow_sheet = FeiShuKahuna.get_workflow_sheet(spreadsheet)
-                FeiShuKahuna.output_work_flow(work_flow_sheet, report['work_flow'])
-                logistic_sheet = FeiShuKahuna.get_logistic_sheet(spreadsheet)
-                FeiShuKahuna.output_logistic_plan(logistic_sheet, report['logistic'])
+                    spreadsheet = FeiShuKahuna.create_user_plan_spreadsheet(user_qq, plan_name)
+                    FeiShuKahuna.create_default_spreadsheet(spreadsheet)
+                    work_tree_sheet = FeiShuKahuna.get_worktree_sheet(spreadsheet)
+                    FeiShuKahuna.output_work_tree(work_tree_sheet, report['work'])
+                    material_sheet = FeiShuKahuna.get_material_sheet(spreadsheet)
+                    FeiShuKahuna.output_material_tree(material_sheet, report['material'])
+                    work_flow_sheet = FeiShuKahuna.get_workflow_sheet(spreadsheet)
+                    FeiShuKahuna.output_work_flow(work_flow_sheet, report['work_flow'])
+                    logistic_sheet = FeiShuKahuna.get_logistic_sheet(spreadsheet)
+                    FeiShuKahuna.output_logistic_plan(logistic_sheet, report['logistic'])
 
-                # 删除不可写入json的多余部分
-                report.pop('logistic')
-                plan_cache = get_user_tmp_cache_prefix(user_qq) + f'{plan_name}_' + 'plan_report.json'
-                with open(os.path.join(TMP_PATH, plan_cache), 'w') as file:
-                    cache_dict = {
-                        'date': get_beijing_utctime(datetime.now()).isoformat(),
-                        'data': report
-                    }
-                    json.dump(cache_dict, file, indent=4)
+                    # 删除不可写入json的多余部分
+                    report.pop('logistic')
+                    plan_cache = get_user_tmp_cache_prefix(user_qq) + f'{plan_name}_' + 'plan_report.json'
+                    with open(os.path.join(TMP_PATH, plan_cache), 'w') as file:
+                        cache_dict = {
+                            'date': get_beijing_utctime(datetime.now()).isoformat(),
+                            'data': report
+                        }
+                        json.dump(cache_dict, file, indent=4)
 
-                res_str = f"执行完成, 当前计划蓝图分解:{work_tree_sheet.url}\n"
-                if report['finished_index']:
-                    finished_str = ''.join([f"{data['name']} x {data['quantity']}\n" for data in report['finished_index']])
-                    res_str += (
-                        f"检测到以下目标已完成：\n"
-                        f'{finished_str}'
-                        "如需删除目标请使用指令："
-                    )
-                    yield event.plain_result(res_str)
-                    await asyncio.sleep(0.5)
-                    yield event.plain_result(f".工业 计划 删除产品 {plan_name} {','.join([str(data['index']) for data in report['finished_index']])}")
-                else:
-                    yield event.plain_result(res_str)
+                    res_str = f"执行完成, 当前计划蓝图分解:{work_tree_sheet.url}\n"
+                    if report['finished_index']:
+                        finished_str = ''.join([f"{data['name']} x {data['quantity']}\n" for data in report['finished_index']])
+                        res_str += (
+                            f"检测到以下目标已完成：\n"
+                            f'{finished_str}'
+                            "如需删除目标请使用指令："
+                        )
+                        yield event.plain_result(res_str)
+                        await asyncio.sleep(0.5)
+                        yield event.plain_result(f".工业 计划 删除产品 {plan_name} {','.join([str(data['index']) for data in report['finished_index']])}")
+                    else:
+                        yield event.plain_result(res_str)
             finally:
                 calculate_lock.release()
         else:

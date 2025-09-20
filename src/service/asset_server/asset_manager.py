@@ -26,7 +26,7 @@ class AssetManager():
     container_dict: dict[(int, str): AssetContainer] = dict() # {(owner_qq, location_id): AssetContainer}
     monitor_process = None
     last_refresh = None
-    refresh_flag = False
+    refresh_flag = asyncio.Lock()
 
     @classmethod
     async def init(cls):
@@ -98,16 +98,18 @@ class AssetManager():
     async def refresh_all_asset(cls, force=False):
         if not force and not await RefreshDataDBUtils.out_of_min_interval('asset', 15):
             return
-        cls.refresh_flag = True
+        if cls.refresh_flag.locked():
+            logger.info('可能有计算任务执行中，延迟资产刷新。')
+            while cls.refresh_flag.locked():
+                await asyncio.sleep(1)
+        async with cls.refresh_flag:
+            logger.info('开始刷新所有资产')
+            for asset in cls.asset_dict.values():
+                await asset.get_asset()
+            await cls.copy_to_cache()
 
-        logger.info('开始刷新所有资产')
-        for asset in cls.asset_dict.values():
-            await asset.get_asset()
-        await cls.copy_to_cache()
-
-        await RefreshDataDBUtils.update_refresh_date('asset')
-        cls.refresh_flag = False
-        logger.info('刷新资产完成。')
+            await RefreshDataDBUtils.update_refresh_date('asset')
+            logger.info('刷新资产完成。')
 
     @classmethod
     async def get_asset_in_container_list(cls, container_list: list):
