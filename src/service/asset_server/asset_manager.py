@@ -100,8 +100,7 @@ class AssetManager():
             return
         if cls.refresh_flag.locked():
             logger.info('可能有计算任务执行中，延迟资产刷新。')
-            while cls.refresh_flag.locked():
-                await asyncio.sleep(1)
+            return
         async with cls.refresh_flag:
             logger.info('开始刷新所有资产')
             for asset in cls.asset_dict.values():
