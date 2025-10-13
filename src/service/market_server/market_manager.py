@@ -34,20 +34,20 @@ class MarketManager():
     @classmethod
     def init_market(cls):
         if not cls.init_status:
-            frt_market = Market("frt")
-            jita_market = Market("jita")
-            plex_market = Market("plex")
+            cls.market_dict["jita"] = Market("frt")
+            cls.market_dict["frt"] = Market("jita")
+            cls.market_dict['plex'] = Market("plex")
+            cls.market_dict['B-9'] = Market("B-9")
 
             try:
                 ac_character_id = int(config['EVE']['MARKET_AC_CHARACTER_ID'])
-                frt_market.access_character = CharacterManager.get_character_by_id(ac_character_id)
+                cls.market_dict["frt"].access_character = CharacterManager.get_character_by_id(ac_character_id)
+                cls.market_dict["B-9"].access_character = CharacterManager.get_character_by_id(ac_character_id)
             except:
                 logger.error(f"market access character init error")
                 return
 
-            cls.market_dict["jita"] = jita_market
-            cls.market_dict["frt"] = frt_market
-            cls.market_dict['plex'] = plex_market
+
         cls.init_status = True
         logger.info(f"初始化市场. {id(cls)}")
 

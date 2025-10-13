@@ -26,6 +26,7 @@ JITA_TRADE_HUB_STRUCTURE_ID = 60003760
 PLEX_ID = 44992
 FRT_4H_STRUCTURE_ID = 1035466617946
 S33RB_O_STRUCTURE_ID = 1045441547980
+B_9C24_KEEPSTAR_ID = 1046831245129
 PIMI_STRUCTURE_LIST = [1042508032148, 1042499803831, 1044752365771]
 
 class RateLimiter:
@@ -67,6 +68,8 @@ class Market:
         self.market_type = market_type
         if market_type == "frt":
             self.location_id = FRT_4H_STRUCTURE_ID
+        elif market_type == "B-9":
+            self.location_id = B_9C24_KEEPSTAR_ID
         else:
             self.location_id = JITA_TRADE_HUB_STRUCTURE_ID
 
@@ -78,7 +81,9 @@ class Market:
             await self.get_jita_order()
             await self.get_plex_order()
         if self.market_type == "frt":
-            await self.get_frt_order()
+            await self.get_structure_order(FRT_4H_STRUCTURE_ID)
+        if self.market_type == "B-9":
+            await self.get_structure_order(B_9C24_KEEPSTAR_ID)
 
     async def check_structure_access(self):
         res = await eveesi.markets_structures(self.access_character.ac_token, FRT_4H_STRUCTURE_ID, test=True, log=True)
@@ -86,12 +91,12 @@ class Market:
             return False
         return True
 
-    async def get_frt_order(self):
+    async def get_structure_order(self, structure_id):
         if not self.access_character:
             return
-        results = await eveesi.markets_structures(self.access_character.ac_token, FRT_4H_STRUCTURE_ID)
+        results = await eveesi.markets_structures(self.access_character.ac_token, structure_id)
 
-        await MarkerOrderDBUtils.delete_order_by_location_id(FRT_4H_STRUCTURE_ID)
+        await MarkerOrderDBUtils.delete_order_by_location_id(structure_id)
         with tqdm(total=len(results), desc=f"写入{MarkerOrderDBUtils.cls_model.__tablename__}数据", unit="page", ascii='=-') as pbar:
             for i, result in enumerate(results):
                 await MarkerOrderDBUtils.insert_many(result)
@@ -185,7 +190,7 @@ class Market:
         if self.market_type == "jita":
             target_location = JITA_TRADE_HUB_STRUCTURE_ID
         else:
-            target_location = FRT_4H_STRUCTURE_ID
+            target_location = self.location_id
 
         # 统计总数据数量，并按照is_buy_order进行求和统计
         total_count = await MarketOrderCacheDBUtils.select_order_count_by_location_id(target_location)

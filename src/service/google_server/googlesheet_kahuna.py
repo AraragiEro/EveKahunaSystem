@@ -23,10 +23,11 @@ REGION_FORGE_ID = 10000002
 REGION_VALE_ID = 10000003
 JITA_TRADE_HUB_STRUCTURE_ID = 60003760
 FRT_4H_STRUCTURE_ID = 1035466617946
+B_9C24_KEEPSTAR_ID = 1046831245129
 
 class KahunaGoogleSheetManager:
     def __init__(self):
-        self.refresh_running = False
+        self.refresh_running = asyncio.Lock()
         self.sheet_api_test = False
 
     def test_google_sheet_api(self):
@@ -78,7 +79,7 @@ class KahunaGoogleSheetManager:
     """
     表1： 市场
     """
-    async def output_market_data(self):
+    async def output_4h_market_data(self):
         frt_4h_order = await MarketOrderCacheDBUtils.select_order_by_location_id(FRT_4H_STRUCTURE_ID)
         jita_market = MarketManager.get_market_by_type('jita')
         pl_asset = await pm.get_all_assets()
@@ -222,12 +223,35 @@ class KahunaGoogleSheetManager:
 
         return res
 
+    async def output_B_9_order(self):
+        header = ['id', 'is_buy_order', 'issued', 'volume_remain', 'type_id', 'price']
+
+        b_9_order = await MarketOrderCacheDBUtils.select_order_by_location_id(B_9C24_KEEPSTAR_ID)
+        b_9_order = list(b_9_order)
+        res = [header]
+        for data in b_9_order:
+            if int(data.is_buy_order) == 1:
+                continue
+            res.append([
+                data.id,
+                int(data.is_buy_order),
+                data.issued,
+                data.volume_remain,
+                data.type_id,
+                data.price,
+            ])
+        return res
+
     async def refresh_market_monitor(self):
         start = datetime.now()
 
         try:
             # 在事件循环中运行异步函数
-            res = await self.output_market_data()
+            # 4H市场订单详细数据
+            res = await self.output_4h_market_data()
+
+            # B-9订单粗略数据
+            B_9_order_data = await self.output_B_9_order()
 
             spreadsheet_id = config['GOOGLE']['MARKET_MONITOR_SPREADSHEET_ID']
 
@@ -243,6 +267,11 @@ class KahunaGoogleSheetManager:
                         'range': '欢迎！先看这里!A17',
                         'values': [['最后更新:', get_beijing_utctime(datetime.now()).strftime('%Y-%m-%d %H:%M:%S')]]
                     },
+                    {
+                        'majorDimension': 'ROWS',
+                        'range': 'B-9订单数据',
+                        'values': B_9_order_data
+                    },
                 ],
                 'valueInputOption': 'USER_ENTERED'
             }
@@ -253,17 +282,16 @@ class KahunaGoogleSheetManager:
             logger.error(e)
             raise e
 
-
     async def refresh_market_monitor_process(self, force=False):
-        if self.refresh_running:
+        if self.refresh_running.locked():
             return
-        if not self.sheet_api_test:
-            self.test_google_sheet_api()
+        async with self.refresh_running:
             if not self.sheet_api_test:
-                logger.error('google_sheet_api test not pass.')
-                return
-        try:
-            self.refresh_running = True
+                self.test_google_sheet_api()
+                if not self.sheet_api_test:
+                    logger.error('google_sheet_api test not pass.')
+                    return
+
             if not force and not await RefreshDataDBUtils.out_of_hour_interval('market_monitor', 2):
                 return
             if not config.has_option('GOOGLE', 'MARKET_MONITOR_SPREADSHEET_ID'):
@@ -272,9 +300,6 @@ class KahunaGoogleSheetManager:
 
             await self.refresh_market_monitor()
 
-
             await RefreshDataDBUtils.update_refresh_date('market_monitor')
-        finally:
-            self.refresh_running = False
 
 kahuna_google_market_monitor = KahunaGoogleSheetManager()
