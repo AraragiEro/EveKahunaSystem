@@ -34,8 +34,8 @@ class MarketManager():
     @classmethod
     def init_market(cls):
         if not cls.init_status:
-            cls.market_dict["jita"] = Market("frt")
-            cls.market_dict["frt"] = Market("jita")
+            cls.market_dict["jita"] = Market("jita")
+            cls.market_dict["frt"] = Market("frt")
             cls.market_dict['plex'] = Market("plex")
             cls.market_dict['B-9'] = Market("B-9")
 

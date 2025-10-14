@@ -204,13 +204,14 @@ class Market:
 
     order_rouge_cache = TTLCache(maxsize=500, ttl=10 * 60)
     async def get_type_order_rouge(self, type_id: int) -> tuple[float, float]:
-        if type_id in Market.order_rouge_cache:
-            return Market.order_rouge_cache[type_id]
         if self.market_type == "jita":
             target_location = JITA_TRADE_HUB_STRUCTURE_ID
         else:
             target_location = FRT_4H_STRUCTURE_ID
-        
+
+        if (type_id, target_location) in Market.order_rouge_cache:
+            return Market.order_rouge_cache[(type_id, target_location)]
+
         target_id , target_location = type_id, target_location  # replace with actual values
 
         # plex统一大市场，不需要进行位置筛选
@@ -227,7 +228,7 @@ class Market:
         if not min_price_sell:
             min_price_sell = 0
         res = [float(max_price_buy), float(min_price_sell)]
-        Market.order_rouge_cache[type_id] = res
+        Market.order_rouge_cache[(type_id, target_location)] = res
         return res
 
     async def get_latest_order_by_type_id(self, type_id: int) -> tuple[list, list]:
