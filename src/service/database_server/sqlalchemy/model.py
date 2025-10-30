@@ -18,9 +18,15 @@ from .connect_manager import PostgreModel
 class User(PostgreModel):
     __tablename__ = 'user'
     user_name = Column(Integer, primary_key=True)
-    user_qq = Column(Integer)
-    create_date = Column(DateTime, nullable=False)
+    create_date = Column(DateTime)
     password_hash = Column(Text)
+
+class UserData(PostgreModel):
+    __tablename__ = 'user_data'
+    user_name = Column(Integer, ForeignKey("user.user_name"), primary_key=True)
+    user_qq = Column(Integer, index=True)
+    main_character_id = Column(Integer, index=True)
+
 
 class VipStatus(PostgreModel):
     __tablename__ = 'vip_status'

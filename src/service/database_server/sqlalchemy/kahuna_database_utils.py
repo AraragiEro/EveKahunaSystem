@@ -13,7 +13,7 @@ from .config_model import (
     Character,
     Structure,
     Matcher,
-    User,
+    # User,
     UserData,
     UserAssetStatistics,
     InvTypeMap,
@@ -29,31 +29,39 @@ from .cache_model import (
     MarketHistory,
     RefreshDate
 )
+from .model import (
+    User,
+    InvitCode,
+    EveAuthedCharacter,
+    EveAliasCharacter
+)
 
 from ...log_server import logger
 
-# result.all()  # 返回所有行的列表，每行是一个元组 [(obj1,), (obj2,)]
-# result.first()  # 返回第一行元组 (obj1,) 或 None
-# result.one()  # 返回唯一一行元组 (obj1,)，如果不是恰好一行则抛出异常
-# result.one_or_none()  # 返回唯一一行元组 (obj1,) 或 None，如果多于一行则抛出异常
-# result.scalar()  # 返回第一行第一列的值 obj1 或 None
-# result.scalar_one()  # 返回唯一一行第一列的值 obj1，如果不是恰好一行则抛出异常
-# result.scalar_one_or_none()  # 返回唯一一行第一列的值 obj1 或 None，如果多于一行则抛出异常
-# result.partitions(size)  # 返回分批处理的迭代器，每批 size 个行元组
-# result.mappings().all()  # 返回所有行的字典列表 [{'col1': val1, 'col2': val2}, ...]
-# result.columns('col1', 'col2').all()  # 返回指定列的所有行元组 [(val1, val2), ...]
+"""
+result.all()  # 返回所有行的列表，每行是一个元组 [(obj1,), (obj2,)]
+result.first()  # 返回第一行元组 (obj1,) 或 None
+result.one()  # 返回唯一一行元组 (obj1,)，如果不是恰好一行则抛出异常
+result.one_or_none()  # 返回唯一一行元组 (obj1,) 或 None，如果多于一行则抛出异常
+result.scalar()  # 返回第一行第一列的值 obj1 或 None
+result.scalar_one()  # 返回唯一一行第一列的值 obj1，如果不是恰好一行则抛出异常
+result.scalar_one_or_none()  # 返回唯一一行第一列的值 obj1 或 None，如果多于一行则抛出异常
+result.partitions(size)  # 返回分批处理的迭代器，每批 size 个行元组
+result.mappings().all()  # 返回所有行的字典列表 [{'col1': val1, 'col2': val2}, ...]
+result.columns('col1', 'col2').all()  # 返回指定列的所有行元组 [(val1, val2), ...]
 
-# result.scalars().all()  # 返回所有行第一列的值列表 [obj1, obj2, ...]
-# result.scalars().first()  # 返回第一行第一列的值 obj1 或 None
-# result.scalars().one()  # 返回唯一一行第一列的值 obj1，如果不是恰好一行则抛出异常
-# result.scalars().one_or_none()  # 返回唯一一行第一列的值 obj1 或 None，如果多于一行则抛出异常
-# result.scalars(1).all()  # 返回所有行第二列的值列表 [val1, val2, ...]（索引从0开始）
+result.scalars().all()  # 返回所有行第一列的值列表 [obj1, obj2, ...]
+result.scalars().first()  # 返回第一行第一列的值 obj1 或 None
+result.scalars().one()  # 返回唯一一行第一列的值 obj1，如果不是恰好一行则抛出异常
+result.scalars().one_or_none()  # 返回唯一一行第一列的值 obj1 或 None，如果多于一行则抛出异常
+result.scalars(1).all()  # 返回所有行第二列的值列表 [val1, val2, ...]（索引从0开始）
 
-# result.fetchall()  # 等同于 all()，返回所有行的元组列表
-# result.fetchone()  # 等同于 first()，返回第一行元组或 None
+result.fetchall()  # 等同于 all()，返回所有行的元组列表
+result.fetchone()  # 等同于 first()，返回第一行元组或 None
 
-# result.keys()  # 返回结果列名列表
-# result.unique().all()  # 返回去重后的所有行元组列表
+result.keys()  # 返回结果列名列表
+result.unique().all()  # 返回去重后的所有行元组列表
+"""
 
 class CommonUtils:
     cls_model = None
@@ -120,13 +128,11 @@ class CommonUtils:
                 result = await session.execute(stmt)
                 return result.scalars().all()
 
-
     @classmethod
     def get_obj(cls):
         if not cls.cls_model:
             raise Exception("cls_model is None")
         return cls.cls_model()
-
 
     @classmethod
     async def save_obj(cls, asset_owner_obj):

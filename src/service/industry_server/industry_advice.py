@@ -500,7 +500,7 @@ class IndustryAdvice:
     async def perisonal_inventory_statistics(cls, user_qq: int):
         market = MarketManager.get_market_by_type('jita')
 
-        # TODO 获取资产
+        # 获取资产
         container_list = AssetManager.get_user_container(user_qq)
         target_container = set(container for container in container_list)
         asset_dict = {}

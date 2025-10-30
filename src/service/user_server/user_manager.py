@@ -12,8 +12,6 @@ from ..log_server import logger
 from ...utils import KahunaException
 
 ESI_CACHE = TTLCache(maxsize=100, ttl=300)
-
-
 class UserManager():
     init_status = False
     lock = Lock()
@@ -25,14 +23,13 @@ class UserManager():
 
     @classmethod
     async def init_user_dict(cls):
+        # TODO postgre 不再全量读取到内存，只保存热点数据
         if not cls.init_status:
 
             user_list = await UserDBUtils.select_all()
             for user in user_list:
                 usr_obj = User(
-                    qq=user.user_qq,
-                    create_date=user.create_date,
-                    expire_date=user.expire_date
+                    qq=user.user_qq
                 )
                 await usr_obj.user_data.load_self_data()
                 if user.main_character_id:

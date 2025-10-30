@@ -498,7 +498,6 @@ class IndustryAnalyser():
             return self.work_graph.nodes[child_id], self.global_graph.nodes[child_id]
 
         need_cal_edge = [edge for edge in self.bp_graph.in_edges(child_id, data=True)]
-        # TODO需要改变结构
         # 当前[fathern, child, data]
         # 改为[father, [index], child, quantity]
         tmp_dict = {}

@@ -73,7 +73,6 @@ class IndustryConfigManager():
     #   特别设置的建筑效率 > 蓝图资产所在建筑效率 > 默认建筑效率
     @classmethod
     def get_eff(cls, source_id: int) -> tuple[int, int]:
-        # TODO:　根据制品类型获取双系数
         mater_eff = 1
         time_eff = 1
 
@@ -100,7 +99,7 @@ class IndustryConfigManager():
 
         if action_id == 11:
             return EffStructUreType.T2_TATARA
-        elif group_name == 'Construction Components': # TODO 记得替换
+        elif group_name == 'Construction Components':
             return EffStructUreType.T2_LETA_LU
         else:
             return EffStructUreType.T1_SOTIYO

@@ -15,12 +15,11 @@ import sys
 import os
 # sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.service.database_server.sqlalchemy import connect_manager
-from src.service.database_server.sqlalchemy.connect_manager import PostgreDatabaseManager
-TARGET_MODULE_PATH = 'src.service.database_server.sqlalchemy.connect_manager'
+from src_v2.core.database import connect_manager
+from src_v2.core.database.connect_manager import PostgreDatabaseManager
+TARGET_MODULE_PATH = 'src_v2.core.database.connect_manager'
 # 创建测试用的模型基类
 PostgreBaseModel = declarative_base()
-
 
 class PostgreModel(PostgreBaseModel):
     """测试用的模型类"""
@@ -407,10 +406,6 @@ class TestPostgreDatabaseManagerIntegration:
             assert len(items) > 0
             assert items[0].name == 'Test Name'
 
-
-if __name__ == '__main__':
-    pytest.main([__file__, '-v', '--asyncio-mode=auto'])
-
 class TestRedisDatabaseManager:
     """RedisDatabaseManager 测试类"""
 
@@ -437,7 +432,7 @@ class TestRedisDatabaseManager:
 
             await manager.init()
 
-            mock_redis_cls.assert_called_once_with(host='redis-host', port=6380)
+            mock_redis_cls.assert_called_once_with(host='redis-host', port=6380, decode_responses=True)
             assert manager.redis is mock_redis_instance
 
 
@@ -474,7 +469,7 @@ class TestRedisDatabaseManagerIntegration:
         assert got in (value.encode('utf-8'), value)
 
     @pytest.mark.asyncio
-    async def test_init_with_config_file(self, manager):
+    async def test_init_with_config_file(self, manager_with_redis):
         """使用配置文件初始化 Redis（无环境变量）"""
         with patch.dict(os.environ, {}, clear=True), \
         patch(f'{TARGET_MODULE_PATH}.config') as mock_config, \
@@ -490,7 +485,11 @@ class TestRedisDatabaseManagerIntegration:
             mock_redis_instance = MagicMock()
             mock_redis_cls.return_value = mock_redis_instance
 
-            await manager.init()
+            await manager_with_redis.init()
 
-            mock_redis_cls.assert_called_once_with(host='cfg-redis-host', port=6379)
-            assert manager.redis is mock_redis_instance
+            mock_redis_cls.assert_called_once_with(host='cfg-redis-host', port=6379, decode_responses=True)
+            assert manager_with_redis.redis is mock_redis_instance
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v', '--asyncio-mode=auto'])

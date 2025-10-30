@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import json
+from warnings import deprecated
 
 from ..database_server.sqlalchemy.kahuna_database_utils import (
     UserDataDBUtils,
@@ -110,6 +111,7 @@ class UserData():
     def feishu_token(self, token: str):
         self.feishu_sheet_token = token
 
+# TODO postgre 适配user对象的修改
 class User():
     def __init__(self, qq: int, create_date: datetime, expire_date: datetime):
         self.user_qq = qq
@@ -122,13 +124,17 @@ class User():
         self.user_data = UserData(qq)
         # self.user_data.load_self_data()
 
+    # 不再user下进行数据库操作，交由manager执行
+    @deprecated
     async def get_from_db(self):
         return await UserDBUtils.select_user_by_user_qq(self.user_qq)
 
+    @deprecated
     def init_time(self):
         self.create_date = datetime.now()
         self.expire_date = datetime.now()
 
+    @deprecated
     async def insert_to_db(self):
         user_obj = await self.get_from_db()
         if not user_obj:
@@ -142,6 +148,7 @@ class User():
         await UserDBUtils.save_obj(user_obj)
         await self.user_data.insert_to_db()
 
+    @deprecated
     @property
     def info(self):
         res = (f"用户:{self.user_qq}\n"
@@ -153,10 +160,12 @@ class User():
             res += f"主角色：{CharacterManager.get_character_by_id(self.main_character_id).character_name}\n"
         return res
 
+    @deprecated
     @property
     def member_status(self):
         return self.expire_date > datetime.now()
 
+    @deprecated
     async def add_member_time(self, day: int):
         add_time = timedelta(days=day)
 
@@ -164,10 +173,12 @@ class User():
         await self.insert_to_db()
         return self.expire_date
 
+    @deprecated
     async def clean_member_time(self):
         self.expire_date = datetime.now()
         await self.insert_to_db()
 
+    @deprecated
     async def delete(self):
         user_obj = await UserDBUtils.select_user_by_user_qq(self.user_qq)
         if not user_obj:
@@ -175,6 +186,7 @@ class User():
 
         await UserDBUtils.delete_user_by_user_qq(self.user_qq)
 
+    @deprecated
     async def set_plan_product(self, plan_name: str, product: str, quantity: int):
         if plan_name not in self.user_data.plan:
             raise KahunaException(
@@ -182,6 +194,8 @@ class User():
         self.user_data.plan[plan_name]["plan"].append([product, quantity])
         await self.user_data.insert_to_db()
 
+    # TODO这是工业的功能，需要迁移
+    @deprecated
     async def create_plan(self, plan_name: str,
                     bp_matcher, st_matcher, prod_block_matcher
                     ):
@@ -200,6 +214,7 @@ class User():
         self.user_data.plan[plan_name]["coop_user"] = []
         await self.user_data.insert_to_db()
 
+    @deprecated
     async def delete_plan_prod(self, plan_name: str, index: int):
         if plan_name not in self.user_data.plan:
             raise KahunaException("plan not found.")
@@ -207,30 +222,35 @@ class User():
             self.user_data.plan[plan_name]["plan"].pop(index)
         await self.user_data.insert_to_db()
 
+    @deprecated
     async def set_manu_cycle_time(self, plan_name: str, cycle_time: int):
         if plan_name not in self.user_data.plan:
             raise KahunaException("plan not found.")
         self.user_data.plan[plan_name]["manucycletime"] = cycle_time
         await self.user_data.insert_to_db()
 
+    @deprecated
     async def set_reac_cycle_time(self, plan_name: str, cycle_time: int):
         if plan_name not in self.user_data.plan:
             raise KahunaException("plan not found.")
         self.user_data.plan[plan_name]["reaccycletime"] = cycle_time
         await self.user_data.insert_to_db()
 
+    @deprecated
     async def delete_plan(self, plan_name: str):
         if plan_name not in self.user_data.plan:
             raise KahunaException("plan not found.")
         self.user_data.plan.pop(plan_name)
         await self.insert_to_db()
 
+    @deprecated
     async def add_alias_character(self, character_id_list):
         for character_data in character_id_list:
             if character_data[0] not in self.user_data.alias:
                 self.user_data.alias[character_data[0]] = character_data[1]
         await self.user_data.insert_to_db()
 
+    @deprecated
     async def add_container_block(self, plan_name: str, container_id: int):
         if plan_name not in self.user_data.plan:
             raise KahunaException("plan not found.")
@@ -240,6 +260,7 @@ class User():
             self.user_data.plan[plan_name]["container_block"].append(container_id)
         await self.user_data.insert_to_db()
 
+    @deprecated
     async def del_container_block(self, plan_name: str, container_id: int):
         if plan_name not in self.user_data.plan:
             raise KahunaException("plan not found.")
@@ -249,6 +270,7 @@ class User():
             self.user_data.plan[plan_name]["container_block"].remove(container_id)
         await self.user_data.insert_to_db()
 
+    @deprecated
     async def add_plan_coop_user(self, plan_name: str, user_qq: int):
         if plan_name not in self.user_data.plan:
             raise KahunaException("plan not found.")
@@ -256,6 +278,7 @@ class User():
             self.user_data.plan[plan_name]["coop_user"].append(user_qq)
         await self.user_data.insert_to_db()
 
+    @deprecated
     async def del_plan_coop_user(self, plan_name: str, user_qq: int):
         if plan_name not in self.user_data.plan:
             raise KahunaException("plan not found.")
