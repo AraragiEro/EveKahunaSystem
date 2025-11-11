@@ -558,16 +558,54 @@ class EveAssetPullMissionDBUtils(_CommonUtils):
     @classmethod
     async def select_mission_by_owner_id_and_owner_type(cls, asset_owner_id: int, asset_owner_type: str):
         async with dbm.get_session() as session:
-            stmt = select(cls.cls_model).where(cls.cls_model.asset_owner_id == asset_owner_id and cls.cls_model.asset_owner_type == asset_owner_type)
+            stmt = select(cls.cls_model).where(cls.cls_model.asset_owner_id == asset_owner_id).where(cls.cls_model.asset_owner_type == asset_owner_type)
             result = await session.execute(stmt)
             return result.scalars().first()
 
     @classmethod
     async def select_all_by_owner_id_and_owner_type(cls, asset_owner_id: int, asset_owner_type: str):
-        stmt = select(cls.cls_model).where(cls.cls_model.asset_owner_id == asset_owner_id and cls.cls_model.asset_owner_type == asset_owner_type)
+        stmt = select(cls.cls_model).where(cls.cls_model.asset_owner_id == asset_owner_id).where(cls.cls_model.asset_owner_type == asset_owner_type)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def select_all_by_user_name(cls, user_name: str):
         stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
+
+class EveIndustryPlanDBUtils(_CommonUtils):
+    cls_model = model.EveIndustryPlan
+
+    @classmethod
+    async def select_all_by_user_name(cls, user_name: str):
+        stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        return await _AsyncIteratorWrapper.from_stmt(stmt)
+
+    @classmethod
+    async def select_by_user_name_and_plan_name(cls, user_name: str, plan_name: str):
+        async with dbm.get_session() as session:
+            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+class EveIndustryPlanProductDBUtils(_CommonUtils):
+    cls_model = model.EveIndustryPlanProduct
+
+    @classmethod
+    async def select_all_by_user_name(cls, user_name: str):
+        stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        return await _AsyncIteratorWrapper.from_stmt(stmt)
+
+    @classmethod
+    async def select_all_by_user_name_and_plan_name(cls, user_name: str, plan_name: str):
+        stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
+        return await _AsyncIteratorWrapper.from_stmt(stmt)
+
+    @classmethod
+    async def delete_all_by_user_name_and_plan_name(cls, user_name: str, plan_name: str, session=None):
+        if not session:
+            async with dbm.get_session() as session:
+                stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
+                await session.execute(stmt)
+        else:
+            stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
+            await session.execute(stmt)

@@ -6,7 +6,7 @@ from cachetools import TTLCache, cached
 from unicodedata import category
 
 from . import database as en_model, database_cn as zh_model
-from .database import InvTypes, InvGroups, InvCategories
+from .database import InvTypes, InvGroups, InvCategories, MapSolarSystems
 from .database import MetaGroups, MarketGroups
 from src_v2.core.log import logger
 
@@ -221,7 +221,10 @@ class SdeUtils:
     def get_market_group_list(cls, type_id: int, zh=False) -> list[str]:
         try:
             market_tree = cls.get_market_group_tree()
-            market_group_id = cls.get_invtpye_node_by_id(type_id).marketGroupID
+            market_group_id = cls.get_invtpye_node_by_id(type_id)
+            if not market_group_id:
+                return []
+            market_group_id = market_group_id.marketGroupID
             market_group_list = []
             if market_group_id:
                 market_group_list = [cls.get_name_by_id(type_id), cls.get_market_group_name_by_groupid(market_group_id, zh)]
@@ -259,31 +262,34 @@ class SdeUtils:
             model = en_model
         try:
             return (
-                model.InvTypes.select(InvCategories.categoryName)
-                .join(InvGroups, on=(InvTypes.groupID == InvGroups.groupID))
-                .join(InvCategories, on=(InvGroups.categoryID == InvCategories.categoryID))
-                .where(InvTypes.typeID == type_id)
+                model.InvTypes.select(model.InvCategories.categoryName)
+                .join(model.InvGroups, on=(model.InvTypes.groupID == model.InvGroups.groupID))
+                .join(model.InvCategories, on=(model.InvGroups.categoryID == model.InvCategories.categoryID))
+                .where(model.InvTypes.typeID == type_id)
                 .scalar()
             )
         except model.InvTypes.DoesNotExist:
             return None
 
-    # @classmethod
-    # def get_structure_info(cls, ac_token: str, structure_id: int) -> dict:
-    #     """
-    #     'name' = {str} '4-HWWF - WinterCo. Central Station'
-    #     'owner_id' = {int} 98599770
-    #     'position' = {dict: 3} {'x': -439918627801.0, 'y': -86578525155.0, 'z': -1177327092030.0}
-    #     'solar_system_id' = {int} 30000240
-    #     'type_id' = {int} 35834
-    #     """
-    #     info = universe_stations_station(structure_id) if len(str(structure_id)) <= 8 else universe_structures_structure(ac_token, structure_id)
-    #     info.update({
-    #         'system': MapSolarSystems.get(MapSolarSystems.solarSystemID==info[('system_id') if len(str(structure_id)) <= 8 else 'solar_system_id'])
-    #                                  .solarSystemName,
-    #         'structure_id': structure_id
-    #     })
-    #     return info
+    @staticmethod
+    @lru_cache(maxsize=100)
+    def get_system_info_by_id(system_id: int, zh=False) -> dict:
+        if zh:
+            model = zh_model
+        else:
+            model = en_model
+        return (
+            model.MapSolarSystems.select(
+                model.MapSolarSystems.solarSystemName.alias('system_name'),
+                model.MapSolarSystems.solarSystemID.alias('system_id'),
+                model.MapSolarSystems.regionID.alias('region_id'),
+                model.MapRegions.regionName.alias('region_name')
+            )
+            .join(model.MapRegions, on=(model.MapSolarSystems.regionID == model.MapRegions.regionID))
+            .where(model.MapSolarSystems.solarSystemID == system_id)
+            .dicts()
+            .first()
+        )
 
     @staticmethod
     def maybe_chinese(strs):
@@ -352,3 +358,4 @@ class SdeUtils:
             return InvTypes.get(InvTypes.typeID == type_id).volume
         except InvTypes.DoesNotExist:
             return 0
+

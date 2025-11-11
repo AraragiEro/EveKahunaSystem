@@ -27,7 +27,7 @@ def get_logger():
         return logger
 
     # 设置 logger 级别
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
 
     # 创建一个输出到控制台的处理器
     console_handler = logging.StreamHandler()

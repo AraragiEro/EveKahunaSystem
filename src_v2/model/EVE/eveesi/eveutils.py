@@ -1,7 +1,6 @@
 import json
 from datetime import datetime, timezone
 import asyncio
-from tqdm.asyncio import tqdm
 from typing import Optional, Any
 import aiohttp
 import traceback
@@ -9,6 +8,7 @@ import traceback
 from src_v2.core.log import logger
 
 OUT_PAGE_ERROR = 404
+FORBIDDEN_ERROR = 403
 
 class DateTimeEncoder(json.JSONEncoder):
     """Custom JSONEncoder subclass to handle datetime objects."""
@@ -34,44 +34,6 @@ def parse_iso_datetime(dt_string):
     except ValueError as e:
         raise ValueError(f"无法解析时间字符串 '{dt_string}': {str(e)}")
 
-
-class async_tqdm_manager:
-    def __init__(self):
-        self.mission = {}
-        self.mission_count = 0
-        self.lock = asyncio.Lock()
-
-    async def add_mission(self, mission_id, len, description=None):
-        async with self.lock:
-            description = description if description else f"{mission_id}"
-            index = self.mission_count
-            self.mission_count += 1
-
-            bar = tqdm(total=len, desc=description, position=index, leave=False)
-
-            self.mission[mission_id] = {
-                "bar": bar,
-                'index': index,
-                'count': 0,
-                "completed": False,
-            }
-
-    async def update_mission(self, mission_id, value=1):
-        async with self.lock:
-            if mission_id in self.mission:
-                self.mission[mission_id]["count"] += value
-                self.mission[mission_id]["bar"].update(value)
-
-    async def complete_mission(self, mission_id):
-        async with self.lock:
-            if mission_id in self.mission:
-                self.mission[mission_id]["completed"] = True
-                self.mission[mission_id]["bar"].close()
-                del self.mission[mission_id]
-                self.mission_count -= 1
-
-
-tqdm_manager = async_tqdm_manager()
 
 async def get_request_async(
         url, headers=None, params=None, log=True, max_retries=2, timeout=60, no_retry_code = None

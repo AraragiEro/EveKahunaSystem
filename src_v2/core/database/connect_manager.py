@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, AnyStr, Type
+import asyncio
 import os
 from sqlalchemy import Column, Integer, String, Text, DateTime, Float, Boolean, ForeignKey, JSON
 from sqlalchemy import inspect, text
@@ -547,7 +548,7 @@ class RedisDatabaseManager():
         )
 
         # 删除forever:开头的key之外的数据
-        await self._redis.flushall()
+        # await self._redis.flushall()
         
         logger.info(f"Redis 连接成功: {host}:{port}")
 
@@ -556,9 +557,34 @@ class RedisDatabaseManager():
         if not self._redis:
             raise RuntimeError("Redis 未初始化，请先调用 init() 方法")
         return self._redis
+
+    async def delete_keys_by_pattern(self, pattern: str):
+        redis = self._redis
+        if not redis:
+            raise RuntimeError("Redis 未初始化，请先调用 init() 方法")
+        """根据模式删除 key（推荐方式）"""
+        deleted_count = 0
+        cursor = 0
+        
+        while True:
+            # SCAN 返回 (cursor, [keys])
+            cursor, keys = await redis.scan(cursor, match=pattern, count=100)
+            
+            if keys:
+                # 批量删除
+                deleted = await redis.delete(*keys)
+                deleted_count += deleted
+            
+            # cursor 为 0 表示扫描完成
+            if cursor == 0:
+                break
+        
+        return deleted_count
+
 class Neo4jDatabaseManager():
     def __init__(self):
         self._neo4j = None
+        self.semaphore = asyncio.Semaphore(50)
     
     async def init(self):
         host = os.getenv('NEO4J_HOST') or config.get('NEO4J', 'Host', fallback='localhost')
@@ -568,15 +594,18 @@ class Neo4jDatabaseManager():
 
         self._neo4j = AsyncGraphDatabase.driver(
             f'bolt://{host}:{port}',
-            auth=(username, password)
+            auth=(username, password),
+            max_connection_pool_size=200,  # 增加连接池大小以支持高并发
+            connection_acquisition_timeout=120  # 增加连接获取超时时间到120秒
         )
         
         # 验证连接
         await self.verify_connectivity()
         logger.info(f"Neo4j 连接成功: {host}:{port}")
 
-        await self.clean_all()
         # 初始化数据库模式（创建索引和约束）
+        # await self.clean_all()
+        await self.clean_all_index()
         from .neo4j_model_manager import neo4j_model_manager
         await neo4j_model_manager.init_schema()
 

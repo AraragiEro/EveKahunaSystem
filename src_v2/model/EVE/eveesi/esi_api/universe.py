@@ -1,7 +1,9 @@
 import asyncio
 
 from ..esi_req_manager import esi_request
-from ..eveutils import get_request_async, tqdm_manager, OUT_PAGE_ERROR
+from ..eveutils import FORBIDDEN_ERROR, get_request_async, OUT_PAGE_ERROR, FORBIDDEN_ERROR
+from src_v2.core.utils import tqdm_manager
+
 
 @esi_request
 async def universe_structures_structure(access_token, structure_id: int, log=True):
@@ -20,7 +22,7 @@ async def universe_structures_structure(access_token, structure_id: int, log=Tru
     else:
         ac_token = access_token
     data, _ = await get_request_async(f"https://esi.evetech.net/latest/universe/structures/{structure_id}/",
-                       headers={"Authorization": f"Bearer {ac_token}"}, log=log)
+                       headers={"Authorization": f"Bearer {ac_token}"}, log=log, no_retry_code=[FORBIDDEN_ERROR])
     return data
 
 @esi_request

@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from math import trunc
 
+from tqdm.asyncio import tqdm
+
 from ..log import logger
 
 # import transformers
@@ -107,3 +109,40 @@ def unset_debug_qq():
 # def check_context_token_count(input: str, context_token_limit: int):
 #     result = get_chat_token_count(input)
 #     return result <= context_token_limit
+class async_tqdm_manager:
+    def __init__(self):
+        self.mission = {}
+        self.mission_count = 0
+        self.lock = asyncio.Lock()
+
+    async def add_mission(self, mission_id, len, description=None):
+        async with self.lock:
+            description = description if description else f"{mission_id}"
+            index = self.mission_count
+            self.mission_count += 1
+
+            bar = tqdm(total=len, desc=description, position=index, leave=False)
+
+            self.mission[mission_id] = {
+                "bar": bar,
+                'index': index,
+                'count': 0,
+                "completed": False,
+            }
+
+    async def update_mission(self, mission_id, value=1):
+        async with self.lock:
+            if mission_id in self.mission:
+                self.mission[mission_id]["count"] += value
+                self.mission[mission_id]["bar"].update(value)
+
+    async def complete_mission(self, mission_id):
+        async with self.lock:
+            if mission_id in self.mission:
+                self.mission[mission_id]["completed"] = True
+                self.mission[mission_id]["bar"].close()
+                del self.mission[mission_id]
+                self.mission_count -= 1
+
+
+tqdm_manager = async_tqdm_manager()

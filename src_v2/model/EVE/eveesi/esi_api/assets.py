@@ -1,7 +1,9 @@
 import asyncio
 
 from ..esi_req_manager import esi_request
-from ..eveutils import get_request_async, tqdm_manager, OUT_PAGE_ERROR
+from ..eveutils import get_request_async, OUT_PAGE_ERROR
+from src_v2.core.utils import tqdm_manager
+
 
 # Get corporation asset locations
 # esi-assets.read_corporation_assets.v1

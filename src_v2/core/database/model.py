@@ -10,8 +10,9 @@ from sqlalchemy import (
     UniqueConstraint,
     BigInteger,
     UUID,
-    ARRAY
+    ARRAY,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 
 from .connect_manager import PostgreModel
@@ -156,3 +157,36 @@ class EveAssetNodeAccess(PostgreModel):
     asset_owner_id = Column(Integer)
 all_model.append(EveAssetNodeAccess)
 
+class EveIndustryPlan(PostgreModel):
+    __tablename__ = 'eve_industry_plan'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(Text)
+    plan_name = Column(Text)
+    settings = Column(JSONB)
+all_model.append(EveIndustryPlan)
+
+class EveIndustryPlanProduct(PostgreModel):
+    __tablename__ = 'eve_industry_plan_product'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(Text, index=True)
+    plan_name = Column(Text, index=True)
+    index_id = Column(Integer, index=True)
+    product_type_id = Column(Integer, index=True)
+    quantity = Column(Integer)
+all_model.append(EveIndustryPlanProduct)
+
+class EveIndustryPlanConfigFlow(PostgreModel):
+    __tablename__ = 'eve_industry_plan_config_flow'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(Text, index=True)
+    plan_name = Column(Text, index=True)
+    
+all_model.append(EveIndustryPlanConfigFlow)
+
+# class EveIndustryPlanSetting(PostgreModel):
+#     __tablename__ = 'eve_industry_plan_setting'
+#     id = Column(Integer, primary_key=True, autoincrement=True)
+#     user_name = Column(Text, ForeignKey("user.user_name"), index=True)
+#     plan_name = Column(Text, ForeignKey("eve_industry_plan.plan_name"), index=True)
+#     settings = Column(JSONB)
+# all_model.append(EveIndustryPlanSetting)

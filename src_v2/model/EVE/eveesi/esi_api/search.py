@@ -1,7 +1,9 @@
 import asyncio
 
 from ..esi_req_manager import esi_request
-from ..eveutils import get_request_async, tqdm_manager, OUT_PAGE_ERROR, parse_token
+from ..eveutils import get_request_async, OUT_PAGE_ERROR, parse_token
+from src_v2.core.utils import tqdm_manager
+
 
 # Search on a string
 # esi-search.search_structures.v

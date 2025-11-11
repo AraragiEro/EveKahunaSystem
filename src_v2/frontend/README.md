@@ -43,3 +43,4 @@ npm run lint
 
 ## 使用的资产
  - https://element-plus.org/zh-CN/component/overview
+ - https://vue-draggable-plus.pages.dev/
