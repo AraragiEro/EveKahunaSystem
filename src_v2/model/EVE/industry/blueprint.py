@@ -394,4 +394,27 @@ class BPManager:
         if root:
             await tqdm_manager.update_mission("init_bp_data_to_neo4j", 1)
 
-    
+    @classmethod
+    @async_lru_cache(maxsize=1000)
+    async def get_bp_name_by_typeid(cls, type_id: int, zh=False):
+        """
+        根据产品type_id获取对应蓝图的名称
+        参数:
+            type_id (int): 产品ID
+            zh (bool): 是否返回中文名称，默认为False
+        返回:
+            str: 蓝图名称，如果未找到返回None
+        """
+        try:
+            # 根据产品ID获取蓝图ID
+            blueprint_type_id = await cls.get_bp_id_by_prod_typeid(type_id)
+            if not blueprint_type_id:
+                return None
+            
+            # 根据zh参数决定返回英文或中文名称
+            if zh:
+                return SdeUtils.get_cn_name_by_id(blueprint_type_id)
+            else:
+                return SdeUtils.get_name_by_id(blueprint_type_id)
+        except Exception:
+            return None

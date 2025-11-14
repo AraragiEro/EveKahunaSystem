@@ -136,6 +136,11 @@ const formatAccounting = (value: number | string | null | undefined): string => 
         maximumFractionDigits: 2
     })
 }
+
+const lackRowClassName = (data: { row: any, rowIndex: number }) => {
+    return data.row.real_quantity > 0 ? 'lack-row' : 'full'
+}
+
 </script>
 
 <template>
@@ -164,28 +169,30 @@ const formatAccounting = (value: number | string | null | undefined): string => 
         </el-col>
     </el-row>
     <el-row>
-    <el-tabs>
+    <el-tabs style="width: 100%;">
         <el-tab-pane label="表格视图">
             <el-table
                 :data="PlanCalculateResultTableView"
                 row-key="type_id"
                 expand-on-click-node="false"
                 default-expand-all
-                auto-resize
+                fit
                 border
                 max-height="75vh"
                 show-overflow-tooltip
-                style="width: 100vh;"
+                :row-class-name="lackRowClassName"
             >
                 <el-table-column label="层" prop="layer_id" width="60"/>
                 <el-table-column label="物品id" prop="type_id" width="70"/>
                 <el-table-column label="物品名en" prop="type_name" width="200"/>
                 <el-table-column label="物品名zh" prop="tpye_name_zh" width="200"/>
-                <el-table-column label="缺失" prop="real_quantity" width="100" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
                 <el-table-column label="总需求" prop="quantity" width="100" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
+                <el-table-column label="缺失" prop="real_quantity" width="100" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
+                <el-table-column label="冗余" prop="redundant" width="100" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
                 <el-table-column label="库存" prop="store_quantity" width="100" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
-                <el-table-column label="缺失流程" prop="jobs" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
-                <el-table-column label="总流程" prop="real_jobs" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
+                <el-table-column label="运行中任务" prop="running_jobs"/>
+                <el-table-column label="缺失流程" prop="real_jobs" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
+                <el-table-column label="总流程" prop="jobs" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
                 <el-table-column label="蓝图库存单位" prop="bp_quantity" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
                 <el-table-column label="蓝图库存流程" prop="bp_jobs" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
                 <el-table-column label="状态" prop="status" />
@@ -198,11 +205,10 @@ const formatAccounting = (value: number | string | null | undefined): string => 
                 row-key="type_id"
                 expand-on-click-node="false"
                 default-expand-all
-                auto-resize
                 border
                 max-height="75vh"
                 show-overflow-tooltip
-                style="width: 100vh;"
+                :row-class-name="lackRowClassName"
             >
                 <el-table-column label="类型" prop="layer_id" />
                 <el-table-column label="物品id" prop="type_id" />
@@ -218,4 +224,9 @@ const formatAccounting = (value: number | string | null | undefined): string => 
 </template>
 
 <style scoped>
+:deep(.el-table .lack-row) {
+    background-color: #ff7979 !important;
+    font-weight: bold !important;
+    color: #000000 !important;
+}
 </style>

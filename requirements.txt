@@ -22,6 +22,7 @@ PyYAML==6.0.2
 quart==0.20.0
 quart_auth==0.11.0
 quart_schema==0.22.0
+hypercorn==0.17.0
 requests_oauthlib==2.0.0
 thefuzz==0.22.1
 toml==0.10.2

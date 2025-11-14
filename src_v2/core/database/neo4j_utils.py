@@ -379,6 +379,30 @@ class Neo4jAssetUtils:
                 nodes.append(dict(record["a"]))
             return nodes
 
+    @staticmethod
+    async def get_asset_by_type_id_in_container_list(type_id: int, container_list: List[int]) -> List[Dict]:
+        query = """
+        match (a:Asset {type_id: $type_id}) where a.location_id in $container_list return a
+        """
+        async with neo4j_manager.get_session() as session:
+            result = await session.run(query, {"type_id": type_id, "container_list": container_list})
+            assets = []
+            async for record in result:
+                assets.append(dict(record["a"]))
+            return assets
+
+    @staticmethod
+    async def get_asset_in_container_list(container_list: List[int]) -> List[Dict]:
+        query = """
+        match (a:Asset) where a.location_id in $container_list return a
+        """
+        async with neo4j_manager.get_session() as session:
+            result = await session.run(query, {"container_list": container_list})
+            assets = []
+            async for record in result:
+                assets.append(dict(record["a"]))
+            return assets
+
 class Neo4jIndustryUtils:
     """工业制造相关的 CRUD 操作"""
     @staticmethod

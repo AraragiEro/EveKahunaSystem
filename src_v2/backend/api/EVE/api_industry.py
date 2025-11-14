@@ -13,6 +13,7 @@ from src.service.log_server import logger
 from src_v2.model.EVE.industry.industry_manager import IndustryManager
 from src_v2.core.database.neo4j_utils import Neo4jIndustryUtils as NIU
 from src_v2.core.utils import KahunaException
+from src_v2.model.EVE.industry.plan_configflow_operate import ConfigFlowOperateCenter
 
 api_industry_bp = Blueprint('api_industry', __name__, url_prefix='/api/EVE/industry')
 
@@ -91,10 +92,12 @@ async def get_plan_calculate_result_table_view():
     user_id = g.current_user["user_id"]
 
     try:
-        await IndustryManager.calculate_plan(user_id, data["plan_name"])
-        data = await IndustryManager.get_plan_tableview_data(data["plan_name"], user_id)
+        op = await ConfigFlowOperateCenter.create(user_id, data["plan_name"])
+        await IndustryManager.calculate_plan(op)
+        data = await IndustryManager.get_plan_tableview_data(op)
         return jsonify({"status": 200, "data": data})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
     except Exception as e:
         logger.error(f"获取计划计算结果表格视图失败: {traceback.format_exc()}")
@@ -148,7 +151,7 @@ async def get_structure_list():
         logger.error(f"获取建筑列表失败: {traceback.format_exc()}")
         return jsonify({"message": "获取建筑列表失败", "status": 500}), 500
         
-@api_industry_bp.route("/getStructureAssignKeywordSuggestions", methods=["POST"])
+@api_industry_bp.route("/getGroupSuggestions", methods=["POST"])
 @auth_required
 async def get_structure_assign_keyword_suggestions():
     data = await request.json
@@ -242,3 +245,29 @@ async def save_config_flow_to_plan():
     except:
         logger.error(f"保存配置流失败: {traceback.format_exc()}")
         return jsonify({"message": "保存配置流失败", "status": 500}), 500
+
+# # 获取计划设置
+@api_industry_bp.route("/modifyPlanSettings", methods=["POST"])
+@auth_required
+async def modify_plan_settings():
+    data = await request.json
+    user_id = g.current_user["user_id"]
+
+    try:
+        await IndustryManager.modify_plan_settings(user_id, data["plan_name"], data["plan_settings"])
+        return jsonify({"message": "修改计划设置成功", "status": 200})
+    except:
+        logger.error(f"修改计划设置失败: {traceback.format_exc()}")
+        return jsonify({"message": "修改计划设置失败", "status": 500}), 500
+
+@api_industry_bp.route("/getItemInfo", methods=["POST"])
+@auth_required
+async def get_item_info():
+    data = await request.json
+
+    try:
+        item_info = await IndustryManager.get_item_info(data["type_id"])
+        return jsonify({"data": item_info, "status": 200})
+    except:
+        logger.error(f"获取物品信息失败: {traceback.format_exc()}")
+        return jsonify({"message": "获取物品信息失败", "status": 500}), 500

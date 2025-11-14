@@ -39,7 +39,7 @@ async def corporations_corporation_assets(access_token, corporation_id: int, pag
     tasks = []
     data = [data]
     for p in range(2, pages + 1):
-        tasks.append(corporations_corporation_assets(ac_token, corporation_id, p, test, max_retries, log))
+        tasks.append(asyncio.create_task(corporations_corporation_assets(ac_token, corporation_id, p, test, max_retries, log)))
     page_results = await asyncio.gather(*tasks)
     for data_page in page_results:
         data.append(data_page)

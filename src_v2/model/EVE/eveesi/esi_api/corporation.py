@@ -5,38 +5,6 @@ from ..eveutils import get_request_async, OUT_PAGE_ERROR
 from src_v2.core.utils import tqdm_manager
 
 
-@esi_request
-async def corporations_corporation_id_industry_jobs(
-        access_token, corporation_id: int, page: int=1, include_completed: bool = False, max_retries=3, log=True
-):
-    if not isinstance(access_token, str):
-        ac_token = await access_token
-    else:
-        ac_token = access_token
-    data, pages = await get_request_async(
-        f"https://esi.evetech.net/latest/corporations/{corporation_id}/industry/jobs/",
-            headers={"Authorization": f"Bearer {ac_token}"},
-            params={
-                "page": page,
-                "include_completed": 1 if include_completed else 0
-            }, log=log, max_retries=max_retries,
-            no_retry_code=[OUT_PAGE_ERROR]
-        )
-    if page != 1:
-        await tqdm_manager.update_mission(f'corporations_corporation_id_industry_jobs_{corporation_id}')
-        return data
-
-    await tqdm_manager.add_mission(f'corporations_corporation_id_industry_jobs_{corporation_id}', pages)
-    tasks = []
-    data = [data]
-    for p in range(2, pages + 1):
-        tasks.append(corporations_corporation_id_industry_jobs(ac_token, corporation_id, p, include_completed, max_retries, log))
-    page_results = await asyncio.gather(*tasks)
-    for data_page in page_results:
-        data.append(data_page)
-    await tqdm_manager.complete_mission(f'corporations_corporation_id_industry_jobs_{corporation_id}')
-
-    return data
 
 
 
@@ -83,7 +51,7 @@ async def corporations_corporation_id_blueprints(access_token, corporation_id: i
     tasks = []
     data = [data]
     for p in range(2, pages + 1):
-        tasks.append(corporations_corporation_id_blueprints(ac_token, corporation_id, p, max_retries, log))
+        tasks.append(asyncio.create_task(corporations_corporation_id_blueprints(ac_token, corporation_id, p, max_retries, log)))
     page_results = await asyncio.gather(*tasks)
     for data_page in page_results:
         data.append(data_page)

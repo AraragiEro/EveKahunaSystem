@@ -38,7 +38,6 @@ class CharacterManager(metaclass=SingletonMeta):
             raise KahunaException("角色不存在")
 
         character = Character.from_db_obj(character_db_obj)
-        await character.ac_token
         return character
 
     async def get_corporation_data_by_corporation_id(self, corporation_id: int) -> M_EveCorporation:
@@ -107,7 +106,7 @@ class CharacterManager(metaclass=SingletonMeta):
             corporation_id=corporation_id
             # director="Director" in character_roles['roles'] if 'roles' in character_roles else None,
         )
-        await EveAuthedCharacterDBUtils.save_obj(character_db_obj)
+        await EveAuthedCharacterDBUtils.merge(character_db_obj)
         character = Character.from_db_obj(character_db_obj)
         character_roles = await eveesi.characters_character_roles(character.ac_token, character_id)
         character_db_obj.director = "Director" in character_roles['roles'] if 'roles' in character_roles else None
@@ -171,7 +170,7 @@ class CharacterManager(metaclass=SingletonMeta):
         # 生成批量任务
         batch_tasks = []
         for character_id in characters_id_list:
-            batch_tasks.append(eveesi.characters_character(character_id))
+            batch_tasks.append(asyncio.create_task(eveesi.characters_character(character_id)))
 
         # 执行批量任务
         characters_info_list = await asyncio.gather(*batch_tasks)

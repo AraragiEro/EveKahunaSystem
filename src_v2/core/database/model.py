@@ -84,7 +84,7 @@ all_model.append(RoleHierarchy)
 class EveAuthedCharacter(PostgreModel):
     __tablename__ = 'eve_authed_character'
     character_id = Column(Integer, primary_key=True)
-    owner_user_name = Column(Text, ForeignKey("user.user_name"))
+    owner_user_name = Column(Text)
     character_name = Column(Text, index=True)
     birthday = Column(DateTime)
     access_token = Column(Text)
@@ -97,7 +97,7 @@ all_model.append(EveAuthedCharacter)
 class EveAliasCharacter(PostgreModel):
     __tablename__ = 'eve_alias_character'
     alias_character_id = Column(Integer, primary_key=True)
-    main_character_id = Column(Integer, ForeignKey("eve_authed_character.character_id"), index=True)
+    main_character_id = Column(Integer, index=True)
     character_name = Column(Text)
     enabled = Column(Boolean)
 all_model.append(EveAliasCharacter)
@@ -143,8 +143,8 @@ all_model.append(EveCorporation)
 class EveAssetPullMission(PostgreModel):
     __tablename__ = 'eve_asset_pull_mission'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_name = Column(Text, ForeignKey("user.user_name"))
-    access_character_id = Column(Integer, ForeignKey("eve_authed_character.character_id"))
+    user_name = Column(Text)
+    access_character_id = Column(Integer)
     asset_owner_type = Column(Text)
     asset_owner_id = Column(Integer)
     active = Column(Boolean)

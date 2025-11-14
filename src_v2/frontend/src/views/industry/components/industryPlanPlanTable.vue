@@ -1,6 +1,6 @@
 <template>
   <div class="table-container">
-    <el-scrollbar height="65vh">
+    <el-scrollbar height="56vh">
     <table class="card-table">
       <thead>
         <tr class="table-header">

@@ -1,6 +1,7 @@
 <template>
   <div class="table-container">
-    <table class="card-table">
+    <el-scrollbar height="65vh">
+    <table class="card-table" >
       <thead>
         <tr class="table-header">
           <th>配置类型</th>
@@ -15,6 +16,8 @@
             <el-tooltip
               :content="formatConfigValue(item.config_type, item.config_value)"
               placement="top"
+              effect="dark"
+              :popper-options="{ modifiers: [{ name: 'offset', options: { offset: [0, 8] } }] }"
             >
               <div class="config-description-text">
                 {{ formatConfigValue(item.config_type, item.config_value) }}
@@ -32,6 +35,7 @@
         </tr>
       </tbody>
     </table>
+  </el-scrollbar>
   </div>
 </template>
 
@@ -60,7 +64,8 @@ const configTypeMap = ref<{ [key: string]: string }>({
   "StructureAssignConf": "建筑分配",
   "MaterialTagConf": "原材料标记",
   "DefaultBlueprintConf": "缺省蓝图参数",
-  "LoadAssetConf": "载入库存"
+  "LoadAssetConf": "载入库存",
+  "MaxJobSplitCountConf": "最大作业拆分控制"
 })
 
 const handleDeleteConfigFlowConfig = async (item: PlanConfigObject) => {
@@ -87,11 +92,17 @@ const formatConfigValue = (type: string, value: any) => {
   if (type === 'StructureRigConfig') {
     return `建筑: ${parsedValue.structure_name || 'N/A'}, 时间效率等级: ${parsedValue.time_eff_level ?? 0}, 材料效率等级: ${parsedValue.mater_eff_level ?? 0}`
   } else if (type === 'StructureAssignConf') {
-    return `建筑: ${parsedValue.structure_name || 'N/A'}, 分配类型: ${parsedValue.assign_type || 'N/A'}, 关键词: ${parsedValue.keyword || 'N/A'}`
+    const keywordGroups = parsedValue.keyword_groups || []
+    const keywords = keywordGroups.map((kg: any) => `${kg.keyword}(${kg.keyword_type})`).join(', ') || 'N/A'
+    return `建筑: ${parsedValue.structure_name || 'N/A'}, 关键词组: ${keywords}`
   } else if (type === 'MaterialTagConf') {
-    return `原材料标记: ${parsedValue.tag_item_value || 'N/A'}, 原材料类型: ${parsedValue.tag_item_type || 'N/A'}`
+    const keywordGroups = parsedValue.keyword_groups || []
+    const keywords = keywordGroups.map((kg: any) => `${kg.keyword}(${kg.keyword_type})`).join(', ') || 'N/A'
+    return `原材料标记: ${keywords}`
   } else if (type === 'DefaultBlueprintConf') {
-    return `蓝图: ${parsedValue.blueprint_name || 'N/A'}, 时间效率: ${parsedValue.time_eff ?? 0}, 材料效率: ${parsedValue.mater_eff ?? 0}`
+    const keywordGroups = parsedValue.keyword_groups || []
+    const keywords = keywordGroups.map((kg: any) => `${kg.keyword}(${kg.keyword_type})`).join(', ') || 'N/A'
+    return `关键词组: ${keywords}, 时间效率: ${parsedValue.time_eff ?? 0}, 材料效率: ${parsedValue.mater_eff ?? 0}`
   } else if (type === 'LoadAssetConf') {
     return `库存许可: ${parsedValue.tag || parsedValue.container_tag || 'N/A'}`
   }
@@ -110,6 +121,7 @@ const formatConfigValue = (type: string, value: any) => {
 
 .card-table {
   width: 100%;
+  /*  table-layout: fixed; 使用固定布局，更好地控制列宽 */
   border-collapse: separate;
   border-spacing: 0 12px;
   background: transparent;
@@ -176,14 +188,16 @@ const formatConfigValue = (type: string, value: any) => {
   font-size: 15px;
   font-weight: 500;
   color: #303133;
-  min-width: 150px;
-  width: 20%;
+  min-width: 80px;
+  width: 120px;
 }
 
 .config-description {
   font-size: 14px;
   color: #606266;
   position: relative;
+  max-width: 70px; /* 配合表格布局，让列可以自适应 */
+  overflow: hidden;
 }
 
 .config-description-text {
@@ -194,10 +208,12 @@ const formatConfigValue = (type: string, value: any) => {
   display: block;
   width: 100%;
   cursor: help;
+  /* 单行显示，超出部分用省略号，完整内容通过 tooltip 显示 */
 }
 
 .action-cell {
-  width: 200px;
+  width: 180px;
+  min-width: 180px;
   text-align: right;
   white-space: nowrap;
 }
@@ -241,9 +257,9 @@ const formatConfigValue = (type: string, value: any) => {
   }
 
   .config-type-name {
-    min-width: 120px;
     font-size: 14px;
-    width: 25%;
+    min-width: 80px;
+    width: 120px;
   }
 
   .config-description {
@@ -273,5 +289,23 @@ const formatConfigValue = (type: string, value: any) => {
   padding: 40px;
   color: #909399;
   font-size: 14px;
+}
+
+/* 隐藏横向滚动条 */
+:deep(.el-scrollbar__bar.is-horizontal) {
+  display: none !important;
+}
+
+/* 确保内容不会超出容器，禁止横向滚动 */
+:deep(.el-scrollbar__wrap) {
+  overflow-x: hidden !important;
+  overflow-y: auto;
+}
+
+/* 优化 tooltip 样式 */
+:deep(.el-tooltip__popper) {
+  max-width: 500px;
+  word-break: break-word;
+  white-space: normal;
 }
 </style>

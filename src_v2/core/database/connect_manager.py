@@ -565,6 +565,12 @@ class RedisDatabaseManager():
             raise RuntimeError("Redis 未初始化，请先调用 init() 方法")
         return self._redis
 
+    @property
+    def r(self):
+        if not self._redis:
+            raise RuntimeError("Redis 未初始化，请先调用 init() 方法")
+        return self._redis
+
     async def delete_keys_by_pattern(self, pattern: str):
         redis = self._redis
         if not redis:

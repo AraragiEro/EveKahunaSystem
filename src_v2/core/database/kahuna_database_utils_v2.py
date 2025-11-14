@@ -13,7 +13,15 @@ from . import model
 
 
 class _AsyncIteratorWrapper:
-    """包装异步生成器，自动管理资源"""
+    """包装异步生成器，自动管理资源
+    
+    使用方式：
+        async with await SomeDBUtils.select_all() as iterator:
+            async for item in iterator:
+                # 处理 item
+                pass
+        # 退出上下文管理器时，session 会自动关闭
+    """
     def __init__(self, generator: AsyncGenerator, session):
         self._generator = generator
         self._session = session
@@ -45,20 +53,40 @@ class _AsyncIteratorWrapper:
         try:
             return await self._generator.__anext__()
         except StopAsyncIteration:
+            # 正常结束，立即清理资源（即使没有使用上下文管理器）
             await self._cleanup()
             raise
-        except GeneratorExit:
+        except (GeneratorExit, Exception) as e:
+            # 发生异常时也要清理资源
             await self._cleanup()
+            if isinstance(e, GeneratorExit):
+                raise
+            # 其他异常继续抛出
             raise
+    
+    async def __aenter__(self):
+        """异步上下文管理器入口"""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """异步上下文管理器出口，确保资源被清理"""
+        await self._cleanup()
+        return False  # 不抑制异常
     
     async def _cleanup(self):
         """清理资源"""
         if not self._closed:
             self._closed = True
             try:
-                await self._generator.aclose()
+                # 尝试关闭生成器
+                if hasattr(self._generator, 'aclose'):
+                    try:
+                        await self._generator.aclose()
+                    except Exception:
+                        pass
             except Exception:
                 pass
+            # 关闭 session
             if self._session:
                 try:
                     await self._session.close()
@@ -66,7 +94,7 @@ class _AsyncIteratorWrapper:
                     pass
     
     async def aclose(self):
-        """显式关闭"""
+        """显式关闭（保持向后兼容）"""
         await self._cleanup()
     
     def __del__(self):
@@ -74,6 +102,7 @@ class _AsyncIteratorWrapper:
         if not self._closed and self._session:
             # 注意：在 __del__ 中不能使用 await，所以这里只是标记
             # 实际清理由 asyncio 的事件循环处理
+            # 如果对象被垃圾回收时还未关闭，会在事件循环中产生警告
             pass
 
 

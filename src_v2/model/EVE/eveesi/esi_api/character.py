@@ -28,13 +28,10 @@ async def character_character_id_portrait(access_token, character_id, log=True):
 
 @esi_request
 async def characters_character_id_blueprints(access_token, character_id: int, page: int=1, max_retries=3, log=True):
-    if not isinstance(access_token, str):
-        ac_token = await access_token
-    else:
-        ac_token = access_token
+    access_token = await parse_token(access_token)
     data, pages = await get_request_async(
         f"https://esi.evetech.net/latest/characters/{character_id}/blueprints/",
-        headers={"Authorization": f"Bearer {ac_token}"}, params={"page": page}, log=log, max_retries=max_retries,
+        headers={"Authorization": f"Bearer {access_token}"}, params={"page": page}, log=log, max_retries=max_retries,
         no_retry_code=[OUT_PAGE_ERROR]
     )
     if page != 1:
@@ -45,7 +42,7 @@ async def characters_character_id_blueprints(access_token, character_id: int, pa
     tasks = []
     data = [data]
     for p in range(2, pages + 1):
-        tasks.append(characters_character_id_blueprints(ac_token, character_id, p, max_retries, log))
+        tasks.append(asyncio.create_task(characters_character_id_blueprints(access_token, character_id, p, max_retries, log)))
         # 使用asyncio.gather同时等待所有任务完成
     page_results = await asyncio.gather(*tasks)
     # 将所有页面的结果合并到data中
@@ -78,7 +75,7 @@ async def characters_character_assets(access_token, character_id: int, page: int
     tasks = []
     data = [data]
     for p in range(2, pages + 1):
-        tasks.append(characters_character_assets(ac_token, character_id, p, test, max_retries, log))
+        tasks.append(asyncio.create_task(characters_character_assets(ac_token, character_id, p, test, max_retries, log)))
     page_results = await asyncio.gather(*tasks)
     for data_page in page_results:
         data.append(data_page)
@@ -104,30 +101,6 @@ async def characters_character(character_id, log=True):
     data, _ = await get_request_async(f"https://esi.evetech.net/latest/characters/{character_id}/", log=log)
     data["character_id"] = character_id
     return data
-
-
-@esi_request
-async def characters_character_id_industry_jobs(access_token, character_id: int, include_completed: bool = False, log=True):
-    """
-    List character industry jobs
-    Args:
-        access_token: Access token
-        character_id: An EVE character ID
-        datasource: The server name you would like data from
-        include_completed: Whether to retrieve completed character industry jobs
-    Returns:
-        Industry jobs placed by a character
-    """
-    ac_token = await access_token
-    data, _ = await get_request_async(f"https://esi.evetech.net/latest/characters/{character_id}/industry/jobs/", headers={
-        "Authorization": f"Bearer {ac_token}"
-    }, params={
-        "include_completed": 1 if include_completed else 0
-    }, log=log)
-
-    return data
-
-
 
 # /characters/{character_id}/orders/
 @esi_request

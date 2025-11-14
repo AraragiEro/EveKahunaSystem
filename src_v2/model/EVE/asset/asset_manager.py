@@ -85,7 +85,7 @@ class AssetManager(metaclass=SingletonMeta):
         await self.processing_asset_pull_mission(mission_obj)
 
         mission_obj.last_pull_time = get_beijing_utctime(datetime.now())
-        await EveAssetPullMissionDBUtils.save_obj(mission_obj)
+        await EveAssetPullMissionDBUtils.merge(mission_obj)
 
     async def get_user_asset_pull_mission_list(self, user_name: str) -> list[dict]:
         missions = []
@@ -214,11 +214,13 @@ class AssetManager(metaclass=SingletonMeta):
                 await tqdm_manager.update_mission("_generate_all_nodes", 1)
 
         await tqdm_manager.add_mission("_generate_all_nodes", len(assets_list))
-        tasks = [generate_with_semaphore(asset) for asset in assets_list]
+        tasks = [asyncio.create_task(generate_with_semaphore(asset)) for asset in assets_list]
         await asyncio.gather(*tasks)
         await tqdm_manager.complete_mission("_generate_all_nodes")
 
     async def _generate_all_locate_relation(self, assets_list: list[dict], mission_obj: M_EveAssetPullMission):
+        structure_nodes = await NAU.get_structure_nodes()
+        structure_item_id_list = [structure.get("structure_id", None) for structure in structure_nodes]
         async def generate_with_semaphore(asset: dict):
             async with neo4j_manager.semaphore:
                 if asset["location_type"] == 'station':
@@ -227,7 +229,7 @@ class AssetManager(metaclass=SingletonMeta):
                         {
                             "item_id": asset["item_id"],
                             "type_id": asset["type_id"],
-                            "owner_id": asset["owner_id"],
+                            "owner_id": mission_obj.asset_owner_id,
                         },
                         {},
                         "LOCATED_IN",
@@ -259,40 +261,75 @@ class AssetManager(metaclass=SingletonMeta):
                         {
                             "item_id": asset["item_id"],
                             "type_id": asset["type_id"],
-                            "owner_id": asset["owner_id"],
+                            "owner_id": mission_obj.asset_owner_id,
                         },
-                        {},
-                        "LOCATED_IN",
-                        {},{},
-                        "SolarSystem",
-                        {
-                            "solar_system_id": system_info["system_id"],
-                        },
-                        {}
-                    )
-                else:
-                    await NIU.link_node(
-                        "Asset",
                         {
                             "item_id": asset["item_id"],
                             "type_id": asset["type_id"],
-                            "owner_id": asset["owner_id"],
+                            "owner_id": mission_obj.asset_owner_id,
                         },
-                        {},
                         "LOCATED_IN",
                         {},{},
-                        "Asset",
-                        {
-                            "item_id": asset["location_id"],
-                            "owner_id": asset["owner_id"],
-                        },
-                        {}
+                        "SolarSystem",
+                        {"solar_system_id": system_info["system_id"]},
+                        {"solar_system_id": system_info["system_id"]}
                     )
+                else:
+                    if asset["location_id"] in structure_item_id_list:
+                        
+                        await NIU.link_node(
+                            "Asset",
+                            {
+                                "item_id": asset["item_id"],
+                                "type_id": asset["type_id"],
+                                "owner_id": mission_obj.asset_owner_id,
+                            },
+                            {
+                                "item_id": asset["item_id"],
+                                "type_id": asset["type_id"],
+                                "owner_id": mission_obj.asset_owner_id,
+                            },
+                            "LOCATED_IN",
+                            {},{},
+                            "Structure",
+                            {"structure_id": asset["location_id"]},
+                            {"structure_id": asset["location_id"]}
+                        )
+                    else:
+                        await NIU.link_node(
+                            "Asset",
+                            {
+                                "item_id": asset["item_id"],
+                                "type_id": asset["type_id"],
+                                "owner_id": mission_obj.asset_owner_id,
+                            },
+                            {
+                                "item_id": asset["item_id"],
+                                "type_id": asset["type_id"],
+                                "owner_id": asset["owner_id"],
+                            },
+                            "LOCATED_IN",
+                            {},{},
+                            "Asset",
+                            {
+                                "item_id": asset["location_id"],
+                                "owner_id": asset["owner_id"],
+                            },
+                            {
+                                "item_id": asset["location_id"],
+                                "owner_id": mission_obj.asset_owner_id,
+                            }
+                        )
                 await tqdm_manager.update_mission("_generate_all_locate_relation", 1)
 
         await tqdm_manager.add_mission("_generate_all_locate_relation", len(assets_list))
-        tasks = [generate_with_semaphore(asset) for asset in assets_list]
-        await asyncio.gather(*tasks)
+        tasks = [asyncio.create_task(generate_with_semaphore(asset)) for asset in assets_list]
+        # await asyncio.gather(*tasks)
+        while True:
+            uncompleted_tasks = [task for task in tasks if not task.done()]
+            if not uncompleted_tasks:
+                break
+            await asyncio.sleep(0.1)  # 避免 CPU 占用过高
         await tqdm_manager.complete_mission("_generate_all_locate_relation")
 
     async def _generate_forbidden_structure_node(self, mission_obj: M_EveAssetPullMission):

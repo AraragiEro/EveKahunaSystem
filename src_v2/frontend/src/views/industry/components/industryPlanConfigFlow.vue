@@ -14,7 +14,8 @@ const configTypeMap = ref<{ [key: string]: string }>({
   "StructureAssignConf": "建筑分配",
   "MaterialTagConf": "原材料标记",
   "DefaultBlueprintConf": "缺省蓝图参数",
-  "LoadAssetConf": "载入库存"
+  "LoadAssetConf": "载入库存",
+  "MaxJobSplitCountConf": "最大作业拆分控制"
 })
 
 const props = defineProps<Props>()
@@ -52,6 +53,10 @@ const getConfigFlowList = async () => {
     configFlowList.value = data.data
 }
 
+const isConfigInPlan = (configId: number): boolean => {
+    return configFlowList.value.some(item => item.config_id === configId)
+}
+
 const addConfigToPlan = async (config: PlanConfigObject) => {
     const res = await http.post('/EVE/industry/addConfigToPlan', {
         plan_name: props.selectedPlan,
@@ -64,7 +69,7 @@ const addConfigToPlan = async (config: PlanConfigObject) => {
     }
     ElMessage.success(data.message)
     getConfigFlowList()
-    configFlowManagementVisible.value = false
+    // configFlowManagementVisible.value = false
 }
 
 const saveConfigFlowToPlan = async () => {
@@ -93,29 +98,10 @@ const openCreateConfigDrawer = () => {
     createConfigDrawerVisible.value = true
 }
 
-
-interface StructureRigConfig {
-    structure_id: number,
-    time_eff_level: number,
-    mater_eff_level: number
-}
-interface StructureAssignConf {
-    structure_id: number,
-    assign_type: string,
-    keyword: string
-}
-interface MaterialTagConf {
-    tag_item_value: string,
-    tag_item_type: string
-}
-interface DefaultBlueprintConf {
-    blueprint_id: number,
-    time_eff: number,
-    mater_eff: number
-}
-interface LoadAssetConf {
-    owner_id: number,
-    container_id: number
+interface KeywordGroup {
+    index: number,
+    keyword: string,
+    keyword_type: string
 }
 const configForm = ref({
     StructureRigConfig: {
@@ -125,21 +111,49 @@ const configForm = ref({
     },
     StructureAssignConf: {
         structure_name: '',
-        assign_type: '',
-        keyword: ''
+        keyword_groups: [
+            {
+                index: 0,
+                keyword: '',
+                keyword_type: ''
+            }
+        ]
     },
     MaterialTagConf: {
-        tag_item_value: '',
-        tag_item_type: ''
+        keyword_groups: [
+            {
+                index: 0,
+                keyword: '',
+                keyword_type: ''
+            }
+        ]
     },
     DefaultBlueprintConf: {
-        select_type: 'blueprint',
-        blueprint_name: "",
+        keyword_groups: [
+            {
+                index: 0,
+                keyword: '',
+                keyword_type: ''
+            }
+        ],
         time_eff: 0,
         mater_eff: 0
     },
     LoadAssetConf: {
         container_tag: ""
+    },
+    MaxJobSplitCountConf: {
+        keyword_groups: [
+            {
+                index: 0,
+                keyword: '',
+                keyword_type: ''
+            }
+        ],
+        judge_type: '',
+        max_count: 0,
+        max_time_day: 0,
+        max_time_date: ''
     }
 })
 
@@ -171,6 +185,12 @@ const createConfig = async () => {
             ElMessage.error("未找到对应的库存许可")
             return
         }
+    } else if (createConfigType.value === 'MaxJobSplitCountConf') {
+        config_value = configForm.value.MaxJobSplitCountConf
+    }
+    else {
+        ElMessage.error("未找到对应的配置类型")
+        return
     }
     console.log("config_value", config_value)
     const res = await http.post('/EVE/industry/createConfigFlowConfig', {
@@ -221,66 +241,95 @@ const assignTypeOptions = ref([
     { value: 'marketGroup', label: 'marketGroup' },
     { value: 'category', label: 'category'}
 ])
-interface AssignKeywordItem {
+
+// ===================== 关键字组管理 =====================
+const group_keyword_map = ref<{ [key: string]: [] }>({
+    'group': [],
+    'meta': [],
+    'blueprint': [],
+    'marketGroup': [],
+    'category': []
+})
+
+const group_keyword_type = ref('')
+const before_fetch_group_suggestions = (keyword_type: string) => {
+    console.log("before_fetch_group_suggestions keyword_type", keyword_type)
+    group_keyword_type.value = keyword_type
+}
+interface KeywordItem {
     value: string
 }
-const StructureAssignKeywordSuggestions = ref<AssignKeywordItem[]>([])
-const StructureAssignKeywordCreateFilter = (queryString: string) => {
-  return (restaurant: AssignKeywordItem) => {
-    return (
-      restaurant.value.toLowerCase().indexOf(queryString.toLowerCase()) === 0
-    )
-  }
-}
-const fetchSuggestions = async (assign_type: string) => {
-    console.log("fetchSuggestions assign_type", assign_type)
-    const res = await http.post('/EVE/industry/getStructureAssignKeywordSuggestions', {
-        assign_type: assign_type
+const get_group_suggestions = async (keyword_type: string) => {
+    console.log("get_group_suggestions keyword_type", keyword_type)
+    if (group_keyword_map.value[keyword_type]?.length > 0) {
+        console.log("get_group_suggestions group_keyword_map.value[keyword_type]", group_keyword_map.value[keyword_type])
+        return { data: group_keyword_map.value[keyword_type] }
+    }
+
+    const res = await http.post('/EVE/industry/getGroupSuggestions', {
+        assign_type: keyword_type
     })
     const data = await res.json()
-    console.log("fetchSuggestions data", data)
+    console.log("get_group_suggestions data", data)
+    // 缓存数据
+    if (data.data) {
+        group_keyword_map.value[keyword_type] = data.data
+    }
     return data
 }
-const fetchStructureAssignKeywordSuggestions = async (queryString: string, cb: (suggestions: AssignKeywordItem[]) => void) => {
-    const assign_type = configForm.value.StructureAssignConf.assign_type
-    console.log("fetchStructureAssignKeywordSuggestions assign_type", assign_type)
-    const data = await fetchSuggestions(assign_type)
-    StructureAssignKeywordSuggestions.value = data.data
+
+const fetchGroupSuggestions = async (queryString: string, cb: (suggestions: KeywordItem[]) => void) => {
+    const data = await get_group_suggestions(group_keyword_type.value)
     
-    const results = queryString
-    ? StructureAssignKeywordSuggestions.value.filter(StructureAssignKeywordCreateFilter(queryString))
+    console.log("data", data)
+    const suggestions = data.data || []
+    const results = queryString && Array.isArray(suggestions)
+    ? suggestions.filter(suggestionFilter(queryString))
     : []
     console.log("results", results)
 
     cb(results)
 }
-
-const MaterialSuggestions = ref<AssignKeywordItem[]>([])
-const fetchMaterialSuggestions = async (queryString: string, cb: (suggestions: AssignKeywordItem[]) => void) => {
-    let assign_type = configForm.value.MaterialTagConf.tag_item_type
-    const data = await fetchSuggestions(assign_type)
-    BlueprintSuggestions.value = data.data
-    
-    const results = queryString
-    ? BlueprintSuggestions.value.filter(StructureAssignKeywordCreateFilter(queryString))
-    : []
-
-    cb(results)
+const suggestionFilter = (queryString: string) => {
+    return (suggestion: KeywordItem) => {
+        return suggestion.value.toLowerCase().indexOf(queryString.toLowerCase()) === 0
+    }
 }
 
-const BlueprintSuggestions = ref<AssignKeywordItem[]>([])
-const fetchBlueprintSuggestions = async (queryString: string, cb: (suggestions: AssignKeywordItem[]) => void) => {
-    let assign_type = configForm.value.DefaultBlueprintConf.select_type
-    const data = await fetchSuggestions(assign_type)
-    BlueprintSuggestions.value = data.data
-    
-    const results = queryString
-    ? BlueprintSuggestions.value.filter(StructureAssignKeywordCreateFilter(queryString))
-    : []
-
-    cb(results)
+const add_conf_group = (config_type: string) => {
+    if (config_type === 'StructureAssignConf') {
+        configForm.value.StructureAssignConf.keyword_groups.push({
+            index: configForm.value.StructureAssignConf.keyword_groups.length,
+            keyword: '',
+            keyword_type: ''
+        })
+    } else if (config_type === 'MaterialTagConf') {
+        configForm.value.MaterialTagConf.keyword_groups.push({
+            index: configForm.value.MaterialTagConf.keyword_groups.length,
+            keyword: '',
+            keyword_type: ''
+        })
+    }
+    else if (config_type === 'DefaultBlueprintConf') {
+        configForm.value.DefaultBlueprintConf.keyword_groups.push({
+            index: configForm.value.DefaultBlueprintConf.keyword_groups.length,
+            keyword: '',
+            keyword_type: ''
+        })
+    }
 }
 
+const delete_conf_group = (config_type: string, index: number) => {
+    if (config_type === 'StructureAssignConf') {
+        configForm.value.StructureAssignConf.keyword_groups.splice(index, 1)
+    } else if (config_type === 'MaterialTagConf') {
+        configForm.value.MaterialTagConf.keyword_groups.splice(index, 1)
+    } else if (config_type === 'DefaultBlueprintConf') {
+        configForm.value.DefaultBlueprintConf.keyword_groups.splice(index, 1)
+    }
+}
+
+// =======================载入库存管理 =====================
 interface ContainerPermissionItem {
     tag: string
 }
@@ -303,6 +352,17 @@ const fetchContainerPermissionSuggestions = async (queryString: string, cb: (sug
     : ContainerPermissionSuggestions.value
     cb(results)
 }
+
+// =======================最大作业拆分控制管理 =====================
+
+const judgeTypeOptions = ref([
+    { value: 'count', label: 'count' },
+    { value: 'time', label: 'time' }
+])
+const judgeTypeMap = ref<{ [key: string]: string }>({
+    'count': '最大流程',
+    'time': '最长时间'
+})
 
 // 格式化 JSON 用于 tooltip 显示（带缩进）
 const formatJsonTooltip = (value: any): string => {
@@ -422,7 +482,7 @@ watch(
                 </el-table-column>
                 <el-table-column label="操作" prop="action">
                     <template #default="{ row }">
-                        <el-button type="primary" plain @click="addConfigToPlan(row)">
+                        <el-button type="primary" plain @click="addConfigToPlan(row)" :disabled="isConfigInPlan(row.config_id)">
                             添加到计划{{ props.selectedPlan }}
                         </el-button>
                     </template>
@@ -442,6 +502,7 @@ watch(
             <el-radio-button label="原材料标记" value="MaterialTagConf" />
             <el-radio-button label="缺省蓝图参数" value="DefaultBlueprintConf" />
             <el-radio-button label="载入库存" value="LoadAssetConf" />
+            <el-radio-button label="最大作业拆分控制" value="MaxJobSplitCountConf" />
         </el-radio-group>
 
         <!-- 建筑插件配置 -->
@@ -471,28 +532,41 @@ watch(
                     value-key="structure_name"
                 />
             </el-form-item>
+            <el-card v-for="group in configForm.StructureAssignConf.keyword_groups" :key="group.index">
             <el-form-item label="分配类型">
-                <el-select v-model="configForm.StructureAssignConf.assign_type" placeholder="Select" style="width: 240px">
+                <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
                     <el-option
                     v-for="item in assignTypeOptions"
                     :key="item.value"
                     :label="item.label"
-                    :value="item.value"/>
+                    :value="item.value"
+                    />
                 </el-select>
             </el-form-item>
             <el-form-item label="标记关键字">
                 <el-autocomplete
-                    v-model="configForm.StructureAssignConf.keyword"
-                    :fetch-suggestions="fetchStructureAssignKeywordSuggestions"
+                    v-model="group.keyword"
+                    :fetch-suggestions="fetchGroupSuggestions"
                     value-key="value"
+                    @click="before_fetch_group_suggestions(group.keyword_type)"
                 />
             </el-form-item>
+            <el-button
+            @click="delete_conf_group(createConfigType, group.index)"
+            :disabled="configForm.StructureAssignConf.keyword_groups.length === 1">
+                删除组
+            </el-button>
+            </el-card>
+            <el-button @click="add_conf_group(createConfigType)">
+                增加组
+            </el-button>
         </el-form>
 
         <!-- 原材料标记配置 -->
         <el-form :model="configForm.MaterialTagConf" label-width="120px" v-else-if="createConfigType === 'MaterialTagConf'">
+            <el-card v-for="group in configForm.MaterialTagConf.keyword_groups" :key="group.index">
             <el-form-item label="原材料类型">
-                <el-select v-model="configForm.MaterialTagConf.tag_item_type" placeholder="Select" style="width: 240px">
+                <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
                     <el-option
                     v-for="item in assignTypeOptions"
                     :key="item.value"
@@ -502,23 +576,53 @@ watch(
             </el-form-item>
             <el-form-item label="标记关键字">
                 <el-autocomplete
-                    v-model="configForm.MaterialTagConf.tag_item_value"
-                    :fetch-suggestions="fetchMaterialSuggestions"
+                    v-model="group.keyword"
+                    :fetch-suggestions="fetchGroupSuggestions"
                     value-key="value"
+                    @click="before_fetch_group_suggestions(group.keyword_type)"
                 />
             </el-form-item>
+            <el-button
+            @click="delete_conf_group(createConfigType, group.index)"
+            :disabled="configForm.MaterialTagConf.keyword_groups.length === 1">
+                删除组
+            </el-button>
+            </el-card>
+            <el-button @click="add_conf_group(createConfigType)">
+                增加组
+            </el-button>
         </el-form>
         
         <!-- 缺省蓝图参数配置 -->
         <el-form :model="configForm.DefaultBlueprintConf" label-width="120px" v-else-if="createConfigType === 'DefaultBlueprintConf'">
-
-            <el-form-item label="选择蓝图">
+            <el-card v-for="group in configForm.DefaultBlueprintConf.keyword_groups" :key="group.index">
+            <el-form-item label="蓝图类型">
+                <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
+                    <el-option
+                    v-for="item in assignTypeOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"/>
+                </el-select>
+            </el-form-item>
+            <el-form-item label="标记关键字">
                 <el-autocomplete
-                    v-model="configForm.DefaultBlueprintConf.blueprint_name"
-                    :fetch-suggestions="fetchBlueprintSuggestions"
+                    v-model="group.keyword"
+                    :fetch-suggestions="fetchGroupSuggestions"
                     value-key="value"
+                    @click="before_fetch_group_suggestions(group.keyword_type)"
                 />
             </el-form-item>
+            <el-button
+            @click="delete_conf_group(createConfigType, group.index)"
+            :disabled="configForm.DefaultBlueprintConf.keyword_groups.length === 1">
+                删除组
+            </el-button>
+            </el-card>
+            <el-button @click="add_conf_group(createConfigType)">
+                增加组
+            </el-button>
+
             <el-form-item label="时间效率">
                 <el-input-number v-model="configForm.DefaultBlueprintConf.time_eff" placeholder="请输入时间效率" :min="0" :max="20" />
             </el-form-item>
@@ -536,7 +640,58 @@ watch(
                     value-key="tag"
                 />
             </el-form-item>
-            </el-form>
+        </el-form>
+
+        <!-- 最大作业拆分控制配置 -->
+        <el-form :model="configForm.MaxJobSplitCountConf" label-width="120px" v-else-if="createConfigType === 'MaxJobSplitCountConf'">
+            <el-card v-for="group in configForm.MaxJobSplitCountConf.keyword_groups" :key="group.index">
+            <el-form-item label="作业类型">
+                <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
+                    <el-option
+                    v-for="item in assignTypeOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"/>
+                </el-select>
+            </el-form-item>
+            <el-form-item label="标记关键字">
+                <el-autocomplete
+                    v-model="group.keyword"
+                    :fetch-suggestions="fetchGroupSuggestions"
+                    value-key="value"
+                    @click="before_fetch_group_suggestions(group.keyword_type)"
+                />
+            </el-form-item>
+            <el-button
+            @click="delete_conf_group(createConfigType, group.index)"
+            :disabled="configForm.MaxJobSplitCountConf.keyword_groups.length === 1">
+                删除组
+            </el-button>
+            </el-card>
+            <el-button @click="add_conf_group(createConfigType)">
+                增加组
+            </el-button>
+
+            <el-form-item label="判断类型">
+                <el-select v-model="configForm.MaxJobSplitCountConf.judge_type" placeholder="Select" style="width: 240px">
+                    <el-option
+                    v-for="item in judgeTypeOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"/>
+                </el-select>
+            </el-form-item>
+            <el-form-item label="最大流程" v-if="configForm.MaxJobSplitCountConf.judge_type === 'count'">
+                <el-input-number v-model="configForm.MaxJobSplitCountConf.max_count" placeholder="请输入最大作业数量" :min="0" :max="100" />
+                <!-- 预估时间 -->
+            </el-form-item>
+            <el-form-item label="最长时间" v-if="configForm.MaxJobSplitCountConf.judge_type === 'time'">
+                <el-input-number v-model="configForm.MaxJobSplitCountConf.max_time_day" placeholder="天" :min="0" :max="100" />
+                <span>天</span>
+                <el-time-picker v-model="configForm.MaxJobSplitCountConf.max_time_date" placeholder="时间" value-format="HH:mm:ss" />
+                <!-- 预估组件制造流程数 -->
+            </el-form-item>
+        </el-form>
 
         <template #footer>
             <el-button @click="createConfig" type="primary" plain size="large">创建</el-button>

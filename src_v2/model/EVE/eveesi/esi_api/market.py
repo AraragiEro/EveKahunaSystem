@@ -29,7 +29,7 @@ async def markets_structures(access_token, structure_id: int, page: int=1, test=
     tasks = []
     data = [data]
     for p in range(2, pages + 1):
-        tasks.append(markets_structures(ac_token, structure_id, p, test, max_retries, log))
+        tasks.append(asyncio.create_task(markets_structures(ac_token, structure_id, p, test, max_retries, log)))
     page_results = await asyncio.gather(*tasks)
     for page_data in page_results:
         data.append(page_data)
@@ -57,7 +57,7 @@ async def markets_region_orders(region_id: int, type_id: int = None, page: int=1
     tasks = []
     data = [data]
     for p in range(2, pages + 1):
-        tasks.append(markets_region_orders(region_id, type_id, p, max_retries, log))
+        tasks.append(asyncio.create_task(markets_region_orders(region_id, type_id, p, max_retries, log)))
     page_results = await asyncio.gather(*tasks)
     for data_page in page_results:
         data.append(data_page)
@@ -105,7 +105,7 @@ async def characters_character_orders_history(access_token, character_id: int, p
     tasks = []
     data = [data]
     for p in range(2, pages + 1):
-        tasks.append(characters_character_orders_history(ac_token, character_id, p, max_retries, log))
+        tasks.append(asyncio.create_task(characters_character_orders_history(ac_token, character_id, p, max_retries, log)))
     page_results = await asyncio.gather(*tasks)
     for data_page in page_results:
         data.append(data_page)

@@ -131,15 +131,19 @@ class SdeUtils:
 
     @staticmethod
     @lru_cache(maxsize=1000)
-    def get_metaname_by_typeid(typeid: int) -> int:
+    def get_metaname_by_typeid(typeid: int, zh=False) -> int:
+        if zh:
+            model = zh_model
+        else:
+            model = en_model
         try:
-            return (InvTypes.select(MetaGroups.nameID)
-                       .join(MetaGroups, on=(InvTypes.metaGroupID == MetaGroups.metaGroupID))
-                       .switch(InvTypes)
-                       .where(InvTypes.typeID == typeid)
+            return (model.InvTypes.select(model.MetaGroups.nameID)
+                       .join(model.MetaGroups, on=(model.InvTypes.metaGroupID == model.MetaGroups.metaGroupID))
+                       .switch(model.InvTypes)
+                       .where(model.InvTypes.typeID == typeid)
                        .scalar()
             )
-        except DoesNotExist:
+        except model.InvTypes.DoesNotExist:
             return None
 
     @staticmethod
@@ -223,25 +227,30 @@ class SdeUtils:
     @classmethod
     @lru_cache(maxsize=1000)
     def get_market_group_list(cls, type_id: int, zh=False) -> list[str]:
+        if zh:
+            model = zh_model
+        else:
+            model = en_model
         try:
             market_tree = cls.get_market_group_tree()
-            market_group_id = cls.get_invtpye_node_by_id(type_id)
+            market_group_id = model.InvTypes.get_or_none(model.InvTypes.typeID == type_id)
             if not market_group_id:
                 return []
             market_group_id = market_group_id.marketGroupID
             market_group_list = []
             if market_group_id:
-                market_group_list = [cls.get_name_by_id(type_id), cls.get_market_group_name_by_groupid(market_group_id, zh)]
+                market_group_list = [model.InvTypes.get(model.InvTypes.typeID == type_id).typeName, model.MarketGroups.get(model.MarketGroups.marketGroupID == market_group_id).nameID]
                 parent_nodes = [parent_id for parent_id in market_tree.predecessors(market_group_id)]
                 while parent_nodes:
                     parent_node = parent_nodes[0]
-                    parent_name = cls.get_market_group_name_by_groupid(parent_node, zh)
+                    parent_name = model.MarketGroups.get(model.MarketGroups.marketGroupID == parent_node).nameID
                     market_group_list.append(parent_name)
                     parent_nodes = [parent_id for parent_id in market_tree.predecessors(parent_node)]
                 market_group_list.reverse()
             return market_group_list
-        except Exception as e:
-            logger.error(f"get_market_group_list error: {e}")
+        except model.InvTypes.DoesNotExist:
+            return []
+        except model.MarketGroups.DoesNotExist:
             return []
 
         # market_group_id = cls.get_invtpye_node_by_id(type_id).marketGroupID

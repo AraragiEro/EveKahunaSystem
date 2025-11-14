@@ -17,6 +17,19 @@ async def serve_vue(path='index.html'):
     root_dir = os.path.join(os.path.dirname(__file__), '../frontend/dist')
     return await send_from_directory(root_dir, path)
 
+async def init_server():
+    """初始化服务器"""
+    from src_v2.core.database.connect_manager import postgres_manager, redis_manager, neo4j_manager
+
+    await postgres_manager.init()
+    await redis_manager.init()
+    await neo4j_manager.init()
+
+def get_app():
+    """获取Quart应用实例，供ASGI服务器使用"""
+    return app
+
 async def init_backend():
-    return await app.run_task(debug=True, port=9527)
+    """初始化后端（已废弃，请使用get_app()获取app实例，然后通过hypercorn启动）"""
+    return app
 

@@ -237,7 +237,7 @@ const canPullNow = (lastPullTime: string | null | undefined): boolean => {
       return true
     }
     
-    const fiveMinutes = 5 * 60 * 1000
+    const fiveMinutes = 1 * 60 * 1000
     const elapsed = now - lastPull
     return elapsed >= fiveMinutes
   } catch (e) {
