@@ -595,6 +595,7 @@ class IndustryManager(metaclass=SingletonMeta):
                     "need_calculate": False
                 }
             )
+            await tqdm_manager.update_mission("relation_moniter_process", 1)
             return
         
         # 收集父节点需求数量 ==============================================================================================

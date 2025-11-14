@@ -20,10 +20,13 @@ async def serve_vue(path='index.html'):
 async def init_server():
     """初始化服务器"""
     from src_v2.core.database.connect_manager import postgres_manager, redis_manager, neo4j_manager
+    from src_v2.model.EVE.eveesi.esi_req_manager import init_esi_manager
+
 
     await postgres_manager.init()
     await redis_manager.init()
     await neo4j_manager.init()
+    await init_esi_manager()
 
 def get_app():
     """获取Quart应用实例，供ASGI服务器使用"""

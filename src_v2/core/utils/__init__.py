@@ -1,6 +1,7 @@
 import math
 import asyncio
 import traceback
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from math import trunc
@@ -121,7 +122,8 @@ class async_tqdm_manager:
             index = self.mission_count
             self.mission_count += 1
 
-            bar = tqdm(total=len, desc=description, position=index, leave=False)
+            # 明确指定输出到 stderr，确保在生产模式下也能正常显示
+            bar = tqdm(total=len, desc=description, position=index, leave=False, file=sys.stderr)
 
             self.mission[mission_id] = {
                 "bar": bar,

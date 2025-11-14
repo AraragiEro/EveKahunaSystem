@@ -8,3 +8,4 @@ tmp
 *.db-wal
 config.ini
 *.sql
+**/*.pyc

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, nextTick } from 'vue'
 import { http } from '@/http'
 import type { PlanProductTableData, PlanTableData } from './components/interfaceType.vue'
 import { ElMessage } from 'element-plus'
@@ -44,8 +44,8 @@ const loadFromLocal = (planName: string, keys: string): any[] | null => {
 }
 
 // 拉取计划计算结果
-const PlanCalculateMaterialTableView = ref()
-const PlanCalculateResultTableView = ref()
+const PlanCalculateMaterialTableView = ref<any[]>([])
+const PlanCalculateResultTableView = ref<any[]>([])
 const getPlanCalculateResultTableView = async () => {
     console.log("getPlanCalculateResultTableView", selectedPlan.value)
     if (!selectedPlan.value) {
@@ -53,6 +53,8 @@ const getPlanCalculateResultTableView = async () => {
         return
     }
     try {
+        
+        
         const res = await http.post('/EVE/industry/getPlanCalculateResultTableView',
             {
                 plan_name: selectedPlan.value
@@ -71,14 +73,20 @@ const getPlanCalculateResultTableView = async () => {
             ElMessage.error(data.error || "获取数据失败")
             return
         }
-        
-        const resultData = data.data || []
-        PlanCalculateResultTableView.value = resultData.flow_output
-        PlanCalculateMaterialTableView.value = resultData.material_output
+        // 先清空数据，避免数据错位
+        PlanCalculateResultTableView.value = []
+        PlanCalculateMaterialTableView.value = []
+        const resultData = data.data || {}
+        // 使用 nextTick 确保 DOM 更新完成后再赋值，避免数据错位
+        await nextTick()
+        PlanCalculateResultTableView.value = resultData.flow_output || []
+        PlanCalculateMaterialTableView.value = resultData.material_output || []
         
         // 保存到本地
-        saveToLocal(selectedPlan.value, resultData.flow_output, "flow"),
+        saveToLocal(selectedPlan.value, resultData.flow_output, "flow")
         saveToLocal(selectedPlan.value, resultData.material_output, "material")
+
+        ElMessage.success("计算成功")
     } catch (error) {
         console.error("getPlanCalculateResultTableView error:", error)
         ElMessage.error(error instanceof Error ? error.message : "网络请求失败，请稍后重试")
@@ -173,6 +181,7 @@ const lackRowClassName = (data: { row: any, rowIndex: number }) => {
         <el-tab-pane label="表格视图">
             <el-table
                 :data="PlanCalculateResultTableView"
+                :key="`flow-table-${selectedPlan || 'default'}`"
                 row-key="type_id"
                 expand-on-click-node="false"
                 default-expand-all
@@ -202,6 +211,7 @@ const lackRowClassName = (data: { row: any, rowIndex: number }) => {
         <el-tab-pane label="材料试图">
             <el-table
                 :data="PlanCalculateMaterialTableView"
+                :key="`material-table-${selectedPlan || 'default'}`"
                 row-key="type_id"
                 expand-on-click-node="false"
                 default-expand-all

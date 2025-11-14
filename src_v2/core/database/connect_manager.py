@@ -1,15 +1,12 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List, AnyStr, Type
+from typing import List, Type
 import asyncio
 import os
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float, Boolean, ForeignKey, JSON
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 from sqlalchemy.orm import DeclarativeMeta
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import event
-from win32gui import PostThreadMessage
 
 from neo4j import AsyncGraphDatabase
 

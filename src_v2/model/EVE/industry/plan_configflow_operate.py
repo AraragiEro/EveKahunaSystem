@@ -149,6 +149,7 @@ class ConfigFlowOperateCenter():
 
     # 获取正在运行的joblit
     async def get_running_job_list(self):
+        from src_v2.core.log import logger
         async with running_job_update_lock:
             if self._running_jobs_update:
                 return self._running_jobs
@@ -170,8 +171,11 @@ class ConfigFlowOperateCenter():
             running_job_list = []
             # 获取运行中的job
             for character_id in character_ids:
+                logger.debug(f"step 5.1.1")
                 character = await CharacterManager().get_character_by_character_id(character_id)
+                logger.debug(f"step 5.1.2")
                 jobs = await eveesi.characters_character_id_industry_jobs(character.ac_token, character_id)
+                logger.debug(f"step 5.1.3")
                 if not jobs:
                     continue
                 running_job_list.extend(jobs)
