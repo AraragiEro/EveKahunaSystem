@@ -120,10 +120,11 @@ async def delete_account():
     user_id = g.current_user["user_id"]
     main_character_id = await UserManager().get_main_character_id(user_id)
     # 删除用户所有角色相关数据
-
+    
     # 删除用户角色数据
     await CharacterManager().delete_all_alias_characters_of_main_character(main_character_id)
     await CharacterManager().delete_all_character_of_user(user_id)
+
     # 删除用户数据
     await UserManager().delete_user(user_id)
 

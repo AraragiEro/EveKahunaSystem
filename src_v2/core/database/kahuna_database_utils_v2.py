@@ -180,10 +180,13 @@ class _CommonUtils:
             session.add(asset_owner_obj)
 
     @classmethod
-    async def merge(cls, obj):
+    async def merge(cls, obj, session=None):
         if not cls.cls_model:
             raise Exception("cls_model is None")
-        async with dbm.get_session() as session:
+        if not session:
+            async with dbm.get_session() as session:
+                await session.merge(obj)
+        else:
             await session.merge(obj)
 
     @classmethod
@@ -682,3 +685,8 @@ class EveIndustryPlanConfigFlowDBUtils(_CommonUtils):
             stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
             result = await session.execute(stmt)
             return result.scalars().first()
+
+    @classmethod
+    async def select_all_by_user_name(cls, user_name: str):
+        stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        return await _AsyncIteratorWrapper.from_stmt(stmt)

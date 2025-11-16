@@ -35,7 +35,9 @@ interface PlanTableData {
 }
 
 const marketRootTree = ref([])
-const selectedPlan = ref<string | null>(null)
+// 从 localStorage 恢复之前选择的计划
+const STORAGE_KEY = 'industry_plan_selected_plan'
+const selectedPlan = ref<string | null>(localStorage.getItem(STORAGE_KEY) || null)
 const getMarketRootTree = async () => {
   const res = await http.post('/EVE/industry/getMarketTree', {
     node: 'root'
@@ -64,7 +66,18 @@ const getPlanTableData = async () => {
   const res = await http.post('/EVE/industry/getPlanTableData')
   const data = await res.json()
   IndustryPlanTableData.value = data.data
+  
+  // 如果从 localStorage 恢复了计划，但计划列表中不存在，则清除
   if (selectedPlan.value) {
+    const planExists = IndustryPlanTableData.value.some(item => item.plan_name === selectedPlan.value)
+    if (!planExists) {
+      selectedPlan.value = null
+      localStorage.removeItem(STORAGE_KEY)
+      currentPlanProducts.value = []
+      return
+    }
+    
+    // 加载计划数据
     currentPlanProducts.value = IndustryPlanTableData.value.find(item => item.plan_name == selectedPlan.value)?.products || []
     current_plan_settings.value = IndustryPlanTableData.value.find(item => item.plan_name == selectedPlan.value)?.plan_settings || {
       name: '',
@@ -72,6 +85,7 @@ const getPlanTableData = async () => {
       considerate_running_job: false,
       split_to_jobs: false,
       considerate_bp_relation: false,
+      full_use_bp_cp: false,
       work_type: 'whole'
     }
     current_plan_settings.value.name = selectedPlan.value
@@ -329,6 +343,12 @@ const currentPlanProducts = ref<PlanProductTableData[]>([])
 const handlePlanChange = (value: string) => {
   console.log("handlePlanChange", value)
   selectedPlan.value = value
+  // 保存选择的计划到 localStorage
+  if (value) {
+    localStorage.setItem(STORAGE_KEY, value)
+  } else {
+    localStorage.removeItem(STORAGE_KEY)
+  }
   currentPlanProducts.value = IndustryPlanTableData.value.find(item => item.plan_name == value)?.products || []
   current_plan_settings.value = IndustryPlanTableData.value.find(item => item.plan_name == value)?.plan_settings || {
     name: '',
@@ -336,6 +356,7 @@ const handlePlanChange = (value: string) => {
     considerate_running_job: false,
     split_to_jobs: false,
     considerate_bp_relation: false,
+    full_use_bp_cp: false,
     work_type: 'whole'
   }
   current_plan_settings.value.name = value
@@ -504,7 +525,7 @@ onMounted(() => {
             </VueDraggable>
           </div>
           <div class="industry-plan-table-fonfig-flow" style="min-width: 350px;">
-            <industry-plan-config-flow :selected-plan="selectedPlan" />
+            <industry-plan-config-flow v-if="selectedPlan" :selected-plan="selectedPlan" />
           </div>
         </div>
       </div>

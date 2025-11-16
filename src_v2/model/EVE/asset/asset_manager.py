@@ -5,7 +5,7 @@ import pathlib
 
 from tqdm.std import tqdm
 
-from src_v2.core.database.connect_manager import redis_manager, neo4j_manager
+from src_v2.core.database.connect_manager import redis_manager as rdm, neo4j_manager
 from src_v2.core.utils import SingletonMeta, tqdm_manager
 from src_v2.core.utils import KahunaException, get_beijing_utctime
 
@@ -81,6 +81,7 @@ class AssetManager(metaclass=SingletonMeta):
         if not mission_obj:
             raise KahunaException('任务不存在')
 
+        await rdm.r.hset(f'asset_pull_mission_status:{asset_owner_type}:{asset_owner_id}', 'step_name', "清理旧数据")
         await self.clean_asset_pull_mission_assets(mission_obj)
         await self.processing_asset_pull_mission(mission_obj)
 
@@ -127,15 +128,15 @@ class AssetManager(metaclass=SingletonMeta):
     async def get_station_info(self, station_id: int):
         # 上级为空间站是NPC空间站，需要补充创建星系
         # 获取缓存
-        station_info_cache = await redis_manager.redis.hgetall(f'eveesi:universe_stations_station:{station_id}')
+        station_info_cache = await rdm.redis.hgetall(f'eveesi:universe_stations_station:{station_id}')
         if not station_info_cache:
             station_info = await eveesi.universe_stations_station(station_id)
             station_info_cache = {
                 "name": station_info["name"],
                 "system_id": station_info["system_id"],
             }
-            await redis_manager.redis.hset(f'eveesi:universe_stations_station:{station_id}', mapping=station_info_cache)
-            await redis_manager.redis.expire(f'eveesi:universe_stations_station:{station_id}', 60*60*24)
+            await rdm.redis.hset(f'eveesi:universe_stations_station:{station_id}', mapping=station_info_cache)
+            await rdm.redis.expire(f'eveesi:universe_stations_station:{station_id}', 60*60*24)
         else:
             station_info = station_info_cache
             return station_info, False
@@ -191,7 +192,11 @@ class AssetManager(metaclass=SingletonMeta):
     async def _generate_all_nodes(self, assets_list: list[dict], mission_obj: M_EveAssetPullMission):
         stucture_list = await NAU.get_structure_nodes()
         structure_item_id_list = [structure.get("item_id", None) for structure in stucture_list]
+        status_key = f'asset_pull_mission_status:{mission_obj.asset_owner_type}:{mission_obj.asset_owner_id}'
+
+        last_progress = 0
         async def generate_with_semaphore(asset: dict):
+            nonlocal last_progress
             async with neo4j_manager.semaphore:
                 if asset["item_id"] in structure_item_id_list:
                     return
@@ -211,17 +216,26 @@ class AssetManager(metaclass=SingletonMeta):
                 if asset["location_type"] == 'station':
                     await self.create_station_node(asset["location_id"])
 
-                await tqdm_manager.update_mission("_generate_all_nodes", 1)
+                now_progress = await tqdm_manager.update_mission("_generate_all_nodes", 1)
+                if now_progress / len(assets_list) * 100 > last_progress + 0.1:
+                    await rdm.r.hset(status_key, 'step_progress', now_progress / len(assets_list))
+                    last_progress = now_progress / len(assets_list)
 
         await tqdm_manager.add_mission("_generate_all_nodes", len(assets_list))
+        await rdm.r.hset(status_key, 'step_name', "生成资产树节点")
+        await rdm.r.hset(status_key, 'step_progress', 0)
         tasks = [asyncio.create_task(generate_with_semaphore(asset)) for asset in assets_list]
         await asyncio.gather(*tasks)
         await tqdm_manager.complete_mission("_generate_all_nodes")
 
     async def _generate_all_locate_relation(self, assets_list: list[dict], mission_obj: M_EveAssetPullMission):
+        status_key = f'asset_pull_mission_status:{mission_obj.asset_owner_type}:{mission_obj.asset_owner_id}'
         structure_nodes = await NAU.get_structure_nodes()
         structure_item_id_list = [structure.get("structure_id", None) for structure in structure_nodes]
+        
+        last_progress = 0
         async def generate_with_semaphore(asset: dict):
+            nonlocal last_progress
             async with neo4j_manager.semaphore:
                 if asset["location_type"] == 'station':
                     await NIU.link_node(
@@ -320,9 +334,14 @@ class AssetManager(metaclass=SingletonMeta):
                                 "owner_id": mission_obj.asset_owner_id,
                             }
                         )
-                await tqdm_manager.update_mission("_generate_all_locate_relation", 1)
+                now_progress = await tqdm_manager.update_mission("_generate_all_locate_relation", 1)
+                if now_progress / len(assets_list) > last_progress + 0.1:
+                    await rdm.r.hset(status_key, 'step_progress', now_progress / len(assets_list))
+                    last_progress = now_progress / len(assets_list)
 
         await tqdm_manager.add_mission("_generate_all_locate_relation", len(assets_list))
+        await rdm.r.hset(status_key, 'step_name', "生成资产树关系")
+        await rdm.r.hset(status_key, 'step_progress', 0)
         tasks = [asyncio.create_task(generate_with_semaphore(asset)) for asset in assets_list]
         # await asyncio.gather(*tasks)
         while True:
@@ -336,11 +355,15 @@ class AssetManager(metaclass=SingletonMeta):
         access_character = await CharacterManager().get_character_by_character_id(mission_obj.access_character_id)
         # 补全玩家建筑信息
         forbidden_structure_node_list = await NAU.get_forbidden_structure_node_list(mission_obj.asset_owner_id)
+        status_key = f'asset_pull_mission_status:{mission_obj.asset_owner_type}:{mission_obj.asset_owner_id}'
+        await rdm.r.hset(status_key, 'step_name', "生成无权限建筑节点")
+        await rdm.r.hset(status_key, 'step_progress', 0.5)
+        await rdm.r.hset(status_key, 'is_indeterminate', 1)
 
         await tqdm_manager.add_mission("_generate_forbidden_structure_node", len(forbidden_structure_node_list))
         for forbidden_structure_node in forbidden_structure_node_list:
             # 建筑信息
-            structure_info_cache = await redis_manager.redis.hgetall(f'eveesi:universe_structures_structure:{forbidden_structure_node["item_id"]}')
+            structure_info_cache = await rdm.redis.hgetall(f'eveesi:universe_structures_structure:{forbidden_structure_node["item_id"]}')
             if not structure_info_cache:
                 structure_info = await eveesi.universe_structures_structure(access_character.ac_token, forbidden_structure_node["item_id"])
                 if structure_info:
@@ -358,8 +381,8 @@ class AssetManager(metaclass=SingletonMeta):
                         'solar_system_id': 'unknown',
                         'type_id': 'unknown',
                     }
-                await redis_manager.redis.hset(f'eveesi:universe_structures_structure:{forbidden_structure_node["item_id"]}', mapping=structure_info_cache)
-                await redis_manager.redis.expire(f'eveesi:universe_structures_structure:{forbidden_structure_node["item_id"]}', 60*60*24)
+                await rdm.redis.hset(f'eveesi:universe_structures_structure:{forbidden_structure_node["item_id"]}', mapping=structure_info_cache)
+                await rdm.redis.expire(f'eveesi:universe_structures_structure:{forbidden_structure_node["item_id"]}', 60*60*24)
             structure_info = structure_info_cache
             
             # 星系信息
@@ -402,8 +425,14 @@ class AssetManager(metaclass=SingletonMeta):
     async def _update_structure_node(self, mission_obj: M_EveAssetPullMission):
         access_character = await CharacterManager().get_character_by_character_id(mission_obj.access_character_id)
         structure_asset_nodes = await NAU.get_structure_asset_nodes(mission_obj.asset_owner_id)
+        status_key = f'asset_pull_mission_status:{mission_obj.asset_owner_type}:{mission_obj.asset_owner_id}'
+        await rdm.r.hset(status_key, 'step_name', "更新建筑节点信息")
+        await rdm.r.hset(status_key, 'step_progress', 0.0)
+        await rdm.r.hset(status_key, 'is_indeterminate', 0)
+
+        await tqdm_manager.add_mission("_update_structure_node", len(structure_asset_nodes))
         for node in structure_asset_nodes:
-            structure_info_cache = await redis_manager.redis.hgetall(f'eveesi:universe_structures_structure:{node["item_id"]}')
+            structure_info_cache = await rdm.redis.hgetall(f'eveesi:universe_structures_structure:{node["item_id"]}')
             if not structure_info_cache:
                 structure_info = await eveesi.universe_structures_structure(access_character.ac_token, node["item_id"])
                 if structure_info:
@@ -430,8 +459,8 @@ class AssetManager(metaclass=SingletonMeta):
                         'region_id': 'unknown',
                         'region_name': 'unknown',
                     }
-                await redis_manager.redis.hset(f'eveesi:universe_structures_structure:{node["item_id"]}', mapping=structure_info_cache)
-                await redis_manager.redis.expire(f'eveesi:universe_structures_structure:{node["item_id"]}', 60*60*24)
+                await rdm.redis.hset(f'eveesi:universe_structures_structure:{node["item_id"]}', mapping=structure_info_cache)
+                await rdm.redis.expire(f'eveesi:universe_structures_structure:{node["item_id"]}', 60*60*24)
             structure_info = structure_info_cache
             structure_node = {
                 'structure_id': node["item_id"],
@@ -445,10 +474,13 @@ class AssetManager(metaclass=SingletonMeta):
             }
 
             await NAU.change_asset_to_structure(node, structure_node)
-            await tqdm_manager.update_mission("_update_structure_node", 1)
+            now_progress = await tqdm_manager.update_mission("_update_structure_node", 1)
+            await rdm.r.hset(status_key, 'step_progress', now_progress / len(structure_asset_nodes))
         await tqdm_manager.complete_mission("_update_structure_node")
 
     async def processing_asset_pull_mission(self, mission_obj: M_EveAssetPullMission):
+        status_key = f'asset_pull_mission_status:{mission_obj.asset_owner_type}:{mission_obj.asset_owner_id}'
+
         if mission_obj.asset_owner_type == 'character':
             pull_function = eveesi.characters_character_assets
 
@@ -456,7 +488,13 @@ class AssetManager(metaclass=SingletonMeta):
             pull_function = eveesi.corporations_corporation_assets
 
         access_character = await CharacterManager().get_character_by_character_id(mission_obj.access_character_id)
-        assets = await pull_function(access_character.ac_token, mission_obj.asset_owner_id)
+
+        await rdm.r.hset(status_key, 'step_name', "通过api拉取资产")
+        assets = await pull_function(
+            access_character.ac_token,
+            mission_obj.asset_owner_id,
+            status_key=status_key
+        )
         assets_list = []
         for assets_list_batch in assets:
             assets_list.extend(assets_list_batch)

@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from math import trunc
 
+from src_v2.core.database.connect_manager import redis_manager as rdm
+
 from tqdm.asyncio import tqdm
 
 from ..log import logger
@@ -132,11 +134,19 @@ class async_tqdm_manager:
                 "completed": False,
             }
 
-    async def update_mission(self, mission_id, value=1):
+    async def update_mission(self, mission_id, value=1, **kwargs):
         async with self.lock:
             if mission_id in self.mission:
                 self.mission[mission_id]["count"] += value
                 self.mission[mission_id]["bar"].update(value)
+                return self.mission[mission_id]["count"]
+            return 0
+
+    async def get_mission_count(self, mission_id):
+        async with self.lock:
+            if mission_id in self.mission:
+                return self.mission[mission_id]["count"]
+            return 0
 
     async def complete_mission(self, mission_id):
         async with self.lock:

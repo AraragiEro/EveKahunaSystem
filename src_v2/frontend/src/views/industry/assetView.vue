@@ -18,10 +18,24 @@ type Mission = {
   subject_id: number
   is_active: boolean
   last_pull_time?: string | null
+  pull_status?: number
+  step_name?: string
+  is_indeterminate?: boolean
 }
 
 const missions = ref<Mission[]>([])
 const missionsLoading = ref(false)
+
+// 正在拉取中的任务标识集合
+const pullingMissions = ref<Set<string>>(new Set())
+// 每个任务的轮询定时器 ID
+const pollingIntervals = ref<Map<string, number>>(new Map())
+// 每个任务的重试次数
+const pollingRetries = ref<Map<string, number>>(new Map())
+// 最大重试次数
+const MAX_RETRY_COUNT = 3
+// 重试延时（毫秒）
+const RETRY_DELAY = 3000
 
 // 当前时间戳，用于实时更新倒计时
 const currentTime = ref(Date.now())
@@ -159,17 +173,175 @@ const handleStartMission = async (row: Mission) => {
   }
 }
 
+// 获取任务标识
+const getMissionKey = (row: Mission): string => {
+  return `${row.subject_type}:${row.subject_id}`
+}
+
+// 检查任务是否正在拉取中
+const isPulling = (row: Mission): boolean => {
+  return pullingMissions.value.has(getMissionKey(row))
+}
+
+// 停止指定任务的轮询
+const stopPolling = (row: Mission) => {
+  const missionKey = getMissionKey(row)
+  const intervalId = pollingIntervals.value.get(missionKey)
+  if (intervalId !== undefined) {
+    clearInterval(intervalId)
+    pollingIntervals.value.delete(missionKey)
+  }
+  pullingMissions.value.delete(missionKey)
+  pollingRetries.value.delete(missionKey)
+}
+
+// 轮询拉取进度
+const pollPullStatus = async (row: Mission) => {
+  const missionKey = getMissionKey(row)
+  try {
+    const res = await http.post('/EVE/asset/getAssetPullMissionStatus', {
+      asset_owner_type: row.subject_type,
+      asset_owner_id: row.subject_id
+    })
+    const data = await res.json()
+    if (data?.code === 200 && data?.data) {
+      // 成功获取进度，重置重试计数器
+      pollingRetries.value.delete(missionKey)
+      
+      const status = data.data.status
+      const stepProgress = data.data.step_progress
+      const isIndeterminate = data.data.is_indeterminate
+      
+      // 处理成功完成的情况
+      if (status === 'success') {
+        stopPolling(row)
+        ElMessage.success('资产拉取完成')
+        // 刷新任务列表以更新 last_pull_time
+        fetchMissions()
+        return
+      }
+      
+      // 处理失败的情况
+      if (status === 'failed') {
+        stopPolling(row)
+        ElMessage.error('资产拉取失败')
+        // 刷新任务列表
+        fetchMissions()
+        return
+      }
+      
+      // 处理正在拉取中的情况
+      if (stepProgress !== undefined && stepProgress !== null) {
+        // step_progress 是字符串格式，需要转换为数字
+        const progress = parseFloat(stepProgress)
+        // 将 0-1 的进度转换为 0-100 的百分比
+        const progressPercent = Math.round(progress * 100)
+        
+        // 更新对应任务的进度和步骤名称
+        const mission = missions.value.find(m => 
+          m.subject_type === row.subject_type && m.subject_id === row.subject_id
+        )
+        if (mission) {
+          mission.pull_status = progressPercent
+          if (data.data.step_name) {
+            mission.step_name = data.data.step_name
+          }
+          if (data.data.is_indeterminate) {
+            mission.is_indeterminate = isIndeterminate === '1' ? true : false
+          }
+        }
+        
+        // 如果进度达到 100%，停止轮询（备用检查）
+        if (progress >= 1) {
+          stopPolling(row)
+          ElMessage.success('资产拉取完成')
+          // 刷新任务列表以更新 last_pull_time
+          fetchMissions()
+        }
+      }
+    } else {
+      // API 返回异常，进行重试
+      handlePollingError(row, '获取拉取进度失败')
+    }
+  } catch (e) {
+    // 请求失败，进行重试
+    handlePollingError(row, '获取拉取进度失败')
+  }
+}
+
+// 处理轮询错误，带重试机制
+const handlePollingError = (row: Mission, errorMessage: string) => {
+  const missionKey = getMissionKey(row)
+  const currentRetries = pollingRetries.value.get(missionKey) || 0
+  
+  if (currentRetries >= MAX_RETRY_COUNT) {
+    // 达到最大重试次数，停止轮询
+    stopPolling(row)
+    ElMessage.error(`${errorMessage}，已重试 ${MAX_RETRY_COUNT} 次，停止轮询`)
+    return
+  }
+  
+  // 增加重试次数
+  pollingRetries.value.set(missionKey, currentRetries + 1)
+  
+  // 延时后重试
+  setTimeout(() => {
+    // 检查任务是否仍在拉取中（可能已被停止）
+    if (pullingMissions.value.has(missionKey)) {
+      pollPullStatus(row)
+    }
+  }, RETRY_DELAY)
+  
+  // 只在第一次失败时提示用户
+  if (currentRetries === 0) {
+    ElMessage.warning(`${errorMessage}，将在 ${RETRY_DELAY / 1000} 秒后重试（最多重试 ${MAX_RETRY_COUNT} 次）`)
+  }
+}
+
 const handlePullMission = async (row: Mission) => {
+  const missionKey = getMissionKey(row)
+  
+  // 如果已经在拉取中，不重复操作
+  if (pullingMissions.value.has(missionKey)) {
+    return
+  }
+  
   try {
     const res = await http.post(`/EVE/asset/pullAssetNow`, {
       asset_owner_type: row.subject_type,
       asset_owner_id: row.subject_id
     })
-    await res.json()
-    ElMessage.success('已拉取任务')
-    fetchMissions()
+    const data = await res.json()
+    if (res.status !== 200) {
+      ElMessage.error('拉取任务失败')
+      return
+    }
+
+    // 标记任务为正在拉取
+    pullingMissions.value.add(missionKey)
+    
+    // 初始化进度为 0
+    const mission = missions.value.find(m => 
+      m.subject_type === row.subject_type && m.subject_id === row.subject_id
+    )
+    if (mission) {
+      mission.pull_status = 0
+    }
+    
+    // 启动轮询，每 2 秒查询一次进度
+    const intervalId = window.setInterval(() => {
+      pollPullStatus(row)
+    }, 2000)
+    pollingIntervals.value.set(missionKey, intervalId)
+    
+    // 立即执行一次查询
+    pollPullStatus(row)
+    
+    ElMessage.success('已开始拉取任务')
   } catch (e) {
     ElMessage.error('拉取任务失败')
+    // 如果失败，确保不标记为正在拉取
+    pullingMissions.value.delete(missionKey)
   }
 }
 
@@ -219,7 +391,14 @@ const handleCreateMission = async () => {
 }
 
 // 检查是否可以立刻拉取（距离上次拉取超过5分钟，或者从未拉取过）
-const canPullNow = (lastPullTime: string | null | undefined): boolean => {
+const canPullNow = (row: Mission): boolean => {
+  // 如果任务正在拉取中，不能再次拉取
+  const missionKey = getMissionKey(row)
+  if (pullingMissions.value.has(missionKey)) {
+    return false
+  }
+  
+  const lastPullTime = row.last_pull_time
   if (!lastPullTime) {
     return true // 从未拉取过，可以立刻拉取
   }
@@ -305,11 +484,19 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  // 清理定时器
+  // 清理时间更新定时器
   if (timeUpdateInterval !== null) {
     clearInterval(timeUpdateInterval)
     timeUpdateInterval = null
   }
+  
+  // 清理所有轮询定时器
+  pollingIntervals.value.forEach((intervalId) => {
+    clearInterval(intervalId)
+  })
+  pollingIntervals.value.clear()
+  pullingMissions.value.clear()
+  pollingRetries.value.clear()
 })
 
 </script>
@@ -338,27 +525,34 @@ onUnmounted(() => {
         </template>
       </el-table-column>
       <el-table-column label="主体名称" prop="subject_name" min-width="auto" />
-      <el-table-column label="是否启动" prop="is_active" width="110">
+      <el-table-column label="是否启动" prop="is_active" width="74">
         <template #default="{ row }">
           <el-tag type="success" v-if="row.is_active">已启动</el-tag>
           <el-tag type="default" v-else>未启动</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="上次拉取时间" prop="last_pull_time" min-width="100px">
+      <el-table-column label="上次拉取时间" prop="last_pull_time" width="190px">
         <template #default="{ row }">
           <span>{{ row.last_pull_time || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="拉取状态" prop="pull_status" width="200px">
-
+      <el-table-column label="拉取状态" prop="pull_status" width="250px">
+        <template #default="{ row }">
+          <div>
+            <el-progress :percentage="row.pull_status ?? 0" :indeterminate="row.is_indeterminate === undefined"/>
+            <div v-if="row.step_name" style="font-size: 12px; color: #909399; margin-top: 4px;">
+              {{ row.step_name }}
+            </div>
+          </div>
+        </template>
       </el-table-column>
       <el-table-column label="操作" width="300px" fixed="right">
         <template #default="{ row }">
           <!-- 立刻拉取 -->
           <!-- 如果上次拉取时间超过5分钟，或者从未拉取过，则可点击 -->
-          <el-tooltip :content="canPullNow(row.last_pull_time) ? '可以立刻拉取' : formatRemainingTime(getRemainingSeconds(row.last_pull_time))" placement="top">
+          <el-tooltip :content="canPullNow(row) ? '可以立刻拉取' : (isPulling(row) ? '正在拉取中...' : formatRemainingTime(getRemainingSeconds(row.last_pull_time)))" placement="top">
             <el-button 
-              v-if="canPullNow(row.last_pull_time)" 
+              v-if="canPullNow(row)" 
               size="small" 
               type="primary" 
               plain 

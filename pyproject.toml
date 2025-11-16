@@ -26,6 +26,7 @@ dependencies = [
     "sqlalchemy>=2.0.44",
     "thefuzz>=0.22.1",
     "tqdm>=4.67.1",
+    "watchfiles>=1.1.1",
     "werkzeug>=3.1.3",
 ]
 

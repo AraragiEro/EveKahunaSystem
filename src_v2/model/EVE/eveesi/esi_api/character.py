@@ -4,6 +4,8 @@ from ..esi_req_manager import esi_request
 from ..eveutils import get_request_async, OUT_PAGE_ERROR, parse_token
 from src_v2.core.utils import tqdm_manager
 
+from src_v2.core.database.connect_manager import redis_manager as rdm
+
 
 @esi_request
 async def character_character_id_skills(access_token, character_id, log=True):
@@ -55,7 +57,7 @@ async def characters_character_id_blueprints(access_token, character_id: int, pa
 
 
 @esi_request
-async def characters_character_assets(access_token, character_id: int, page: int=1, test=False, max_retries=3, log=True):
+async def characters_character_assets(access_token, character_id: int, page: int=1, test=False, max_retries=3, log=True, **kwargs):
     if not isinstance(access_token, str):
         ac_token = await access_token
     else:
@@ -65,23 +67,32 @@ async def characters_character_assets(access_token, character_id: int, page: int
         headers={"Authorization": f"Bearer {ac_token}"}, params={"page": page}, log=log, max_retries=max_retries,
         no_retry_code=[OUT_PAGE_ERROR]
     )
+    status_key = kwargs.get('status_key', None)
 
     if test or page != 1:
         if page != 1:
             await tqdm_manager.update_mission(f'characters_character_assets_{character_id}')
+            if status_key:
+                total_page = await rdm.r.hget(status_key, "total_page")
+                await rdm.r.hset(status_key, "step_progress", page / int(total_page or 0))
         return data
 
     await tqdm_manager.add_mission(f'characters_character_assets_{character_id}', pages)
+    
+    if status_key:
+        await rdm.r.hset(status_key, "total_page", pages)
+        await rdm.r.hset(status_key, "step_progress", 0)
     tasks = []
     data = [data]
-    for p in range(2, pages + 1):
-        tasks.append(asyncio.create_task(characters_character_assets(ac_token, character_id, p, test, max_retries, log)))
+
+    tasks = [
+        asyncio.create_task(characters_character_assets(ac_token, character_id, p, test, max_retries, log, status_key=status_key)) for p in range(2, pages + 1)
+    ]
     page_results = await asyncio.gather(*tasks)
-    for data_page in page_results:
-        data.append(data_page)
+    data.extend(page_results)
     await tqdm_manager.complete_mission(f'characters_character_assets_{character_id}')
 
-    return data
+    return data[0]
 
 @esi_request
 async def characters_character(character_id, log=True):

@@ -8,7 +8,8 @@ from math import ceil
 from src_v2.core.database.neo4j_models import MarketGroup
 from src_v2.core.database.neo4j_utils import Neo4jIndustryUtils as NIU
 from src_v2.core.database.neo4j_utils import Neo4jAssetUtils as NAU
-from src_v2.core.database.connect_manager import neo4j_manager, redis_manager, postgres_manager
+from src_v2.core.database.connect_manager import neo4j_manager, redis_manager as rdm, postgres_manager
+import src_v2.model.EVE.industry.blueprint as BPM
 from src_v2.core.database.kahuna_database_utils_v2 import (
     EveIndustryPlanDBUtils,
     EveIndustryPlanProductDBUtils,
@@ -163,6 +164,9 @@ class IndustryManager(metaclass=SingletonMeta):
 
     @classmethod
     async def calculate_plan(cls, op: ConfigFlowOperateCenter):
+        await rdm.r.set(op.total_progress_key, 0)
+        await rdm.r.hset(op.current_progress_key, mapping={"name": "开始计算", "progress": 0})
+
         user_id = op.user_name
         plan_name = op.plan_name
         plan_obj = await EveIndustryPlanDBUtils.select_by_user_name_and_plan_name(user_id, plan_name)
@@ -180,10 +184,27 @@ class IndustryManager(metaclass=SingletonMeta):
             })
         if not plan_data["products"]:
             raise KahunaException(f"计划 {plan_name} 没有添加产品")
+        
+        await rdm.r.hset(op.current_progress_key, mapping={"name": "删除计划", "progress": 100})
         await cls.delete_plan(plan_name, user_id)
+        await rdm.r.set(op.total_progress_key, 20)
+        
+        await rdm.r.hset(op.current_progress_key, mapping={"name": "创建计划节点", "progress": 100})
         await cls.create_plan_node(plan_data)
-        await cls.create_plan_tree(plan_data)
+        await rdm.r.set(op.total_progress_key, 40)
+
+        await rdm.r.hset(op.current_progress_key, mapping={"name": "创建计划树", "progress": 0})
+        await cls.create_plan_tree(plan_data, op)
+        await rdm.r.set(op.total_progress_key, 60)
+
+        await rdm.r.hset(op.current_progress_key, mapping={"name": "更新树状态", "progress": 0})
         await cls.update_plan_status(plan_name, user_id, op)
+        await rdm.r.set(op.total_progress_key, 80)
+
+        await rdm.r.hset(op.current_progress_key, mapping={"name": "数据汇总", "progress": 0})
+        result_data = await IndustryManager.get_plan_tableview_data(op)
+        await rdm.r.set(op.total_progress_key, 100)
+        return result_data
 
     @classmethod
     async def create_plan_node(cls, plan_data: dict):
@@ -215,13 +236,14 @@ class IndustryManager(metaclass=SingletonMeta):
         await NIU.merge_node("Plan", node_index, node_properties)
 
     @classmethod
-    async def create_plan_tree(cls, plan_data: dict):
+    async def create_plan_tree(cls, plan_data: dict, op: ConfigFlowOperateCenter):
         plan_name = plan_data["plan_name"]
         user_name = plan_data["user_name"]
         products = plan_data["products"]
         plan_user_dict = {"plan_name": plan_name, "user_name": user_name}
         counter = AsyncCounter()
 
+        last_progress = 0
         await tqdm_manager.add_mission(f"create_plan_{plan_name}", len(products))
         for product in products:
             # 将树连接到plan节点
@@ -236,10 +258,14 @@ class IndustryManager(metaclass=SingletonMeta):
                  "product_num": 1, "material_num": product["quantity"], "order_id": await counter.next_relation()},
                 "PlanBlueprint",
                 {**plan_user_dict, "type_id": product["product_type_id"]},
-                {**plan_user_dict, "type_id": product["product_type_id"]}
+                {**plan_user_dict, "type_id": product["product_type_id"], "order_id": await counter.next_node()}
             )
             await cls._create_plan_bp_tree(plan_user_dict, product, counter)
-            await tqdm_manager.update_mission(f"create_plan_{plan_name}", 1)
+            mission_count = await tqdm_manager.update_mission(f"create_plan_{plan_name}", 1)
+            now_progress = mission_count / len(products) * 100
+            if now_progress > last_progress + 10:
+                await rdm.r.hset(op.current_progress_key, mapping={"name": "创建计划树", "progress": now_progress})
+                last_progress = now_progress
 
             # index_root节点更新需求数量，更新状态为finished.
         await tqdm_manager.complete_mission(f"create_plan_{plan_name}")
@@ -284,21 +310,22 @@ class IndustryManager(metaclass=SingletonMeta):
         # 定义原材料大类
         material_type = ["矿石", "冰矿产物", "燃料块", "元素", "气云", "行星工业", "杂货"]
 
+        await rdm.r.hset(op.current_progress_key, mapping={"name": "获取路径数据", "progress": 100, "is_indeterminate": 1})
+        logger.info("收集路径深度")
         node_dict = {
             node['type_id']: node for node in await NIU.get_user_plan_node_with_distance(user_name, plan_name)
         }
 
-        # 更新关系中的数据
-        # 工作，材料需求
+
         job_deal_set = set()
-        stock_deal_set = set()
-        running_job_deal_set = set()
+        logger.info("收集关系数据")
         relations = await NIU.get_user_plan_relation(user_name, plan_name)
         await tqdm_manager.add_mission(f"收集关系数据 {plan_name}", len(relations))
+        last_progress = 0
         for relation in relations:
             relation_need_calculate = relation.get("need_calculate", None)
-            # if not relation['need_calculate']:
-            #     continue
+
+            # 汇总材料节点计算后真实需求数量【缺失】
             material_id = relation['material']
             product_id = relation['product']
             await tqdm_manager.update_mission(f"收集关系数据 {plan_name}", 1)
@@ -306,58 +333,40 @@ class IndustryManager(metaclass=SingletonMeta):
                 "quantity": node_dict[material_id].get('quantity', 0) + relation['quantity'],
                 "real_quantity": node_dict[material_id].get('real_quantity', 0) + relation['real_quantity'],
             })
-            # 考虑"root"节点情况
-            # if product_id in node_dict:
-                
-            # 每个节点考虑一次库存, 存储当前库存，统计流程数量,记录运行中的任务
-            # 考虑material库存, 每个 material_id 只处理一次
-            if material_id not in stock_deal_set:
-                stock_deal_set.add(material_id)
-                if plan_settings['considerate_asset']:
-                    material_assets_quantity = await op.get_type_assets_quantity(material_id)
-                    node_dict[material_id]["store_quantity"] = material_assets_quantity
-                    node_dict[material_id]["real_quantity"] = node_dict[material_id].get("real_quantity", 0) - material_assets_quantity
             
-            # 处理product库存 每个 product_id 只处理一次
-            if product_id not in stock_deal_set and product_id in node_dict:
-                stock_deal_set.add(product_id)
-                # 考虑库存
-                if plan_settings['considerate_asset']:
-                    product_assets_quantity = await op.get_type_assets_quantity(product_id)
-                    node_dict[product_id]["store_quantity"] = product_assets_quantity
-                    node_dict[product_id]["real_quantity"] = node_dict[product_id].get("real_quantity", 0) - product_assets_quantity
-            
+            # 汇总产品节点计算后真实任务数据【job】
             # 处理product任务 每个 (product_id, index_id) 只处理一次
             if (product_id, relation["index_id"]) not in job_deal_set and product_id in node_dict:
                 job_deal_set.add((product_id, relation["index_id"]))
                 if relation_need_calculate:
-                    job_list = json.loads(relation['job_list'])
-                    real_job_list = json.loads(relation['real_job_list'])
+                    real_job_list,job_list = op.work_list_cache[(product_id, relation["index_id"])]
                     node_dict[product_id].update({
                         "jobs": node_dict[product_id].get('jobs', 0) + sum(work['runs'] for work in job_list),
                         "real_jobs": node_dict[product_id].get('real_jobs', 0) + sum(work['runs'] for work in real_job_list),
+                        "real_job_list": node_dict[product_id].get('real_job_list', []) + real_job_list,
                     })
 
-            # 记录product运行中的任务, 每个 product_id 只处理一次
-            if plan_settings['considerate_running_job']:
-                if product_id not in running_job_deal_set and product_id in node_dict:
-                    running_job_deal_set.add(product_id)
-                    running_jobs = await op.get_running_job_count(product_id)
-                    unfinish_output = running_jobs * relation['product_num']
-                    node_dict[product_id]['running_jobs'] = f"{unfinish_output:,}({running_jobs}x{relation['product_num']})" if unfinish_output > 0 else 0
-        await tqdm_manager.complete_mission(f"收集关系数据 {plan_name}")
-
-        # 统计完缺失后，计算冗余量
-        await tqdm_manager.add_mission(f"计算冗余量 统计运行中任务 {plan_name}", len(node_dict))
+        # 获取库存和冗余
+        logger.info("获取库存和冗余")
         for node in node_dict.values():
-            node["real_quantity"] = node.get("real_quantity", 0)
-            node["redundant"] = - node["real_quantity"] if node["real_quantity"] < 0 else 0
-            node["real_quantity"] = node["real_quantity"] if node['real_quantity'] > 0 else 0
+            # 计算库存
+            type_id = node['type_id']
+            if plan_settings['considerate_asset']:
+                product_assets_quantity = await op.get_type_assets_quantity(type_id)
+                node["store_quantity"] = product_assets_quantity
+                node['real_quantity'] -= product_assets_quantity
 
-            await tqdm_manager.update_mission(f"计算冗余量 统计运行中任务 {plan_name}", 1)
-        await tqdm_manager.complete_mission(f"计算冗余量 统计运行中任务 {plan_name}")
+            # 计算运行中任务产物
+            if plan_settings['considerate_running_job']:
+                running_jobs = await op.get_running_job_count(type_id)
+                unfinish_output = running_jobs * await BPM.get_bp_product_quantity_typeid(type_id)
+                node['real_quantity'] -= unfinish_output
+                node['running_jobs'] = f"{unfinish_output:,}({running_jobs}x{await BPM.get_bp_product_quantity_typeid(type_id)})" if unfinish_output > 0 else 0
+
+            node["redundant"] = - node['real_quantity'] if node['real_quantity'] < 0 else 0
 
         # 根据距离根节点的距离分类
+        logger.info("根据距离根节点的距离分类")
         distance_list = list(set([node['max_distance'] for node in node_dict.values()]))
         distance_list.sort()
         flow_output = [
@@ -372,6 +381,7 @@ class IndustryManager(metaclass=SingletonMeta):
                 "children": []
             } for t in material_type
         }
+        work_flow = []
         await tqdm_manager.add_mission(f"分类节点 {plan_name}", len(node_dict))
         for node in node_dict.values():
             node['tpye_name_zh'] = SdeUtils.get_cn_name_by_id(node['type_id'])
@@ -380,12 +390,40 @@ class IndustryManager(metaclass=SingletonMeta):
                 material_output[material_type_node]['children'].append(node)
             else:
                 flow_output[node['max_distance'] - 1]["children"].append(node)
-            await tqdm_manager.update_mission(f"分类节点 {plan_name}", 1)
-        await tqdm_manager.complete_mission(f"分类节点 {plan_name}")
+            mission_count = await tqdm_manager.update_mission(f"分类节点 {plan_name}", 1)
+            now_progress = mission_count / len(node_dict) * 100
+            if now_progress / 3 + 66 > last_progress + 10:
+                last_progress = now_progress
+            
+            # 整理工作流输出
+            logger.info("整理工作流输出")
+            await rdm.r.hset(op.current_progress_key, mapping={"name": "整理工作流输出", "progress": 100, "is_indeterminate": 1})
+            work_flow.extend([{
+                    "type_id": work["type_id"],
+                    "type_name_zh": SdeUtils.get_cn_name_by_id(work["type_id"]),
+                    "type_name": SdeUtils.get_name_by_id(work["type_id"]),
+                    "avaliable": work["avaliable"],
+                    "runs": work["runs"],
+                    "bp_object": work["bp_object"],
+                    "type_order_id": node["order_id"],
+                } for work in node.get("real_job_list", []) if work
+            ])
+
+
+        # TODO 获取材料报价
+        await rdm.r.hset(op.current_progress_key, mapping={"name": "获取材料报价", "progress": 50, "is_indeterminate": 1})
+        
+        # for marterial_type, material_nodes in material_output.items():
+        #     for material_node in material_nodes:
+        #         material_node.update({
+        #             "purchase_price": None
+        #         })
 
         return {
             "flow_output": flow_output,
-            "material_output": [material_output[t] for t in material_type]
+            "material_output": [material_output[t] for t in material_type],
+            "work_flow": work_flow,
+            "purchase_output": None
         }
 
     @staticmethod
@@ -488,7 +526,8 @@ class IndustryManager(metaclass=SingletonMeta):
             # 从Blueprint节点复制属性，但添加plan_user_dict的属性
             plan_bp_properties = {
                 **plan_user_dict,
-                **node_props
+                **node_props,
+                "order_id": await counter.next_node()
             }
             
             tasks.append(
@@ -603,23 +642,27 @@ class IndustryManager(metaclass=SingletonMeta):
         all_index_real_quantity = sum([relation['relation']['real_quantity'] for relation in product_node_in_relation])
         self_index_quantity = sum([relation['relation']['quantity'] for relation in product_node_in_relation if relation['relation']['index_id'] == self_index_id])
         self_index_real_quantity = sum([relation['relation']['real_quantity'] for relation in product_node_in_relation if relation['relation']['index_id'] == self_index_id])
+        
+        # 保存未处理的需求数量用于后期计算冗余
+        if product_type_id not in op.node_need_quantity:
+            op.node_need_quantity[product_type_id] = all_index_quantity
 
         # 对real_quantity进行处理，去掉库存和生产数量
         # quantity 代表总需求， real_quantity代表从上层传导下来的实际需求， 用quantity减去real是缺失
  
-        # 库存 数量处理 ==============================================================================================
+        # 库存 数量处理 每个(product_type_id, index)只计算一次 ==============================================================================================
         
         if plan_settings['considerate_asset']:
-            self_index_real_quantity = await op.deal_asset_quantity(self_index_real_quantity, product_type_id, self_index_id)
             all_index_real_quantity -= await op.get_type_assets_quantity(product_type_id)
+            self_index_real_quantity = await op.deal_asset_quantity(self_index_real_quantity, product_type_id, self_index_id)
         #     product_asset_quantity = await op.get_type_assets_quantity(product_type_id)
         #     self_index_real_quantity = self_index_real_quantity - product_asset_quantity
 
-        # 运行中任务生产 数量处理 ==============================================================================================
+        # 运行中任务生产 数量处理 每个(product_type_id, index)只计算一次 ==============================================================================================
         
         if plan_settings['considerate_running_job']:
+            all_index_real_quantity -= await op.get_running_job_count(product_type_id) * await BPM.get_bp_product_quantity_typeid(product_type_id)
             self_index_real_quantity = await op.deal_running_job_quantity(self_index_real_quantity, product_type_id, self_index_id)
-            all_index_real_quantity -= await op.get_running_job_count(product_type_id)
         #     running_jobs_runs = await op.get_running_job_count(product_type_id)
         #     running_jobs_unfinish_output = running_jobs_runs * self_relation['product_num']
         #     self_index_real_quantity = self_index_real_quantity - running_jobs_unfinish_output
@@ -636,59 +679,80 @@ class IndustryManager(metaclass=SingletonMeta):
         min_all_index_real_quantity_work = ceil(all_index_real_quantity / self_relation['product_num'])
         min_self_index_quantity_work = ceil((self_index_quantity - last_order_index_remain) / self_relation['product_num'])
         min_self_index_real_quantity_work = ceil((self_index_real_quantity - last_order_index_real_remain) / self_relation['product_num'])
+        if product_type_id not in op.set_uped_jobs:
+            op.set_uped_jobs[product_type_id] = min_all_index_real_quantity_work
         # 剩余未分配流程
         if order_index == 0:
             real_all_index_remain_work = min_all_index_real_quantity_work
         else:
             real_all_index_remain_work = same_route_relations[order_index-1]['relation']['real_work_remain']
 
-        # 根据配置 切分工作流 or 不切分 ==============================================================================================
+        # 获取效率 ==============================================================================================
+        mater_eff, time_eff = await op.get_efficiency(product_type_id)
+        fake_mater_eff, fake_time_eff = await op.get_conf_eff(product_type_id)
+
+        # 根据配置 切分工作流 or 不切分 每个(product_type_id, index)只计算一次 ==============================================================================================
         real_work_list = []
-        if plan_settings['split_to_jobs']:
-            max_job_run = await op.get_max_job_run(product_type_id)
+        if (product_type_id, self_index_id) not in op.work_list_cache:
+            op.work_list_cache[(product_type_id, self_index_id)] = ([], [])
+            if plan_settings['split_to_jobs']:
+                max_job_run = await op.get_max_job_run(product_type_id)
 
 
-            real_work_waiting_to_split = min_self_index_real_quantity_work
-            while real_work_waiting_to_split > 0:
-                # 决定本轮需要安排的流程数
-                #   如果考虑蓝图，向op申请一张蓝图对象
-                #   如果不考虑蓝图，申请一张假原图对象
+                real_work_waiting_to_split = min_self_index_real_quantity_work
+                while real_work_waiting_to_split > 0:
+                    # 决定本轮需要安排的流程数
+                    #   如果考虑蓝图，向op申请一张蓝图对象
+                    #   如果不考虑蓝图，申请一张假原图对象
 
-                #   如果是whole, 取min(蓝图支持的流程， min_all_index_real_quantity_work, max_job_run)
-                #   如果是in_order, 取min(蓝图支持的流程， real_work_waiting_to_split, max_job_run)
-                #       如果bpc不切分，则上两个min不考虑max_job_run
-                bp = await op.get_bp_object(product_type_id, plan_settings['considerate_bp_relation'])
+                    #   如果是whole, 取min(蓝图支持的流程， min_all_index_real_quantity_work, max_job_run)
+                    #   如果是in_order, 取min(蓝图支持的流程， real_work_waiting_to_split, max_job_run)
+                    #       如果bpc不切分，则上两个min不考虑max_job_run
+                    bp = await op.get_bp_object(product_type_id, real_work_waiting_to_split, plan_settings['considerate_bp_relation'])
 
-                if bp['fake'] or bp["quantity"] == -1:
-                    bp_support_runs = max_job_run
-                else:
-                    bp_support_runs = bp["runs"]
-                if plan_settings["full_use_bp_cp"] and bp["runs"] != -1:
-                    max_job_run = bp_support_runs
+                    if bp['fake'] or bp["runs"] < 0:
+                        bp_support_runs = max_job_run
+                    else:
+                        bp_support_runs = bp["runs"]
 
-                if plan_settings["work_type"] == "whole":
-                    this_round_work = min(bp_support_runs, real_all_index_remain_work, max_job_run)
-                elif plan_settings["work_type"] == "in_order":
-                    this_round_work = min(bp_support_runs, real_work_waiting_to_split, max_job_run)
+                    if plan_settings["full_use_bp_cp"] and bp["runs"] > 0:
+                        max_job_run = bp_support_runs
 
-                real_work_list.append({
+                    if plan_settings["work_type"] == "whole":
+                        this_round_work = min(bp_support_runs, op.set_uped_jobs[product_type_id], max_job_run)
+                    elif plan_settings["work_type"] == "in_order":
+                        this_round_work = min(bp_support_runs, real_work_waiting_to_split, max_job_run)
+
+                    real_work_list.append({
+                        "type_id": product_type_id,
+                        "runs": this_round_work,
+                        "bp_object": bp,
+                        "mater_eff": mater_eff * (fake_mater_eff if bp['fake'] else (1 - 0.01 * bp['material_efficiency'])),
+                        "time_eff": time_eff * (fake_time_eff if bp['fake'] else (1 - 0.01 * bp['time_efficiency'])),
+                    })
+                    real_work_waiting_to_split -= this_round_work
+                    op.set_uped_jobs[product_type_id] -= this_round_work
+            else:
+                real_work_list = [{
                     "type_id": product_type_id,
-                    "runs": this_round_work,
-                    "bp_object": bp
-                })
-                real_work_waiting_to_split -= this_round_work
-                real_all_index_remain_work -= this_round_work
-        else:
-            real_work_list = [{
+                    "runs": min_self_index_real_quantity_work,
+                    "mater_eff": mater_eff * fake_mater_eff,
+                    "time_eff": time_eff * fake_time_eff,
+                    "bp_object": await op.get_bp_object(product_type_id, min_self_index_real_quantity_work, False)
+                }]
+            job_list = [{
                 "type_id": product_type_id,
-                "runs": min_self_index_real_quantity_work,
-                "bp_object": await op.get_bp_object(product_type_id, False)
+                "runs": min_self_index_quantity_work,
+                "mater_eff": mater_eff * fake_mater_eff,
+                "time_eff": time_eff * fake_time_eff,
+                "bp_object": await op.get_bp_object(product_type_id, min_self_index_quantity_work, False)
             }]
-        job_list = [{
-            "type_id": product_type_id,
-            "runs": min_self_index_quantity_work,
-            "bp_object": await op.get_bp_object(product_type_id, False)
-        }]
+            await op.calculate_work_material_avaliable(real_work_list)
+            op.work_list_cache[(product_type_id, self_index_id)] = [real_work_list, job_list]
+        else:
+            while op.work_list_cache[(product_type_id, self_index_id)] == ([], []):
+                await asyncio.sleep(0.1)
+            real_work_list, job_list = op.work_list_cache[(product_type_id, self_index_id)]
 
         # 计算多余数量 ==============================================================================================
         real_product_quantity = self_relation['product_num'] * sum([work['runs'] for work in real_work_list])
@@ -697,26 +761,31 @@ class IndustryManager(metaclass=SingletonMeta):
         self_real_product_remain = real_product_quantity - self_index_real_quantity + last_order_index_real_remain
 
         # 根据系数计算工作流需要的材料数量 ==============================================================================================
-        mater_eff, time_eff = await op.get_efficiency(product_type_id)
-        fake_mater_eff, fake_time_eff = await op.get_conf_eff(product_type_id)
 
-        real_quantity_material_need_list = [
-            ceil(
-                work['runs'] * self_relation['material_num'] * mater_eff *
-                (fake_mater_eff if work['bp_object']['fake'] else (1 - 0.01 * work['bp_object']['material_efficiency']))
-            ) for work in real_work_list
-        ]
+        real_quantity_material_need_list = []
+        for work in real_work_list:
+            real_quantity_material_need_list.append(
+                ceil(
+                    work['runs'] * self_relation['material_num'] * (1 if self_relation['material_num'] == 1 else work['mater_eff'])
+                )
+            )
+            logger.debug(f"real_quantity_material_need_list: {real_quantity_material_need_list}")
+        # real_quantity_material_need_list = [
+        #     ceil(
+        #         work['runs'] * self_relation['material_num'] * (1 if self_relation['material_num'] == 1 else 
+        #         (mater_eff * (fake_mater_eff if work['bp_object']['fake'] else (1 - 0.01 * work['bp_object']['material_efficiency']))))
+        #     ) for work in real_work_list
+        # ]
         activety_time = await BPM.get_production_time(product_type_id)
         real_quantity_time_need_list = [
             ceil(
-                work['runs'] * activety_time * time_eff *
-                (fake_time_eff if work['bp_object']['fake'] else (1 - 0.01 * work['bp_object']['time_efficiency']))
+                work['runs'] * activety_time * work["time_eff"]
             ) for work in real_work_list
         ]
         quantity_material_need_list = [
             ceil(
-                work['runs'] * self_relation['material_num'] * mater_eff *
-                (fake_mater_eff if work['bp_object']['fake'] else (1 - 0.01 * work['bp_object']['material_efficiency']))
+                # 有点绕
+                work['runs'] * self_relation['material_num'] * (1 if self_relation['material_num'] == 1 else work['mater_eff'])
             ) for work in job_list
         ]
         quantity_material_need = sum(quantity_material_need_list)
@@ -743,8 +812,6 @@ class IndustryManager(metaclass=SingletonMeta):
                 "product_remain": self_product_remain,
                 "real_product_remain": self_real_product_remain,
                 "real_work_remain": real_all_index_remain_work,
-                "job_list": json.dumps(job_list),
-                "real_job_list": json.dumps(real_work_list),
                 "status": "complete",
                 "need_calculate": True
             }
@@ -817,6 +884,7 @@ class IndustryManager(metaclass=SingletonMeta):
         await tqdm_manager.add_mission("relation_moniter_process", len(all_relation_list))
         
         # finished_relation_set = set()
+        last_progress = 0
         while not await cls._is_update_complete(user_name, plan_name):
             check_tasks = [
                 asyncio.create_task(cls._is_relation_calculate_avaliable(relation)) for relation in all_relation_list
@@ -829,6 +897,11 @@ class IndustryManager(metaclass=SingletonMeta):
             ]
             await asyncio.gather(*calculate_tasks)
             all_relation_list = await NIU.get_relations("PLAN_BP_DEPEND_ON", {"user_name": user_name, "plan_name": plan_name})
+            mission_count = await tqdm_manager.get_mission_count("relation_moniter_process")
+            now_progress = mission_count / len(all_relation_list) * 100
+            if now_progress > last_progress + 10:
+                await rdm.r.hset(op.current_progress_key, mapping={"name": "更新树状态", "progress": now_progress})
+                last_progress = now_progress
         await tqdm_manager.complete_mission("relation_moniter_process")
         logger.info(f"plan {plan_name} status update complete")
 
@@ -883,11 +956,11 @@ class IndustryManager(metaclass=SingletonMeta):
                 owner = await eveesi.corporations_corporation_id(pull_mission.asset_owner_id)
                 owner_name = owner['name']
             system_info = SdeUtils.get_system_info_by_id(container.system_id)
-            structure_info_cache = await redis_manager.redis.hgetall(f'eveesi:universe_structures_structure:{container.structure_id}')
+            structure_info_cache = await rdm.redis.hgetall(f'eveesi:universe_structures_structure:{container.structure_id}')
             if not structure_info_cache:
                 structure_info_cache = await eveesi.universe_structures_structure(access_character.ac_token, container.structure_id)
                 structure_info_cache.pop("position")
-                await redis_manager.redis.hset(f'eveesi:universe_structures_structure:{container.structure_id}', mapping=structure_info_cache)
+                await rdm.redis.hset(f'eveesi:universe_structures_structure:{container.structure_id}', mapping=structure_info_cache)
             
             container = {
                 "asset_owner_id": container.asset_owner_id,
@@ -919,7 +992,6 @@ class IndustryManager(metaclass=SingletonMeta):
     @classmethod
     async def get_structure_assign_keyword_suggestions(cls, assign_type: str):
         output = []
-        SdeUtils
         if assign_type == 'group':
             output.extend([{"value": res.groupName, "label": res.groupName} for res in InvGroups.select(InvGroups.groupName)])
             output.extend([{"value": res.groupName, "label": res.groupName} for res in InvGroups_zh.select(InvGroups_zh.groupName)])
@@ -960,6 +1032,41 @@ class IndustryManager(metaclass=SingletonMeta):
         config_obj.config_type = data['config_type']
         config_obj.config_value = data['config_value']
         await EveIndustryPlanConfigFlowConfigDBUtils.save_obj(config_obj)
+
+    @classmethod
+    async def fetch_recommended_presets(cls, user_id: str):
+        from .config import DEFAULT_MATERIAL_CONFIG, DEFAULT_BLUEPRINT_CONFIG
+
+        for config in DEFAULT_MATERIAL_CONFIG:
+            config_obj = EveIndustryPlanConfigFlowConfigDBUtils.get_obj()
+            config_obj.user_name = user_id
+            config_obj.config_type = config['config_type']
+            config_obj.config_value = config['config_value']
+            await EveIndustryPlanConfigFlowConfigDBUtils.save_obj(config_obj)
+        for config in DEFAULT_BLUEPRINT_CONFIG:
+            config_obj = EveIndustryPlanConfigFlowConfigDBUtils.get_obj()
+            config_obj.user_name = user_id
+            config_obj.config_type = config['config_type']
+            config_obj.config_value = config['config_value']
+            await EveIndustryPlanConfigFlowConfigDBUtils.save_obj(config_obj)
+
+    @classmethod
+    async def delete_config_flow_config(cls, user_id: str, data):
+        config_id = data['config_id']
+        config_obj = await EveIndustryPlanConfigFlowConfigDBUtils.select_by_id(config_id)
+        if not config_obj:
+            raise KahunaException(f"配置不存在")
+
+        user_config_list = []
+        async for config in await EveIndustryPlanConfigFlowDBUtils.select_all_by_user_name(user_id):
+            user_config_list.append(config)
+        async with postgres_manager.get_session() as session:
+            for config_list in user_config_list:
+                if config_id in config_list.config_list:
+                    config_list.config_list.remove(config_id)
+                    await EveIndustryPlanConfigFlowDBUtils.merge(config_list, session)
+
+            await EveIndustryPlanConfigFlowConfigDBUtils.delete_obj(config_obj)
 
     @classmethod
     async def get_config_flow_config_list(cls, user_id: str):

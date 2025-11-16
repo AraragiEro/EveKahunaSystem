@@ -72,6 +72,20 @@ const addConfigToPlan = async (config: PlanConfigObject) => {
     // configFlowManagementVisible.value = false
 }
 
+const deleteConfigFlowConfig = async (configId: number) => {
+    const res = await http.post('/EVE/industry/deleteConfigFlowConfig', {
+        config_id: configId
+    })
+    const data = await res.json()
+    if (data.status !== 200) {
+        ElMessage.error(data.message)
+        return
+    }
+    ElMessage.success(data.message)
+    getConfigFlowConfigList()
+    getConfigFlowList()
+}
+
 const saveConfigFlowToPlan = async () => {
     const res = await http.post('/EVE/industry/saveConfigFlowToPlan', {
         plan_name: props.selectedPlan,
@@ -96,6 +110,19 @@ const openConfigFlowManagement = () => {
 const createConfigDrawerVisible = ref(false)
 const openCreateConfigDrawer = () => {
     createConfigDrawerVisible.value = true
+}
+
+const fetchRecommendedPresetsLoading = ref(false)
+const fetchRecommendedPresets = async () => {
+    fetchRecommendedPresetsLoading.value = true
+
+    const res = await http.post('/EVE/industry/fetchRecommendedPresets', {
+        plan_name: props.selectedPlan
+    })
+    const data = await res.json()
+    console.log("fetchRecommendedPresets data", data)
+
+    fetchRecommendedPresetsLoading.value = false
 }
 
 interface KeywordGroup {
@@ -297,6 +324,7 @@ const suggestionFilter = (queryString: string) => {
 }
 
 const add_conf_group = (config_type: string) => {
+    console.log("add_conf_group config_type", config_type)
     if (config_type === 'StructureAssignConf') {
         configForm.value.StructureAssignConf.keyword_groups.push({
             index: configForm.value.StructureAssignConf.keyword_groups.length,
@@ -313,6 +341,13 @@ const add_conf_group = (config_type: string) => {
     else if (config_type === 'DefaultBlueprintConf') {
         configForm.value.DefaultBlueprintConf.keyword_groups.push({
             index: configForm.value.DefaultBlueprintConf.keyword_groups.length,
+            keyword: '',
+            keyword_type: ''
+        })
+    }
+    else if (config_type === 'MaxJobSplitCountConf') {
+        configForm.value.MaxJobSplitCountConf.keyword_groups.push({
+            index: configForm.value.MaxJobSplitCountConf.keyword_groups.length,
             keyword: '',
             keyword_type: ''
         })
@@ -379,6 +414,29 @@ const formatJsonTooltip = (value: any): string => {
     } catch (e) {
         // 如果不是有效的 JSON，返回原值
         return String(value)
+    }
+}
+
+const formatConfigValue = (row_data: any): string => {
+    if (row_data.config_type === 'DefaultBlueprintConf') {
+        const keywords = row_data.config_value.keyword_groups.map((group: any) => `${group.keyword}(${group.keyword_type})`).join(', ') || 'N/A'
+        return `关键词组: ${keywords}, 时间效率: ${row_data.config_value.time_eff}, 材料效率: ${row_data.config_value.mater_eff}`
+    } else if (row_data.config_type === 'StructureRigConfig') {
+        return `建筑: ${row_data.config_value.structure_name}, 时间效率等级: ${row_data.config_value.time_eff_level}, 材料效率等级: ${row_data.config_value.mater_eff_level}`
+    } else if (row_data.config_type === 'StructureAssignConf') {
+        const keywords = row_data.config_value.keyword_groups.map((group: any) => `${group.keyword}(${group.keyword_type})`).join(', ') || 'N/A'
+        return `建筑: ${row_data.config_value.structure_name}, 关键词组: ${keywords}`
+    } else if (row_data.config_type === 'MaterialTagConf') {
+        const keywords = row_data.config_value.keyword_groups.map((group: any) => `${group.keyword}(${group.keyword_type})`).join(', ') || 'N/A'
+        return `原材料标记: ${keywords}`
+    } else if (row_data.config_type === 'LoadAssetConf') {
+        return `库存许可: ${row_data.config_value.tag}`
+    } else if (row_data.config_type === 'MaxJobSplitCountConf') {
+        const keywords = row_data.config_value.keyword_groups.map((group: any) => `${group.keyword}(${group.keyword_type})`).join(', ') || 'N/A'
+        return `作业类型: ${keywords}, 判断类型: ${row_data.config_value.judge_type}, 最大数量: ${row_data.config_value.max_count}, 最大时间: ${row_data.config_value.max_time_day}天${row_data.config_value.max_time_date}`
+    }
+    else {
+        return String(row_data.config_value)
     }
 }
 
@@ -454,6 +512,9 @@ watch(
             <el-button @click="openCreateConfigDrawer">
                 创建配置
             </el-button>
+            <el-button @click="fetchRecommendedPresets" :loading="fetchRecommendedPresetsLoading">
+                拉取推荐预设
+            </el-button>
         </div>
         <div>
             <el-table
@@ -472,18 +533,21 @@ watch(
                             :raw-content="true"
                         >
                             <template #content>
-                                <pre class="json-tooltip-content">{{ formatJsonTooltip(row.config_value) }}</pre>
+                                <pre class="json-tooltip-content">{{ formatConfigValue(row) }}</pre>
                             </template>
                             <div class="config-value-cell">
-                                {{ formatJsonDisplay(row.config_value) }}
+                                {{ formatConfigValue(row) }}
                             </div>
                         </el-tooltip>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" prop="action">
+                <el-table-column label="操作" prop="action" width="220px">
                     <template #default="{ row }">
                         <el-button type="primary" plain @click="addConfigToPlan(row)" :disabled="isConfigInPlan(row.config_id)">
                             添加到计划{{ props.selectedPlan }}
+                        </el-button>
+                        <el-button type="primary" plain @click="deleteConfigFlowConfig(row.config_id)">
+                            删除
                         </el-button>
                     </template>
                 </el-table-column>

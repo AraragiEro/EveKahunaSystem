@@ -1,7 +1,8 @@
+import asyncio
 from quart import Blueprint, jsonify, request, g
 from src_v2.backend.auth import auth_required
 from src_v2.backend.api.permission_required import permission_required
-from src_v2.core.permission.permission_manager import permission_manager
+from src_v2.core.permission.permission_manager import permission_manager, rdm
 from src_v2.model.EVE.character.character_manager import CharacterManager
 from src_v2.model.EVE.character.character import Character
 from src_v2.core.user.user_manager import UserManager
@@ -158,6 +159,37 @@ async def delete_asset_pull_mission():
     await EveAssetPullMissionDBUtils.delete_obj(mission_obj)
     return jsonify({'code': 200, 'message': '删除成功'})
 
+async def start_pull_asset_now(asset_owner_type: str, asset_owner_id: int):
+    asset_status_key = f'asset_pull_mission_status:{asset_owner_type}:{asset_owner_id}'
+    await rdm.r.hset(asset_status_key, mapping={
+        'status': 'pulling',
+        'total_page': 0,
+        'finished_page': 0,
+        "step_name": "",
+        "step_progress": 0,
+        "is_indeterminate": 0
+    })
+    try:
+        await AssetManager().pull_asset_now(asset_owner_type, asset_owner_id)
+        await rdm.r.hset(asset_status_key, mapping={
+            'status': 'success',
+            'total_page': 0,
+            'finished_page': 0,
+            "step_name": "",
+            "step_progress": 0,
+            "is_indeterminate": 0
+        })
+    except Exception as e:
+        await rdm.r.hset(asset_status_key, mapping={
+            'status': 'failed',
+            'total_page': 0,
+            'finished_page': 0,
+            "step_name": "",
+            "step_progress": 0,
+            "is_indeterminate": 0
+        })
+        raise e
+
 @api_EVE_asset_bp.route('/pullAssetNow', methods=['POST'])
 @auth_required
 async def pull_asset_now():
@@ -165,11 +197,28 @@ async def pull_asset_now():
     asset_owner_type = data.get('asset_owner_type')
     asset_owner_id = data.get('asset_owner_id')
 
-    try:
-        await AssetManager().pull_asset_now(asset_owner_type, asset_owner_id)
-    except Exception as e:
-        return jsonify({'code': 400, 'message': str(e)})
-    return jsonify({'code': 200, 'message': '拉取成功'})
+    asyncio.create_task(start_pull_asset_now(asset_owner_type, asset_owner_id))
+
+    return jsonify({'code': 200, 'message': '任务启动成功'}), 200
+
+@api_EVE_asset_bp.route('/getAssetPullMissionStatus', methods=['POST'])
+@auth_required
+async def get_asset_pull_mission_status():
+    user_id = g.current_user["user_id"]
+    data = await request.json
+    asset_owner_type = data.get('asset_owner_type')
+    asset_owner_id = data.get('asset_owner_id')
+    
+    asset_status_key = f'asset_pull_mission_status:{asset_owner_type}:{asset_owner_id}'
+
+    status = await rdm.r.hget(asset_status_key, "status")
+    step_name = await rdm.r.hget(asset_status_key, "step_name")
+    step_progress = await rdm.r.hget(asset_status_key, "step_progress")
+    is_indeterminate = await rdm.r.hget(asset_status_key, "is_indeterminate")
+
+    logger.info(f"'status': {status}, 'step_name': {step_name}, 'step_progress': {step_progress}")
+    return jsonify({'code': 200, 'data': {'status': status, 'step_name': step_name, 'step_progress': step_progress, 'is_indeterminate': is_indeterminate}})
+
 
 @api_EVE_asset_bp.route('/searchContainerByItemNameAndQuantity', methods=['POST'])
 @auth_required

@@ -11,9 +11,20 @@ from src_v2.core.database.kahuna_database_utils_v2 import (
     UserDataDBUtils
 )
 from src_v2.core.database.connect_manager import postgres_manager, redis_manager
-from src_v2.core.database.model import User as M_User
-from src_v2.core.database.model import UserData as M_UserData
-from src_v2.core.database.kahuna_database_utils_v2 import EveAuthedCharacterDBUtils
+from sqlalchemy import delete
+from src_v2.core.database.model import (
+    User as M_User,
+    UserData as M_UserData,
+    InvitCode as M_InvitCode,
+    UserRoles as M_UserRoles,
+    UserPermissions as M_UserPermissions,
+    EveAuthedCharacter as M_EveAuthedCharacter,
+    EveAliasCharacter as M_EveAliasCharacter
+)
+from src_v2.core.database.kahuna_database_utils_v2 import (
+    EveAuthedCharacterDBUtils,
+    EveAliasCharacterDBUtils
+)
 from src_v2.core.database.kahuna_database_utils_v2 import EveAliasCharacterDBUtils
 from src_v2.core.database.model import EveAliasCharacter as M_EveAliasCharacter
 from src_v2.core.log import logger
@@ -137,6 +148,22 @@ class UserManager(metaclass=SingletonMeta):
         async with postgres_manager.get_session() as session:
             # 删除userdata
             await UserDataDBUtils.delete_user_data_by_user_name(user_name, session=session)
+            # 删除以下表格的用户数据
+            # InvitCode
+            async with postgres_manager.get_session() as session:
+                stmt_invit_code = delete(M_InvitCode).where(M_InvitCode.user_name == user_name)
+                await session.execute(stmt_invit_code)  # type: ignore
+                # UserRoles
+                stmt_user_roles = delete(M_UserRoles).where(M_UserRoles.user_name == user_name)
+                await session.execute(stmt_user_roles)  # type: ignore
+                # UserPermissions
+                stmt_user_permissions = delete(M_UserPermissions).where(M_UserPermissions.user_name == user_name)
+                await session.execute(stmt_user_permissions)  # type: ignore
+
+                # EveAuthedCharacter
+                stmt_eve_authed_character = delete(M_EveAuthedCharacter).where(M_EveAuthedCharacter.owner_user_name == user_name)
+                await session.execute(stmt_eve_authed_character)  # type: ignore
+
             # 删除user
             await UserDBUtils.delete_user_by_user_username(user_name, session=session)
         

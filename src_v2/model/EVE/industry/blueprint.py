@@ -10,6 +10,8 @@ from src_v2.core.database.neo4j_utils import Neo4jIndustryUtils as NIU
 from src_v2.core.database.connect_manager import neo4j_manager
 from src_v2.core.utils import tqdm_manager
 
+from src_v2.core.log import logger
+
 # 限制并发任务数量的信号量，防止连接池耗尽
 # 设置为 50，确保不超过连接池大小（200）的合理比例
 
@@ -89,6 +91,7 @@ class BPManager:
                 (IndustryActivityProducts.blueprintTypeID != 45732)
             ).get().quantity
         except DoesNotExist:
+            logger.error(f"get_bp_product_quantity_typeid: {type_id} not found")
             product_quantity = 1  # 或者你想要的默认值
 
         return product_quantity

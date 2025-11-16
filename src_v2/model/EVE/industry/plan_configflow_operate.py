@@ -1,5 +1,6 @@
 import asyncio
 import json
+from math import ceil
 from src_v2.core.database.kahuna_database_utils_v2 import (
     EveAssetPullMissionDBUtils,
     EveIndustryPlanConfigFlowDBUtils,
@@ -13,6 +14,7 @@ from src_v2.model.EVE.character.character_manager import CharacterManager
 from src_v2.core.user.user_manager import UserManager
 from src_v2.core.database.kahuna_database_utils_v2 import EveIndustryPlanDBUtils
 from src_v2.model.EVE.eveesi import eveesi
+from src_v2.model.EVE.industry.industry_manager import BPM
 from src_v2.model.EVE.sde import SdeUtils
 from src_v2.model.EVE.industry.blueprint import BPManager
 
@@ -23,17 +25,18 @@ bp_asset_prepare_lock = asyncio.Lock()
 asset_prepare_lock = asyncio.Lock()
 running_asset_prepare_lock = asyncio.Lock()
 
+from src_v2.core.log import logger
 
 NULL_MANU_SEC_BONUS = 2.1
 NULL_REAC_SEC_BONUS = 1.1
 
 RIG_MATER_EFF = {
-    1: 1 - 0.02 * NULL_MANU_SEC_BONUS,
-    2: 1 - 0.024 * NULL_MANU_SEC_BONUS,
+    1: 0.02,
+    2: 0.024
 }
 RIG_TIME_EFF = {
-    1: 1 - 0.2 * NULL_MANU_SEC_BONUS,
-    2: 1 - 0.24 * NULL_MANU_SEC_BONUS,
+    1: 0.2,
+    2: 0.24,
 }
 
 MANU_STRUCTURE_MATER_EFF = 1 - 0.01
@@ -45,7 +48,7 @@ LARGE_STRUCTURE_MANU_TIME_EFF = 1 - 0.3
 MID_STRUCTURE_REAC_TIME_EFF = 1 - 0.25
 SMALL_STRUCTURE_REAC_TIME_EFF = 0
 
-MANU_SKILL_TIME_EFF = 1 - 0.32
+MANU_SKILL_TIME_EFF = 1 - 0.354
 REAC_SKILL_TIME_EFF = 1 - 0.2
 
 # 默认蓝图材料效率
@@ -65,6 +68,8 @@ SMALL_COST_EFF = 0.03
 class ConfigFlowOperateCenter():
     def __init__(self, user_name: str, plan_name: str):
         # 同步初始化基本属性
+        self.total_progress_key = ""
+        self.current_progress_key = ""
         self.user_name = user_name
         self.plan_name = plan_name
         self.structure_rig_confs = []
@@ -80,6 +85,7 @@ class ConfigFlowOperateCenter():
 
         self._bp_prepare = False
         self._bp_asset = {}
+        self._bp_used = {}
 
         self._structure_info = {}
         self._node_type_dict = {}
@@ -87,12 +93,19 @@ class ConfigFlowOperateCenter():
         self._asset_prepare = False
         self._asset = {}
         self._asset_allocate = {}
+        self._material_allocate = {}
 
         self._running_asset_prepare = False
         self._running_asset = {}
         self._running_asset_allocate = {}
-
+        
         self.calculate_cache = {}
+
+        self.work_list_cache = {}
+
+        self.node_need_quantity = {}
+
+        self.set_uped_jobs = {}
 
     @classmethod
     async def create(cls, user_name: str, plan_name: str):
@@ -171,11 +184,8 @@ class ConfigFlowOperateCenter():
             running_job_list = []
             # 获取运行中的job
             for character_id in character_ids:
-                logger.debug(f"step 5.1.1")
                 character = await CharacterManager().get_character_by_character_id(character_id)
-                logger.debug(f"step 5.1.2")
                 jobs = await eveesi.characters_character_id_industry_jobs(character.ac_token, character_id)
-                logger.debug(f"step 5.1.3")
                 if not jobs:
                     continue
                 running_job_list.extend(jobs)
@@ -245,6 +255,8 @@ class ConfigFlowOperateCenter():
         if conf["judge_type"] == 'count':
             return conf['max_count']
         elif conf["judge_type"] == 'time':
+            _, time_eff = await self.get_efficiency(type_id)
+            _, fake_time_eff = await self.get_conf_eff(type_id)
             h, m ,s = conf["max_time_date"].split(":")
             day = conf["max_time_day"]
             max_time = day * 24 * 3600 + int(h) * 3600 + int(m) * 60 + int(s)
@@ -252,7 +264,7 @@ class ConfigFlowOperateCenter():
 
             # TODO 系数计算
 
-            return max_time // active_time
+            return max_time // (active_time * time_eff * fake_time_eff)
 
     async def get_relation_need_calculate(self, product_type_id: int):
         product_type = self._node_type_dict.get(product_type_id, None)
@@ -293,12 +305,13 @@ class ConfigFlowOperateCenter():
             bp_assets = {}
             # 获取运行中的job
             for character_id in character_ids:
-                assets_json = rds.r.get(f"bp_assets_cha_{character_id}")
+                assets_json = await rds.r.get(f"bp_assets_cha_{character_id}")
                 if not assets_json:
                     character = await CharacterManager().get_character_by_character_id(character_id)
                     assets = await eveesi.characters_character_id_blueprints(character.ac_token, character_id)
-                    rds.r.set(f"bp_assets_cha_{character_id}", json.dumps(assets), ex=15)
-                assets = json.loads(assets_json)
+                    await rds.r.set(f"bp_assets_cha_{character_id}", json.dumps(assets), ex=15)
+                else:
+                    assets = json.loads(assets_json)
                 for page in assets:
                     for bp in page:
                         if bp['location_id'] not in container_id_list:
@@ -316,11 +329,12 @@ class ConfigFlowOperateCenter():
 
             # 获取公司运行中的job
             if director:
-                assets_json = rds.r.get(f"bp_assets_cor_{director.corporation_id}")
+                assets_json = await rds.r.get(f"bp_assets_cor_{director.corporation_id}")
                 if not assets_json:
                     assets = await eveesi.corporations_corporation_id_blueprints(director.ac_token, director.corporation_id)
-                    rds.r.set(f"bp_assets_cor_{director.corporation_id}", json.dumps(assets), ex=15)
-                assets = json.loads(assets_json)
+                    await rds.r.set(f"bp_assets_cor_{director.corporation_id}", json.dumps(assets), ex=15)
+                else:
+                    assets = json.loads(assets_json)
                 for page in assets:
                     for bp in page:
                         if bp['location_id'] not in container_id_list:
@@ -339,7 +353,9 @@ class ConfigFlowOperateCenter():
             self._bp_asset = bp_assets
             self._bp_prepare = True
 
-    async def get_bp_object(self, type_id: int, considerate_bp_relation: bool):
+    async def get_bp_object(self, type_id: int, less_job_run: bool, considerate_bp_relation: bool):
+        if not self._bp_prepare:
+            await self.prepare_bp_asset()
         bp_type_id = await BPManager.get_bp_id_by_prod_typeid(type_id)
         
         fake_bp = {
@@ -358,9 +374,11 @@ class ConfigFlowOperateCenter():
             return fake_bp
         # 先用bpc
         bpc_list = self._bp_asset.get(bp_type_id, {}).get("bpc", [])
-        bpc_list.sort(key=lambda x: (x["runs"]), reverse=False)
+        bpc_list.sort(key=lambda x: (x["runs"]), reverse=True)
         for bpc in bpc_list:
-            if bpc["quantity"] > 0:
+            if less_job_run < bpc["runs"]:
+                continue
+            if self._bp_used.get(bpc["item_id"], 1) > 0:
                 res = {
                     "type_id": bp_type_id,
                     "item_id": bpc["item_id"],
@@ -372,14 +390,29 @@ class ConfigFlowOperateCenter():
                     "runs": bpc["runs"],
                     "fake": False
                 }
-                bpc["quantity"] -= 1
+                self._bp_used[bpc["item_id"]] = 0
+                return res
+        for bpc in reversed(bpc_list):
+            if self._bp_used.get(bpc["item_id"], 1) > 0:
+                res = {
+                    "type_id": bp_type_id,
+                    "item_id": bpc["item_id"],
+                    "location_flag": bpc["location_flag"],
+                    "location_id": bpc["location_id"],
+                    "material_efficiency": bpc["material_efficiency"],
+                    "time_efficiency": bpc["time_efficiency"],
+                    "quantity": bpc["quantity"],
+                    "runs": bpc["runs"],
+                    "fake": False
+                }
+                self._bp_used[bpc["item_id"]] = 0
                 return res
         
         # 再用bpo
         bpo_list = self._bp_asset.get(bp_type_id, {}).get("bpo", [])
-        bpo_list.sort(key=lambda x: (x["quantity"]), reverse=False)
-        for bpo in bpo_list:
-            if bpo["quantity"] > 0:
+        bpo_list.sort(key=lambda x: (x["quantity"]), reverse=True)
+        for index, bpo in enumerate(bpo_list):
+            if self._bp_used.get(bpo["item_id"], 1) > 0:
                 res = {
                     "type_id": bp_type_id,
                     "item_id": bpo["item_id"],
@@ -391,8 +424,15 @@ class ConfigFlowOperateCenter():
                     "runs": bpo["runs"],
                     "fake": False
                 }
-                bpo["quantity"] -= 1
+                if bpo["item_id"] not in self._bp_used:
+                    if bpo["quantity"] > 0:
+                        self._bp_used[bpo["item_id"]] = bpo["quantity"] - 1
+                    else:
+                        self._bp_used[bpo["item_id"]] = 0
+                else:
+                    self._bp_used[bpo["item_id"]] -= 1
                 return res
+
 
         return fake_bp
 
@@ -444,16 +484,18 @@ class ConfigFlowOperateCenter():
                 structure_eff['mater_eff'] *= 1
                 structure_eff['time_eff'] *= SMALL_STRUCTURE_REAC_TIME_EFF
 
+            active_type = await BPManager.get_activity_id_by_product_typeid(type_id)
             # 建筑插
             for rig_conf in self.structure_rig_confs:
                 if rig_conf['structure_id'] == structure_info['item_id']:
-                    structure_rig_eff['mater_eff'] *= RIG_MATER_EFF[rig_conf['mater_eff_level']]
-                    structure_rig_eff['time_eff'] *= RIG_TIME_EFF[rig_conf['time_eff_level']]
+                    bunus = NULL_MANU_SEC_BONUS if active_type == 1 else NULL_REAC_SEC_BONUS
+                    structure_rig_eff['mater_eff'] *= (1 - RIG_MATER_EFF[rig_conf['mater_eff_level']] * bunus)
+                    structure_rig_eff['time_eff'] *= (1 - RIG_TIME_EFF[rig_conf['time_eff_level']] * bunus)
             
         # 蓝图这里不负责
 
         # 技能
-        active_type = await BPManager.get_activity_id_by_product_typeid(type_id)
+        
         if active_type == 1:
             skill_eff['time_eff'] *= MANU_SKILL_TIME_EFF
         elif active_type == 11:
@@ -467,10 +509,14 @@ class ConfigFlowOperateCenter():
         )
 
     async def get_conf_eff(self, type_id: int):
+        if f"get_conf_eff_{type_id}" in self.cache:
+            return self.cache[f"get_conf_eff_{type_id}"]
         res, conf = await self._is_match_keyword(self.default_blueprint_confs, type_id)
         if res:
-            return 1 - 0.01 * conf['mater_eff'], 1 - 0.01 * conf['time_eff']
-        return 1, 1
+            self.cache[f"get_conf_eff_{type_id}"] = (1 - 0.01 * conf['mater_eff'], 1 - 0.01 * conf['time_eff'])
+        else: 
+            self.cache[f"get_conf_eff_{type_id}"] = (1, 1)
+        return self.cache[f"get_conf_eff_{type_id}"]
 
     async def prepare_asset(self):
         async with asset_prepare_lock:
@@ -500,6 +546,36 @@ class ConfigFlowOperateCenter():
 
         return self._asset_allocate[(type_id, index_id)]
 
+    async def calculate_work_material_avaliable(self, work_list: list):
+        if not self._asset_prepare:
+            await self.prepare_asset()
+        disable = False
+        for work in work_list:
+            if disable:
+                work['avaliable'] = False
+                continue
+            material_need = await BPManager.get_bp_materials(work['type_id'])
+            runs = work['runs']
+            mater_eff = work['mater_eff']
+            
+            for material_type_id, material_quantity in material_need.items():
+                if material_type_id not in self._material_allocate:
+                    self._material_allocate[material_type_id] = self._asset.get(material_type_id, 0)
+
+                if ceil(material_quantity * runs * (mater_eff if material_quantity != 1 else 1)) > self._material_allocate[material_type_id]:
+                    work['avaliable'] = False
+                    disable = True
+                    break
+            if disable:
+                continue
+
+            if material_type_id not in self._material_allocate:
+                logger.error(f"material_type_id {material_type_id} not in _material_allocate")
+            for material_type_id, material_quantity in material_need.items():
+                self._material_allocate[material_type_id] -= ceil(material_quantity * runs * (mater_eff if material_quantity != 1 else 1))
+            work['avaliable'] = True
+        
+
     async def prepare_running_asset(self):
         async with running_asset_prepare_lock:
             if self._running_asset_prepare:
@@ -510,7 +586,8 @@ class ConfigFlowOperateCenter():
             for job in running_job_list:
                 if job['output_location_id'] not in container_id_list:
                     continue
-                self._running_asset[job['product_type_id']] = self._running_asset.get(job['product_type_id'], 0) + self.get_running_job_count(job['product_type_id']) * job['runs']
+                
+                self._running_asset[job['product_type_id']] = self._running_asset.get(job['product_type_id'], 0) + await BPM.get_bp_product_quantity_typeid(job['product_type_id']) * job['runs']
             self._running_asset_prepare = True
 
     async def deal_running_job_quantity(self, quantity: int, type_id: int, index_id: int):

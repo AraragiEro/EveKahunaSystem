@@ -105,6 +105,10 @@ const formatConfigValue = (type: string, value: any) => {
     return `关键词组: ${keywords}, 时间效率: ${parsedValue.time_eff ?? 0}, 材料效率: ${parsedValue.mater_eff ?? 0}`
   } else if (type === 'LoadAssetConf') {
     return `库存许可: ${parsedValue.tag || parsedValue.container_tag || 'N/A'}`
+  } else if (type === 'MaxJobSplitCountConf') {
+    const keywordGroups = parsedValue.keyword_groups || []
+    const keywords = keywordGroups.map((kg: any) => `${kg.keyword}(${kg.keyword_type})`).join(', ') || 'N/A'
+    return `作业类型: ${keywords}, 判断类型: ${parsedValue.judge_type}, 最大数量: ${parsedValue.max_count}, 最大时间: ${parsedValue.max_time_day}天${parsedValue.max_time_date}`
   }
   
   return JSON.stringify(parsedValue)

@@ -23,3 +23,6 @@ const segmentItems = ref([
     <router-view />
   </SidebarLayout>
 </template>
+
+<style scoped>
+</style>
