@@ -7,14 +7,6 @@ from src_v2.core.utils import tqdm_manager
 
 
 
-
-@esi_request
-async def corporations_corporation_id_roles(access_token, corporation_id: int, log=True):
-    ac_token = await access_token
-    data, _ = await get_request_async(f"https://esi.evetech.net/latest/corporations/{corporation_id}/roles/",
-                       headers={"Authorization": f"Bearer {ac_token}"}, log=log, max_retries=1)
-    return data
-
 # Get corporation information
 # https://esi.evetech.net/corporations/{corporation_id}
 @esi_request
@@ -31,7 +23,11 @@ async def corporations_corporation_id_icons(corporation_id: int, log=True):
                        log=log, max_retries=1)
     return data
 
-
+# Get corporation blueprints
+# get
+# https://esi.evetech.net/corporations/{corporation_id}/blueprints
+# esi-corporations.read_blueprints.v1
+# This route is part of the rate limit group corp-industry. This group is limited to 600 tokens per 15 minutes.
 @esi_request
 async def corporations_corporation_id_blueprints(access_token, corporation_id: int, page: int=1, max_retries=3, log=True):
     if not isinstance(access_token, str):
@@ -62,6 +58,7 @@ async def corporations_corporation_id_blueprints(access_token, corporation_id: i
 # Get corporation members
 # esi-corporations.read_corporation_membership.v1
 # https://esi.evetech.net/corporations/{corporation_id}/members
+# esi-corporations.read_corporation_membership.v1
 @esi_request
 async def corporations_corporation_id_members(access_token, corporation_id: int, log=True):
     ac_token = await access_token

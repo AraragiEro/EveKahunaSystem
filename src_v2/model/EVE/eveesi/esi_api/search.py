@@ -8,6 +8,7 @@ from src_v2.core.utils import tqdm_manager
 # Search on a string
 # esi-search.search_structures.v
 # https://esi.evetech.net/characters/{character_id}/search
+# esi-search.search_structures.v1.
 @esi_request
 async def search(
     access_token,

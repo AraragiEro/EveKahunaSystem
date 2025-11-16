@@ -111,3 +111,17 @@ async def characters_character_orders_history(access_token, character_id: int, p
         data.append(data_page)
     await tqdm_manager.complete_mission(f'characters_character_orders_history_{character_id}')
     return data
+
+# List open orders from a character
+# get
+# https://esi.evetech.net/characters/{character_id}/orders
+# esi-markets.read_character_orders.v1.
+@esi_request
+async def characters_character_orders(access_token, character_id: int, log=True):
+    ac_token = await access_token
+    data, _ = await get_request_async(
+        f"https://esi.evetech.net/characters/{character_id}/orders/",
+        headers={"Authorization": f"Bearer {ac_token}"},
+        log=log
+    )
+    return data

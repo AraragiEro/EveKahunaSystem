@@ -4,22 +4,11 @@ from ..esi_req_manager import esi_request
 from ..eveutils import get_request_async, OUT_PAGE_ERROR, parse_token
 from src_v2.core.utils import tqdm_manager
 
-from src_v2.core.database.connect_manager import redis_manager as rdm
 
 
-@esi_request
-async def character_character_id_skills(access_token, character_id, log=True):
-    ac_token = await access_token
-    data, _ = await get_request_async(f"https://esi.evetech.net/latest/characters/{character_id}/skills/",
-                       headers={"Authorization": f"Bearer {ac_token}"}, log=log)
-    return data
 
-@esi_request
-async def character_character_id_wallet(access_token, character_id, log=True):
-    ac_token = await access_token
-    data, _ = await get_request_async(f"https://esi.evetech.net/latest/characters/{character_id}/wallet/",
-                       headers={"Authorization": f"Bearer {ac_token}"}, log=log)
-    return data
+
+
 
 @esi_request
 async def character_character_id_portrait(access_token, character_id, log=True):
@@ -28,6 +17,10 @@ async def character_character_id_portrait(access_token, character_id, log=True):
                        headers={"Authorization": f"Bearer {ac_token}"}, log=log)
     return data
 
+# Get blueprints
+# get
+# https://esi.evetech.net/characters/{character_id}/blueprints
+# esi-characters.read_blueprints.v1
 @esi_request
 async def characters_character_id_blueprints(access_token, character_id: int, page: int=1, max_retries=3, log=True):
     access_token = await parse_token(access_token)
@@ -56,43 +49,6 @@ async def characters_character_id_blueprints(access_token, character_id: int, pa
     return data
 
 
-@esi_request
-async def characters_character_assets(access_token, character_id: int, page: int=1, test=False, max_retries=3, log=True, **kwargs):
-    if not isinstance(access_token, str):
-        ac_token = await access_token
-    else:
-        ac_token = access_token
-    data, pages = await get_request_async(
-        f"https://esi.evetech.net/latest/characters/{character_id}/assets/",
-        headers={"Authorization": f"Bearer {ac_token}"}, params={"page": page}, log=log, max_retries=max_retries,
-        no_retry_code=[OUT_PAGE_ERROR]
-    )
-    status_key = kwargs.get('status_key', None)
-
-    if test or page != 1:
-        if page != 1:
-            await tqdm_manager.update_mission(f'characters_character_assets_{character_id}')
-            if status_key:
-                total_page = await rdm.r.hget(status_key, "total_page")
-                await rdm.r.hset(status_key, "step_progress", page / int(total_page or 0))
-        return data
-
-    await tqdm_manager.add_mission(f'characters_character_assets_{character_id}', pages)
-    
-    if status_key:
-        await rdm.r.hset(status_key, "total_page", pages)
-        await rdm.r.hset(status_key, "step_progress", 0)
-    tasks = []
-    data = [data]
-
-    tasks = [
-        asyncio.create_task(characters_character_assets(ac_token, character_id, p, test, max_retries, log, status_key=status_key)) for p in range(2, pages + 1)
-    ]
-    page_results = await asyncio.gather(*tasks)
-    data.extend(page_results)
-    await tqdm_manager.complete_mission(f'characters_character_assets_{character_id}')
-
-    return data[0]
 
 @esi_request
 async def characters_character(character_id, log=True):
@@ -113,16 +69,7 @@ async def characters_character(character_id, log=True):
     data["character_id"] = character_id
     return data
 
-# /characters/{character_id}/orders/
-@esi_request
-async def characters_character_orders(access_token, character_id: int, log=True):
-    ac_token = await access_token
-    data, _ = await get_request_async(
-        f"https://esi.evetech.net/latest/characters/{character_id}/orders/",
-        headers={"Authorization": f"Bearer {ac_token}"},
-        log=log
-    )
-    return data
+
 
 # Get character portraits
 # https://esi.evetech.net/characters/{character_id}/portrait

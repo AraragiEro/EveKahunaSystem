@@ -4,7 +4,10 @@ from ..esi_req_manager import esi_request
 from ..eveutils import FORBIDDEN_ERROR, get_request_async, OUT_PAGE_ERROR, FORBIDDEN_ERROR
 from src_v2.core.utils import tqdm_manager
 
-
+# Get structure information
+# get
+# https://esi.evetech.net/universe/structures/{structure_id}
+# esi-universe.read_structures.v1
 @esi_request
 async def universe_structures_structure(access_token, structure_id: int, log=True):
     """
@@ -21,10 +24,13 @@ async def universe_structures_structure(access_token, structure_id: int, log=Tru
         ac_token = await access_token
     else:
         ac_token = access_token
-    data, _ = await get_request_async(f"https://esi.evetech.net/latest/universe/structures/{structure_id}/",
+    data, _ = await get_request_async(f"https://esi.evetech.net/universe/structures/{structure_id}/",
                        headers={"Authorization": f"Bearer {ac_token}"}, log=log, no_retry_code=[FORBIDDEN_ERROR])
     return data
 
+# Get station information
+# get
+# https://esi.evetech.net/universe/stations/{station_id}
 @esi_request
 async def universe_stations_station(station_id, log=True):
     data, _ = await get_request_async(f"https://esi.evetech.net/latest/universe/stations/{station_id}/", log=log)
