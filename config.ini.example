@@ -1,38 +1,51 @@
 [APP]
 DBTYPE = sqlite
-COST_PLAN_USER =
-COST_PLAN_NAME =
-CORP_ASSET_USER =
+COST_PLAN_USER = 
+COST_PLAN_NAME = 
+CORP_ASSET_USER = 
 PIC_RENDER_PROXY =
-PROXY = 'http://127.0.0.1:7890'
+PROXY = 127.0.0.1
+PORT = 
 
 [FEISHU]
-APP_ID = MyApp
-SECRET_ID = 1.0
-FOLDER_ROOT =
+APP_ID = 
+SECRET_ID = 
+FOLDER_ROOT = 
 
 [GOOGLE]
-CREDENTIALS =
-MARKET_MONITOR_SPREADSHEET_ID =
+CREDENTIALS = 
+MARKET_MONITOR_SPREADSHEET_ID = 
 
 [POSTGREDB]
-Host = localhost
-Port = 5432
-User = admin
-Password = secret
+Host = 
+Port = 
+Database = 
+User = 
+Password = 
+
+[REDIS]
+Host = 
+Port = 
+
+[NEO4J]
+Host = 
+Port = 
+Username = 
+Password = 
 
 [SQLITEDB]
-DATADB =
-CONFIG_DB =
-CACHE_DB =
-SDEDB =
+CONFIG_DB = 
+CACHE_DB = 
+SDEDB = 
+CN_SDEDB = 
 
 [EVE]
-CLIENT_ID =
-SECRET_KEY =
-MARKET_AC_CHARACTER_ID=
+CLIENT_ID = 
+SECRET_KEY = 
+MARKET_AC_CHARACTER_ID = 
 REF_MATER_WEIGHT = 0.3
 REF_PROFIT_WEIGHT = 0.7
+CALLBACK_LOCAL_ADD = https://localhost:9527/
 
 [ESI]
 publicData = false
