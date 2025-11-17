@@ -177,12 +177,12 @@ async def get_plan_calculate_result_table_view():
             current_progress_hash = await redis_manager.redis.hgetall(current_progress_key)  # type: ignore
             
             if not status:
-                return jsonify({"status": 200, "data": {"status": "idle", "total_progress": None, "current_step": None}})
+                return jsonify({"status": 200, "data": {"status": "idle", "total_progress": None, "current_step": None, "is_indeterminate": 1}})
             
             # 解析状态
             if status.startswith("failed:"):
                 error_msg = status[7:]  # 去掉 "failed:" 前缀
-                return jsonify({"status": 200, "data": {"status": "failed", "error": error_msg, "total_progress": None, "current_step": None}})
+                return jsonify({"status": 200, "data": {"status": "failed", "error": error_msg, "total_progress": None, "current_step": None, "is_indeterminate": 1}})
             else:
                 # 解析总进度
                 total_progress_value = int(total_progress) if total_progress else None
@@ -197,7 +197,8 @@ async def get_plan_calculate_result_table_view():
                         if name or progress_value is not None:
                             current_step_data = {
                                 "name": name,
-                                "progress": int(progress_value) if progress_value is not None else None
+                                "progress": int(progress_value) if progress_value is not None else None,
+                                "is_indeterminate": current_progress_hash.get("is_indeterminate", "0") == "1"
                             }
                     except (ValueError, TypeError) as e:
                         logger.warning(f"解析当前步骤进度失败: {e}, hash数据: {current_progress_hash}")
@@ -208,7 +209,8 @@ async def get_plan_calculate_result_table_view():
                     "data": {
                         "status": status, 
                         "total_progress": total_progress_value,
-                        "current_step": current_step_data
+                        "current_step": current_step_data,
+                        "is_indeterminate": current_progress_hash.get("is_indeterminate", "0") == "1"
                     }
                 })
                 

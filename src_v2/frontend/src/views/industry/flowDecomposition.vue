@@ -5,6 +5,7 @@ import type { PlanProductTableData, PlanTableData } from './components/interface
 import { ElMessage } from 'element-plus'
 import { Document, Loading, Check, Close, Refresh, CopyDocument } from '@element-plus/icons-vue'
 import LaborView from './components/LaborView.vue'
+import CostView from './components/costView.vue'
 
 // localStorage key 前缀
 const STORAGE_KEY_PREFIX = 'plan_calculate_result_'
@@ -90,6 +91,7 @@ const PlanCalculateMaterialTableView = ref<any[]>([])
 const PlanCalculateResultTableView = ref<any[]>([])
 const PlanCalculateWorkFlowTableView = ref<any[]>([])
 const PlanCalculateRunningJobTableView = ref<any[]>([])
+const PlanCalculateEIVCostTableView = ref<any[]>([])
 
 // 计算状态管理
 const isCalculating = ref<boolean>(false)
@@ -180,11 +182,16 @@ const getPlanCalculateResultTableViewStatus = async (showCompletedMessage: boole
         if (statusData.current_step) {
             currentStepName.value = statusData.current_step.name || ''
             currentStepProgress.value = statusData.current_step.progress || 0
-            currentStepProgressIndeterminate.value = statusData.current_step.is_indeterminate || false
+            // 处理 is_indeterminate：支持布尔值、字符串 '1'/'0'、字符串 'true'/'false'
+            const isIndeterminate = statusData.current_step.is_indeterminate
+            currentStepProgressIndeterminate.value = isIndeterminate === true || 
+                isIndeterminate === '1' || 
+                isIndeterminate === 'true' || 
+                isIndeterminate === 1
         } else {
             currentStepName.value = ''
             currentStepProgress.value = 0
-            currentStepProgressIndeterminate.value = false
+            currentStepProgressIndeterminate.value = true
         }
         
         // 如果状态为失败，显示错误信息
@@ -242,6 +249,7 @@ const getPlanCalculateResultTableViewResult = async (showMessage: boolean = true
         PlanCalculateMaterialTableView.value = []
         PlanCalculateWorkFlowTableView.value = []
         PlanCalculateRunningJobTableView.value = []
+        PlanCalculateEIVCostTableView.value = []
         const resultData = data.data || {}
         // 使用 nextTick 确保 DOM 更新完成后再赋值，避免数据错位
         await nextTick()
@@ -249,11 +257,13 @@ const getPlanCalculateResultTableViewResult = async (showMessage: boolean = true
         PlanCalculateMaterialTableView.value = resultData.material_output || []
         PlanCalculateWorkFlowTableView.value = resultData.work_flow || []
         PlanCalculateRunningJobTableView.value = resultData.running_job_tableview_data || []
+        PlanCalculateEIVCostTableView.value = resultData.eiv_cost_dict || []
         // 保存到本地
         saveToLocal(selectedPlan.value, resultData.flow_output, "flow")
         saveToLocal(selectedPlan.value, resultData.material_output, "material")
         saveToLocal(selectedPlan.value, resultData.work_flow, "work_flow")
         saveToLocal(selectedPlan.value, resultData.running_job_tableview_data, "running_job")
+        saveToLocal(selectedPlan.value, resultData.eiv_cost_dict, "eiv_cost")
         calculationStatus.value = 'completed'
         // 只有在需要时才显示成功消息（轮询检测到完成时显示，页面重新加载时不显示）
         if (showMessage) {
@@ -307,6 +317,8 @@ watch(selectedPlan, (newPlan) => {
         const localDataFlow = loadFromLocal(newPlan, "flow")
         const localDataMaterial = loadFromLocal(newPlan, "material")
         const localDataWorkFlow = loadFromLocal(newPlan, "work_flow")
+        const localDataEIVCost = loadFromLocal(newPlan, "eiv_cost")
+        const localDataRunningJob = loadFromLocal(newPlan, "running_job")
         if (localDataFlow) {
             PlanCalculateResultTableView.value = localDataFlow
         } else {
@@ -322,12 +334,24 @@ watch(selectedPlan, (newPlan) => {
         } else {
             PlanCalculateWorkFlowTableView.value = []
         }
+        if (localDataEIVCost) {
+            PlanCalculateEIVCostTableView.value = localDataEIVCost
+        } else {
+            PlanCalculateEIVCostTableView.value = []
+        }
+        if (localDataRunningJob) {
+            PlanCalculateRunningJobTableView.value = localDataRunningJob
+        } else {
+            PlanCalculateRunningJobTableView.value = []
+        }
         // 检查是否有正在进行的计算
         checkCalculationStatus()
     } else {
         PlanCalculateResultTableView.value = []
         PlanCalculateMaterialTableView.value = []
         PlanCalculateWorkFlowTableView.value = []
+        PlanCalculateRunningJobTableView.value = []
+        PlanCalculateEIVCostTableView.value = []
     }
 })
 
@@ -358,6 +382,8 @@ onMounted(async () => {
         const localData = loadFromLocal(selectedPlan.value, "flow")
         const localDataMaterial = loadFromLocal(selectedPlan.value, "material")
         const localDataWorkFlow = loadFromLocal(selectedPlan.value, "work_flow")
+        const localDataEIVCost = loadFromLocal(selectedPlan.value, "eiv_cost")
+        const localDataRunningJob = loadFromLocal(selectedPlan.value, "running_job")
         if (localData) {
             PlanCalculateResultTableView.value = localData
         }
@@ -366,8 +392,12 @@ onMounted(async () => {
         }
         if (localDataWorkFlow) {
             PlanCalculateWorkFlowTableView.value = localDataWorkFlow
-        } else {
-            PlanCalculateWorkFlowTableView.value = []
+        }
+        if (localDataEIVCost) {
+            PlanCalculateEIVCostTableView.value = localDataEIVCost
+        }
+        if (localDataRunningJob) {
+            PlanCalculateRunningJobTableView.value = localDataRunningJob
         }
         // 检查是否有正在进行的计算
         checkCalculationStatus()
@@ -654,17 +684,20 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                                     <el-icon class="status-icon icon-running"><Loading /></el-icon>
                                     <span class="label-text">当前步骤</span>
                                 </div>
-                                <span class="progress-text">{{ currentStepProgress }}%</span>
+                                <span class="progress-text">
+                                    <template v-if="currentStepProgressIndeterminate">进行中...</template>
+                                    <template v-else>{{ currentStepProgress }}%</template>
+                                </span>
                             </div>
                             <el-progress 
-                                :percentage="currentStepProgress" 
+                                :percentage="currentStepProgressIndeterminate ? 50 : currentStepProgress" 
                                 :stroke-width="10"
                                 :show-text="false"
                                 color="#409EFF"
                                 class="progress-bar"
                                 :indeterminate="currentStepProgressIndeterminate"
-                                striped
-                                striped-flow
+                                :striped="!currentStepProgressIndeterminate"
+                                :striped-flow="!currentStepProgressIndeterminate"
                                 :duration="3"
                                 
                             />
@@ -928,17 +961,53 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                                 </div>
                             </template>
                         </el-table-column>
-                        <el-table-column
-                            label="采购价格"
-                            prop="purchase_price"
-                            :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"
-                        />
+                        <el-table-column label="JITA 出单">
+                            <template #default="{ row }">
+                                <div v-if="row.real_quantity > 0">
+                                    {{ formatAccounting(row.sell_price) }}
+                                </div>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="JITA 出单 总价">
+                            <template #default="{ row }">
+                                <div v-if="row.real_quantity > 0">
+                                    {{ formatAccounting(row.sell_price * row.real_quantity) }}
+                                </div>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="JITA 收单">
+                            <template #default="{ row }">
+                                <div v-if="row.real_quantity > 0">
+                                    {{ formatAccounting(row.buy_price) }}
+                                </div>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="JITA 收单 总价">
+                            <template #default="{ row }">
+                                <div v-if="row.real_quantity > 0">
+                                    {{ formatAccounting(row.buy_price * row.real_quantity) }}
+                                </div>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="扫单成本增加">
+                            <template #default="{ row }">
+                                <div v-if="row.real_quantity > 0">
+                                    {{ formatAccounting(row.sell_price * row.real_quantity - row.buy_price * row.real_quantity) }}
+                                </div>
+                            </template>
+                        </el-table-column>
                     </el-table>
                     <!-- 右侧或下方类型分布 ecahrts饼图 -->
                     <div></div>
                 </div>
             </el-tab-pane>
-
+            
+            <el-tab-pane label="成本视图">
+                <CostView 
+                    :-plan-calculate-e-i-v-cost-table-view="PlanCalculateEIVCostTableView"
+                />
+            </el-tab-pane>
+            
             <el-tab-pane label="劳动力视图">
                 <LaborView :running-jobs="PlanCalculateRunningJobTableView" />
             </el-tab-pane>

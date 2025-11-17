@@ -120,6 +120,9 @@ class ConfigFlowOperateCenter():
         self._market_price_status = False
         self._type_adjust_price = {}
 
+        self.index_product_dict = {}
+        self.product_num_dict = {}
+
     @classmethod
     async def create(cls, user_name: str, plan_name: str):
         """异步工厂方法，用于创建并初始化对象"""
