@@ -63,6 +63,7 @@ const loadChildTree = async (row: any, treeNode: any, resolve: (data: any[]) => 
 }
 
 const getPlanTableData = async () => {
+  console.log("getPlanTableData")
   const res = await http.post('/EVE/industry/getPlanTableData')
   const data = await res.json()
   IndustryPlanTableData.value = data.data
@@ -74,6 +75,7 @@ const getPlanTableData = async () => {
       selectedPlan.value = null
       localStorage.removeItem(STORAGE_KEY)
       currentPlanProducts.value = []
+      console.log("selectedPlan not found", selectedPlan.value)
       return
     }
     
@@ -92,6 +94,7 @@ const getPlanTableData = async () => {
   } else {
     currentPlanProducts.value = []
   }
+  console.log("currentPlanProducts", currentPlanProducts.value)
 }
 
 // 新建计划弹窗相关
@@ -324,6 +327,11 @@ const handleContextMenuSelect = (index: string) => {
 
 const handleAddPlanConfirm = async () => {
   addPlanDialogForm.value.add_plan_loading = true
+  if (addPlanDialogForm.value.plan_name === '') {
+    ElMessage.error("请选择计划")
+    addPlanDialogForm.value.add_plan_loading = false
+    return
+  }
   const res = await http.post('/EVE/industry/addPlanProduct', {
     plan_name: addPlanDialogForm.value.plan_name,
     type_id: addPlanDialogForm.value.type_id,

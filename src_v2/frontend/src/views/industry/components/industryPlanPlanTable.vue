@@ -13,7 +13,7 @@
         <tr v-for="item in list" :key="item.row_id" class="card-row cursor-move">
           <td class="product-name">{{ item.type_name_zh }}</td>
           <td class="quantity-cell">
-            <el-input-number v-model="item.quantity" :min="0" :max="1000000" />
+            <el-input-number v-model="item.quantity" controls-position="right" :min="0" :precision="0" />
           </td>
           <td class="action-cell">
             <el-button type="primary" plain @click="handleDeleteProduct(item)">
@@ -124,11 +124,11 @@ const handleDeleteProduct = (item: PlanProductTableData) => {
   font-size: 15px;
   font-weight: 500;
   color: #303133;
-  min-width: 200px;
+  min-width: 100px;
 }
 
 .quantity-cell {
-  width: 180px;
+  width: 250px;
 }
 
 .quantity-cell :deep(.el-input-number) {
@@ -146,7 +146,7 @@ const handleDeleteProduct = (item: PlanProductTableData) => {
 }
 
 .action-cell {
-  width: 120px;
+  width: 40px;
   text-align: right;
 }
 

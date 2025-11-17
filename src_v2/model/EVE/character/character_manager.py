@@ -208,3 +208,24 @@ class CharacterManager(metaclass=SingletonMeta):
                 ))
 
         await redis_manager.redis.set(f"forever:ref_corp_chac_pub_info_corpid_{corporation_id}", "true", ex=60 * 60 * 24)
+
+    async def get_public_character_info_by_character_id(self, character_id: int):
+        character_db_obj = await EvePublicCharacterInfoDBUtils.select_public_character_info_by_character_id(character_id)
+        if not character_db_obj:
+            character_info = await eveesi.characters_character(character_id)
+            character_db_obj = M_EvePublicCharacterInfo(
+                character_id=character_id,
+                alliance_id=character_info['alliance_id'] if 'alliance_id' in character_info else None,
+                birthday=parse_iso_datetime(character_info['birthday']).replace(tzinfo=None),
+                bloodline_id=character_info['bloodline_id'],
+                corporation_id=character_info['corporation_id'],
+                description=character_info['description'] if 'description' in character_info else None,
+                faction_id=character_info['faction_id'] if 'faction_id' in character_info else None,
+                gender=character_info['gender'],
+                name=character_info['name'],
+                race_id=character_info['race_id'],
+                security_status=character_info['security_status'] if 'security_status' in character_info else None,
+                title=character_info['title'] if 'title' in character_info else None,
+            )
+            await EvePublicCharacterInfoDBUtils.save_obj(character_db_obj)
+        return character_db_obj

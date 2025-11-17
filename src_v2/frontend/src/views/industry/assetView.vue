@@ -512,6 +512,10 @@ onUnmounted(() => {
   <el-tab-pane label="资产拉取状态">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
       <div style="font-weight: 600;">当前用户可见任务</div>
+      <el-button type="primary" size="small" @click="fetchMissions">
+        <el-icon style="margin-right:4px"><Refresh /></el-icon>
+        刷新
+      </el-button>
       <el-button type="primary" size="small" @click="openCreateDialog">
         <el-icon style="margin-right:4px"><Plus /></el-icon>
         新增拉取任务

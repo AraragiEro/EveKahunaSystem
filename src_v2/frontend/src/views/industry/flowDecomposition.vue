@@ -4,6 +4,7 @@ import { http } from '@/http'
 import type { PlanProductTableData, PlanTableData } from './components/interfaceType.vue'
 import { ElMessage } from 'element-plus'
 import { Document, Loading, Check, Close, Refresh, CopyDocument } from '@element-plus/icons-vue'
+import LaborView from './components/LaborView.vue'
 
 // localStorage key 前缀
 const STORAGE_KEY_PREFIX = 'plan_calculate_result_'
@@ -88,6 +89,7 @@ const loadFromLocal = (planName: string, keys: string): any[] | null => {
 const PlanCalculateMaterialTableView = ref<any[]>([])
 const PlanCalculateResultTableView = ref<any[]>([])
 const PlanCalculateWorkFlowTableView = ref<any[]>([])
+const PlanCalculateRunningJobTableView = ref<any[]>([])
 
 // 计算状态管理
 const isCalculating = ref<boolean>(false)
@@ -238,18 +240,20 @@ const getPlanCalculateResultTableViewResult = async (showMessage: boolean = true
         // 先清空数据，避免数据错位
         PlanCalculateResultTableView.value = []
         PlanCalculateMaterialTableView.value = []
+        PlanCalculateWorkFlowTableView.value = []
+        PlanCalculateRunningJobTableView.value = []
         const resultData = data.data || {}
         // 使用 nextTick 确保 DOM 更新完成后再赋值，避免数据错位
         await nextTick()
         PlanCalculateResultTableView.value = resultData.flow_output || []
         PlanCalculateMaterialTableView.value = resultData.material_output || []
         PlanCalculateWorkFlowTableView.value = resultData.work_flow || []
-        
+        PlanCalculateRunningJobTableView.value = resultData.running_job_tableview_data || []
         // 保存到本地
         saveToLocal(selectedPlan.value, resultData.flow_output, "flow")
         saveToLocal(selectedPlan.value, resultData.material_output, "material")
         saveToLocal(selectedPlan.value, resultData.work_flow, "work_flow")
-
+        saveToLocal(selectedPlan.value, resultData.running_job_tableview_data, "running_job")
         calculationStatus.value = 'completed'
         // 只有在需要时才显示成功消息（轮询检测到完成时显示，页面重新加载时不显示）
         if (showMessage) {
@@ -933,6 +937,10 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                     <!-- 右侧或下方类型分布 ecahrts饼图 -->
                     <div></div>
                 </div>
+            </el-tab-pane>
+
+            <el-tab-pane label="劳动力视图">
+                <LaborView :running-jobs="PlanCalculateRunningJobTableView" />
             </el-tab-pane>
         </el-tabs>
         </el-row>

@@ -1,6 +1,7 @@
 
 import asyncio
 from datetime import datetime, timezone, timedelta
+import json
 import pathlib
 
 from tqdm.std import tqdm
@@ -90,6 +91,7 @@ class AssetManager(metaclass=SingletonMeta):
 
     async def get_user_asset_pull_mission_list(self, user_name: str) -> list[dict]:
         missions = []
+        # 拉取个人创建的任务
         async for mission in await EveAssetPullMissionDBUtils.select_all_by_user_name(user_name):
             if mission.asset_owner_type == 'character':
                 character = await CharacterManager().get_character_by_character_id(mission.asset_owner_id)
@@ -104,6 +106,38 @@ class AssetManager(metaclass=SingletonMeta):
                 'is_active': mission.active,
                 'last_pull_time': mission.last_pull_time.replace(tzinfo=timezone(timedelta(hours=+8), 'Shanghai'))
             })
+        logger.info(f"拉取个人创建的任务: {missions}")
+        # 拉取同公司的任务
+        main_character_id = await UserManager().get_main_character_id(user_name)
+        main_character = await CharacterManager().get_character_by_character_id(main_character_id)
+        logger.info(f"主角色: {main_character.character_name} {main_character.corporation_id}")
+        if main_character.corporation_id:
+            corp_id = main_character.corporation_id
+            async for mission in await EveAssetPullMissionDBUtils.select_all_by_owner_id_and_owner_type(corp_id, 'corp'):
+                if mission.asset_owner_id not in [m['subject_id'] for m in missions]:
+                    logger.info(f"拉取同公司的任务: {mission.asset_owner_id}")
+                    corporation_info = await rdm.redis.get(f'eveesi:corporations_corporation:{mission.asset_owner_id}') 
+                    if not corporation_info:
+                        corporation_info = await eveesi.corporations_corporation_id(mission.asset_owner_id)
+                        logger.info(f"esi res:{corporation_info}")
+                        if not corporation_info:
+                            logger.error(f"公司{mission.asset_owner_id}获取公开信息失败，跳过")
+                            continue
+                        await rdm.redis.set(f'eveesi:corporations_corporation:{mission.asset_owner_id}', json.dumps(corporation_info))
+                        await rdm.redis.expire(f'eveesi:corporations_corporation:{mission.asset_owner_id}', 60*60*24)
+                    else:
+                        corporation_info = json.loads(corporation_info)
+                    logger.info(f"公司{mission.asset_owner_id}公开信息: {corporation_info}")
+                    missions.append({
+                        'subject_type': mission.asset_owner_type,
+                        'subject_name': corporation_info['name'],
+                        'subject_id': mission.asset_owner_id,
+                        'is_active': mission.active,
+                        'last_pull_time': mission.last_pull_time.replace(tzinfo=timezone(timedelta(hours=+8), 'Shanghai'))
+                    })
+                    logger.info(f"拉取同公司的任务: {missions}")
+        logger.info(f"拉取同公司的任务: {missions}")
+
         return missions
 
     async def create_asset_pull_mission(self, user_name: str, asset_owner_type: str, asset_owner_id: int, active: bool):

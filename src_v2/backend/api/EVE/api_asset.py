@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 from quart import Blueprint, jsonify, request, g
 from src_v2.backend.auth import auth_required
 from src_v2.backend.api.permission_required import permission_required
@@ -115,9 +116,10 @@ async def get_asset_pull_missions():
 
     try:
         missions = await AssetManager().get_user_asset_pull_mission_list(user_id)
+        return jsonify({'code': 200, 'data': missions}), 200
     except Exception as e:
-        return jsonify({'code': 400, 'message': str(e)})
-    return jsonify({'code': 200, 'data': missions})
+        traceback.print_exc()
+        return jsonify({'code': 400, 'message': str(e)}), 400
 
 @api_EVE_asset_bp.route('/closeAssetPullMission', methods=['POST'])
 @auth_required

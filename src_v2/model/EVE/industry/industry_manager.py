@@ -121,6 +121,7 @@ class IndustryManager(metaclass=SingletonMeta):
             }
         
         async for product in await EveIndustryPlanProductDBUtils.select_all_by_user_name(user_name):
+            logger.info(f"获取计划表格数据: {product.plan_name} {product.product_type_id} {product.quantity}")
             type_name = SdeUtils.get_name_by_id(product.product_type_id)
             type_name_zh = SdeUtils.get_cn_name_by_id(product.product_type_id)
             plan_list[product.plan_name]["products"].append({
@@ -136,6 +137,9 @@ class IndustryManager(metaclass=SingletonMeta):
 
     @classmethod
     async def add_plan_product(cls, user_id: str, plan_name: str, type_id: int, quantity: int):
+        user_plan_obj = await EveIndustryPlanDBUtils.select_by_user_name_and_plan_name(user_id, plan_name)
+        if not user_plan_obj:
+            raise KahunaException(f"计划不存在")
         plan_list = []
         async for plan in await EveIndustryPlanProductDBUtils.select_all_by_user_name_and_plan_name(user_id, plan_name):
             plan_list.append(plan)
@@ -430,11 +434,16 @@ class IndustryManager(metaclass=SingletonMeta):
         #             "purchase_price": None
         #         })
 
+        # 获取劳动力数据
+        running_job_tableview_data = await op.get_running_job_tableview_data()
+        
+
         return {
             "flow_output": flow_output,
             "material_output": [material_output[t] for t in material_type],
             "work_flow": work_flow,
-            "purchase_output": None
+            "purchase_output": None,
+            "running_job_tableview_data": running_job_tableview_data
         }
 
     @staticmethod
@@ -807,7 +816,7 @@ class IndustryManager(metaclass=SingletonMeta):
         # 系数成本计算 ==============================================================================================
         structure_info = await op.get_type_assign_structure_info(product_type_id)
         if not structure_info:
-            raise KahunaException(f"物品 {product_type_id} 未分配建筑")
+            raise KahunaException(f"物品 {product_type_id}: {SdeUtils.get_name_by_id(product_type_id)} 未分配建筑")
         material_adjust_price = await op.get_type_adjust_price(material_type_id)
         system_cost = await op.get_system_cost(structure_info['system_id'])
         actype = "manufacturing" if self_relation['activity_id'] == 1 else "reaction"
@@ -1100,10 +1109,9 @@ class IndustryManager(metaclass=SingletonMeta):
             }
             if config.config_type == 'StructureRigConfig':
                 structure_info = await NIU.get_structure_node_by_id(config.config_value['structure_id'])
-                config_data['config_value'] = {
-                    "structure_name": structure_info.get('structure_name', None),
-                    "structure_id": config.config_value
-                }
+                config_data['config_value'].update({
+                    "structure_name": structure_info.get('structure_name', None)
+                })
             res_list.append(config_data)
         return res_list
 

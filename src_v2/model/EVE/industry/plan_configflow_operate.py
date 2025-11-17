@@ -175,7 +175,6 @@ class ConfigFlowOperateCenter():
 
     # 获取正在运行的joblit
     async def get_running_job_list(self):
-        from src_v2.core.log import logger
         async with running_job_update_lock:
             if self._running_jobs_update:
                 return self._running_jobs
@@ -226,6 +225,35 @@ class ConfigFlowOperateCenter():
                 if job['output_location_id'] in access_container_list:
                     count += job['runs']
         return count
+
+    async def get_running_job_tableview_data(self):
+        running_job_list = await self.get_running_job_list()
+        access_container_list = []
+        for config in self.load_asset_confs:
+            access_container_list.append(config['asset_container_id'])
+
+        installer_data = []
+        for job in running_job_list:
+            if job['output_location_id'] not in access_container_list:
+                continue
+            character_public_info = await CharacterManager().get_public_character_info_by_character_id(job['installer_id'])
+            active_type = await BPManager.get_activity_id_by_product_typeid(job['product_type_id'])
+            if active_type == 1:
+                activity_name = "制造"
+            elif active_type == 11:
+                activity_name = "反应"
+            else:
+                activity_name = "未知"
+
+            installer_data.append({
+                "character_name": character_public_info.name,
+                "character_title": character_public_info.title,
+                "activity_name": activity_name,
+                "product_type_name": SdeUtils.get_cn_name_by_id(job['product_type_id']),
+                **job
+            })
+
+        return installer_data
 
     async def _is_match_keyword(self, conf_list, type_id: int):
         group_list = [SdeUtils.get_groupname_by_id(type_id), SdeUtils.get_groupname_by_id(type_id, zh=True)]

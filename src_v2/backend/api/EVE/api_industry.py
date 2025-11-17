@@ -45,23 +45,26 @@ async def create_plan():
         plan_name = data["name"]
         data.pop("name")
         await IndustryManager().create_plan(user_id, plan_name, data)
-        return jsonify({"data": "计划创建成功"})
+        return jsonify({"data": "计划创建成功", "status": 200})
     except:
         logger.error(f"创建计划失败: {traceback.format_exc()}")
-        return jsonify({"error": "创建计划失败"}), 500
+        return jsonify({"error": "创建计划失败", "status": 500}), 500
 
 @api_industry_bp.route("/getPlanTableData", methods=["POST"])
 @auth_required
 async def get_plan_table_data():
     data = await request.json
     user_id = g.current_user["user_id"]
+    logger.info(f"获取计划表格数据: {user_id}")
 
     try:
         plan_table_data = await IndustryManager.get_plan(user_id)
-        return jsonify({"data": plan_table_data})
+        logger.info(f"获取计划表格数据: {plan_table_data} ")
+        return jsonify({"data": plan_table_data, "status": 200})
     except:
+        traceback.print_exc()
         logger.error(f"获取计划表格数据失败: {traceback.format_exc()}")
-        return jsonify({"error": "获取计划表格数据失败"}), 500
+        return jsonify({"error": "获取计划表格数据失败", "status": 500}), 500
 
 @api_industry_bp.route("/addPlanProduct", methods=["POST"])
 @auth_required
@@ -71,10 +74,10 @@ async def add_plan_product():
 
     try:
         await IndustryManager.add_plan_product(user_id, data["plan_name"], data["type_id"], data["quantity"])
-        return jsonify({"data": "产品添加成功"})
+        return jsonify({"data": "产品添加成功", "status": 200})
     except:
         logger.error(f"添加产品失败: {traceback.format_exc()}")
-        return jsonify({"error": "添加产品失败"}), 500
+        return jsonify({"error": "添加产品失败", "status": 500}), 500
 
 @api_industry_bp.route("/savePlanProducts", methods=["POST"])
 @auth_required
@@ -84,10 +87,10 @@ async def save_plan_products():
 
     try:
         await IndustryManager.save_plan_products(user_id, data["plan_name"], data["products"])
-        return jsonify({"data": "产品保存成功"})
+        return jsonify({"data": "产品保存成功", "status": 200})
     except:
         logger.error(f"保存产品失败: {traceback.format_exc()}")
-        return jsonify({"error": "保存产品失败"}), 500
+        return jsonify({"error": "保存产品失败", "status": 500}), 500
 
 async def _calculate_plan_async(user_id: str, plan_name: str):
     """异步计算计划的后台任务"""
@@ -241,10 +244,10 @@ async def get_plan_calculate_result_table_view():
             
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "status": 500}), 500
     except Exception as e:
         logger.error(f"获取计划计算结果表格视图失败: {traceback.format_exc()}")
-        return jsonify({"message": "获取计划计算结果表格视图失败"}), 500
+        return jsonify({"message": "获取计划计算结果表格视图失败", "status": 500}), 500
 
 @api_industry_bp.route("/addIndustrypermision", methods=["POST"])
 @auth_required
@@ -459,3 +462,16 @@ async def get_item_info():
     except:
         logger.error(f"获取物品信息失败: {traceback.format_exc()}")
         return jsonify({"message": "获取物品信息失败", "status": 500}), 500
+
+@api_industry_bp.route("/getLaborForceData", methods=["POST"])
+@auth_required
+async def get_labor_force_data():
+    user_id = g.current_user["user_id"]
+
+    try:
+        return jsonify({"data": "获取劳动力数据成功", "status": 200}), 200
+    except KahunaException as e:
+        return jsonify({"message": str(e), "status": 500}), 500
+    except Exception as e:
+        logger.error(f"获取劳动力数据失败: {traceback.format_exc()}")
+        return jsonify({"message": "获取劳动力数据失败", "status": 500}), 500

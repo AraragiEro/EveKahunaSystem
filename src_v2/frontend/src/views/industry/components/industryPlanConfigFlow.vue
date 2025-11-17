@@ -493,7 +493,7 @@ watch(
 <el-drawer 
     v-model="configFlowManagementVisible"
     resizable
-    size="600"
+    size="1000px"
     @opened="getConfigFlowConfigList"
 >
     <div style="display: flex; flex-direction: column; height: 100%;">
@@ -509,7 +509,7 @@ watch(
             <el-table
             :data="configFlowConfigList"
             >
-                <el-table-column label="配置类型" prop="config_type">
+                <el-table-column label="配置类型" prop="config_type" width="150px">
                     <template #default="{ row }">
                         {{ configTypeMap[row.config_type] }}
                     </template>
@@ -532,10 +532,13 @@ watch(
                 </el-table-column>
                 <el-table-column label="操作" prop="action" width="220px">
                     <template #default="{ row }">
-                        <el-button type="primary" plain @click="addConfigToPlan(row)" :disabled="isConfigInPlan(row.config_id)">
+                        <el-button type="default" plain @click="addConfigToPlan(row)" disabled v-if="isConfigInPlan(row.config_id)">
+                            已经存在于{{ props.selectedPlan }}
+                        </el-button>
+                        <el-button type="primary" plain @click="addConfigToPlan(row)" v-else>
                             添加到计划{{ props.selectedPlan }}
                         </el-button>
-                        <el-button type="primary" plain @click="deleteConfigFlowConfig(row.config_id)">
+                        <el-button type="danger" plain @click="deleteConfigFlowConfig(row.config_id)">
                             删除
                         </el-button>
                     </template>
