@@ -858,14 +858,14 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                             <span v-else>未知</span>
                         </template>
                     </el-table-column>
-                    <el-table-column label="材料满足" prop="avaliable" width="150">
+                    <el-table-column label="材料满足" prop="avaliable" width="75">
                         <template #header>
-                            <span>材料满足筛选</span>
+                            <span>有材料</span>
                             <el-switch
                                 v-model="showUnavailable"
                                 inline-prompt
-                                active-text="显示可进行工作"
-                                inactive-text="隐藏所有工作"
+                                active-text="有材料"
+                                inactive-text="所有"
                             />
                         </template>
                         <template #default="{ row }">
@@ -876,14 +876,14 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                             </div>
                         </template>
                     </el-table-column>
-                    <el-table-column label="分配蓝图" prop="fake" width="150">
+                    <el-table-column label="分配蓝图" prop="fake" width="75">
                         <template #header>
-                            <span>蓝图缺失筛选</span>
+                            <span>有蓝图</span>
                             <el-switch
                                 v-model="showFake"
                                 inline-prompt
-                                active-text="蓝图缺失"
-                                inactive-text="显示所有"
+                                active-text="没蓝图"
+                                inactive-text="所有"
                             />
                         </template>
                         <template #default="{ row }">

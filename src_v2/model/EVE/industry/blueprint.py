@@ -91,7 +91,7 @@ class BPManager:
                 (IndustryActivityProducts.blueprintTypeID != 45732)
             ).get().quantity
         except DoesNotExist:
-            logger.error(f"get_bp_product_quantity_typeid: {type_id} not found")
+            logger.warning(f"get_bp_product_quantity_typeid: {type_id} not found")
             product_quantity = 1  # 或者你想要的默认值
 
         return product_quantity
