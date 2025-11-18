@@ -430,6 +430,10 @@ const CompleteRowClassName = (data: { row: any, rowIndex: number }) => {
     return data.row.real_quantity <= 0 ? 'complete-job' : 'full'
 }
 
+const LackRowClassName = (data: { row: any, rowIndex: number }) => {
+    return data.row.real_quantity > 0 ? 'lack-row' : 'full'
+}
+
 const showFake = ref(false)
 const showUnavailable = ref(false)
 const activeIdFilter = ref('all')
@@ -742,7 +746,7 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                     border
                     max-height="75vh"
                     show-overflow-tooltip
-                    :row-class-name="CompleteRowClassName"
+                    :row-class-name="LackRowClassName"
                 >
                     <el-table-column label="类型" prop="layer_id" />
                     <el-table-column label="物品id" prop="type_id" />
@@ -907,6 +911,12 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
 <style scoped>
 :deep(.el-table .complete-job) {
     background-color: #e7ffc8 !important;
+    font-weight: bold !important;
+    color: #000000 !important;
+}
+
+:deep(.el-table .lack-row) {
+    background-color: #ffc6c6 !important;
     font-weight: bold !important;
     color: #000000 !important;
 }
