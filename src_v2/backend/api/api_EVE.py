@@ -12,6 +12,7 @@ from src.service.log_server import logger
 
 from src_v2.model.EVE.eveesi.oauth import get_auth_url, get_token, CALLBACK_LOCAL_HOST
 from src_v2.model.EVE.character.character_manager import CharacterManager
+from src_v2.core.utils import KahunaException
 
 # app = Quart(__name__)
 # app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -22,11 +23,17 @@ api_EVE_bp = Blueprint('api_EVE', __name__, url_prefix='/api/EVE')
 @api_EVE_bp.route("/oauth/authorize", methods=["GET"] )
 @auth_required
 async def get_oauth_url():
-    # 从g.current_user获取用户ID
-    user_id = g.current_user["user_id"]
-    # 传递user_id到get_auth_url
-    url, _ = get_auth_url(user_id=user_id)
-    return jsonify({"url": url})
+    try:
+        # 从g.current_user获取用户ID
+        user_id = g.current_user["user_id"]
+        # 传递user_id到get_auth_url
+        url, _ = get_auth_url(user_id=user_id)
+        return jsonify({"status": 200, "url": url})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"获取授权链接失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "获取授权链接失败"}), 500
 
 
 @api_EVE_bp.route("/oauth/callback", methods=["GET"])
@@ -43,12 +50,12 @@ async def eve_oauth_callback():
         # 检查是否有错误
         if error:
             logger.error(f"EVE OAuth 回调包含错误: {error}")
-            return jsonify({"error": f"OAuth错误: {error}"}), 400
+            return jsonify({"status": 400, "message": f"OAuth错误: {error}"}), 400
 
         # 检查是否有授权码
         if not code:
             logger.error("EVE OAuth 回调缺少授权码")
-            return jsonify({"error": "缺少授权码"}), 400
+            return jsonify({"status": 400, "message": "缺少授权码"}), 400
 
         # 从state中解析用户ID和原始oauth_state
         user_id = None
@@ -63,15 +70,15 @@ async def eve_oauth_callback():
                 logger.debug(f"从state解析到用户ID: {user_id}, 原始oauth_state: {original_oauth_state}")
             except jwt.ExpiredSignatureError:
                 logger.error("OAuth state已过期")
-                return jsonify({"error": "认证链接已过期，请重新开始认证"}), 400
+                return jsonify({"status": 400, "message": "认证链接已过期，请重新开始认证"}), 400
             except jwt.InvalidTokenError as e:
                 logger.error(f"OAuth state无效: {e}")
-                return jsonify({"error": "无法验证用户身份，请重新开始认证"}), 400
+                return jsonify({"status": 400, "message": "无法验证用户身份，请重新开始认证"}), 400
         
         # 如果无法从state获取user_id，记录错误
         if not user_id or not original_oauth_state:
             logger.error("无法从OAuth state中获取用户ID或原始state")
-            return jsonify({"error": "无法验证用户身份，请重新开始认证"}), 400
+            return jsonify({"status": 400, "message": "无法验证用户身份，请重新开始认证"}), 400
 
         # 记录接收到的回调信息用于调试
         logger.debug(f"收到EVE OAuth回调 - code: {code[:10]}..., user_id: {user_id}")
@@ -97,7 +104,14 @@ async def eve_oauth_callback():
 
         # 使用 auth_response_url 交换授权码以获取 token
         # 现在auth_response_url包含原始的oauth_state，fetch_token可以正确验证
-        access_token, refresh_token, expires_at = get_token(auth_response_url)
+        try:
+            access_token, refresh_token, expires_at = get_token(auth_response_url)
+        except KahunaException as e:
+            logger.error(f"获取token失败: {str(e)}")
+            return jsonify({"status": 500, "message": str(e)}), 500
+        except Exception as e:
+            logger.error(f"获取token失败: {traceback.format_exc()}")
+            return jsonify({"status": 500, "message": "获取token失败"}), 500
         
         try:
             # 使用从state解析出的user_id，而不是g.current_user
@@ -109,9 +123,12 @@ async def eve_oauth_callback():
                 },
                 user_id  # 使用从state解析出的user_id
             )
+        except KahunaException as e:
+            logger.error(f"角色信息入库失败: {str(e)}")
+            return jsonify({"status": 500, "message": str(e)}), 500
         except Exception as e:
-            logger.error(traceback.format_exc())
-            return jsonify({"error": "角色信息入库失败"}), 400
+            logger.error(f"角色信息入库失败: {traceback.format_exc()}")
+            return jsonify({"status": 500, "message": "角色信息入库失败"}), 500
 
         logger.info(f"成功获取 EVE token。用户ID: {user_id}, Access token 过期时间: {expires_at}, 角色名称: {character.character_name}")
 
@@ -122,11 +139,12 @@ async def eve_oauth_callback():
         frontend_redirect_url = "https://" + CALLBACK_LOCAL_HOST + "/setting/characterSetting/auth/close" if CALLBACK_LOCAL_HOST else None
         return redirect(frontend_redirect_url)
 
+    except KahunaException as e:
+        logger.error(f"EVE OAuth 回调处理失败: {str(e)}")
+        return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
-        logger.error(f"EVE OAuth 回调处理失败: {e}")
-        logger.error(traceback.format_exc())
-
-        return jsonify({"error": "认证失败"}), 400
+        logger.error(f"EVE OAuth 回调处理失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "认证失败"}), 500
 
         # 如果出错，将用户重定向到前端的错误页面
         # frontend_error_url = "http://localhost:8080/auth-error"  # 请替换为您的前端错误页面 URL
@@ -135,8 +153,14 @@ async def eve_oauth_callback():
 @api_EVE_bp.route("/oauth/authStatus", methods=["GET"])
 @auth_required
 async def get_auth_status():
-    user_id = g.current_user["user_id"]
-    auth_status = await redis_manager.redis.hget(f"esi_auth_status:user_{user_id}", "authStatus")
-    character_name = await redis_manager.redis.hget(f"esi_auth_status:user_{user_id}", "characterName")
-    await redis_manager.redis.delete(f"esi_auth_status:user_{user_id}")
-    return jsonify({"authStatus": auth_status, "characterName": character_name})
+    try:
+        user_id = g.current_user["user_id"]
+        auth_status = await redis_manager.redis.hget(f"esi_auth_status:user_{user_id}", "authStatus")
+        character_name = await redis_manager.redis.hget(f"esi_auth_status:user_{user_id}", "characterName")
+        await redis_manager.redis.delete(f"esi_auth_status:user_{user_id}")
+        return jsonify({"status": 200, "authStatus": auth_status, "characterName": character_name})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"获取认证状态失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "获取认证状态失败"}), 500

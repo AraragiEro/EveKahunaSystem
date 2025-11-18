@@ -4,6 +4,7 @@ import { http } from '@/http'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
+import { handleApiResponse } from '@/utils/apiResponse'
 
 const deleteAccountConfirm = ref(false)
 const authStore = useAuthStore()
@@ -12,12 +13,11 @@ const router = useRouter()
 const handleDeleteAccount = async () => {
   try {
     const response = await http.post('/auth/deleteAccount')
-    if (response.ok) {
-      ElMessage.success('注销成功')
+    const data = await handleApiResponse(response, '注销失败')
+    if (data) {
+      ElMessage.success(data.message || '注销成功')
       authStore.logout()
       router.push('/login')
-    } else {
-      ElMessage.error('注销失败')
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '注销失败')

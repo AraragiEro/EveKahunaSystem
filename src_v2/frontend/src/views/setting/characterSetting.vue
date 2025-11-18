@@ -36,12 +36,15 @@ const startAuthStatusPolling = () => {
       const response = await http.get('/EVE/oauth/authStatus')
       if (response.ok) {
         const data = await response.json()
-        const authStatus = data?.authStatus
-        const characterName = data?.characterName
-        
-        if (authStatus === 'success') {
-          console.log('检测到认证成功')
-          handleAuthComplete(characterName)
+        // 适配新的返回格式，检查status字段
+        if (data?.status === 200) {
+          const authStatus = data?.authStatus
+          const characterName = data?.characterName
+          
+          if (authStatus === 'success') {
+            console.log('检测到认证成功')
+            handleAuthComplete(characterName)
+          }
         }
       }
     } catch (error) {
@@ -81,18 +84,16 @@ const wrapEsiAuth = async () => {
   
   try {
     const response = await http.get('/EVE/oauth/authorize')
-    let href = ''
-    try {
-      const data = await response.clone().json()
-      href = data?.authUrl || data?.url || data?.href || ''
-    } catch {
-      href = await response.text()
-    }
-
-    if (typeof href === 'string' && /^https?:\/\//i.test(href)) {
-      window.open(href, '_blank', 'noopener,noreferrer')
+    const data = await handleApiResponse(response, '获取认证链接失败')
+    if (data && data.status === 200) {
+      const href = data?.url || data?.authUrl || data?.href || ''
+      if (typeof href === 'string' && /^https?:\/\//i.test(href)) {
+        window.open(href, '_blank', 'noopener,noreferrer')
+      } else {
+        ElMessage.error('获取认证链接失败')
+        stopAuthStatusPolling()
+      }
     } else {
-      ElMessage.error('获取认证链接失败')
       stopAuthStatusPolling()
     }
   } catch (error: any) {

@@ -53,7 +53,7 @@ const loadHierarchy = async () => {
       }
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '加载角色层级关系失败')
+      ElMessage.error(error.message || '加载角色层级关系失败')
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '加载角色层级关系失败')
@@ -136,7 +136,7 @@ const handleDeleteHierarchy = async (parentRole: string, childRole: string) => {
       emit('refresh')
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '删除角色层级关系失败')
+      ElMessage.error(error.message || '删除角色层级关系失败')
     }
   } catch (error: any) {
     if (error !== 'cancel') {

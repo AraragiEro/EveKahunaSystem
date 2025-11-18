@@ -22,7 +22,7 @@ const loadPermissions = async () => {
       permissions.value = data.data || []
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '加载权限列表失败')
+      ElMessage.error(error.message || '加载权限列表失败')
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '加载权限列表失败')
@@ -49,7 +49,7 @@ const handleCreatePermission = async () => {
       loadPermissions()
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '创建权限失败')
+      ElMessage.error(error.message || '创建权限失败')
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '创建权限失败')
@@ -125,7 +125,7 @@ const handleDeletePermission = async (permission: Permission) => {
       loadPermissions()
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '删除权限失败')
+      ElMessage.error(error.message || '删除权限失败')
     }
   } catch (error: any) {
     if (error !== 'cancel') {

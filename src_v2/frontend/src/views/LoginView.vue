@@ -255,14 +255,14 @@ const handleRegister = async () => {
     
     const data = await response.json()
     
-    if (response.ok) {
-      ElMessage.success('注册成功，请登录')
+    if (data.status === 200) {
+      ElMessage.success(data.message || '注册成功，请登录')
       showRegisterDialog.value = false
       handleDialogClose()
       // 自动填充用户名
       loginForm.username = registerForm.username
     } else {
-      ElMessage.error(data.error || '注册失败')
+      ElMessage.error(data.message || '注册失败')
     }
   } catch (error) {
     console.error('注册失败:', error)

@@ -50,7 +50,7 @@ const loadRolePermissions = async () => {
       }
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '加载角色权限失败')
+      ElMessage.error(error.message || '加载角色权限失败')
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '加载角色权限失败')
@@ -115,7 +115,7 @@ const handleRemovePermissionFromRole = async (permissionName: string) => {
       loadRolePermissions()
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '移除角色权限失败')
+      ElMessage.error(error.message || '移除角色权限失败')
     }
   } catch (error: any) {
     if (error !== 'cancel') {

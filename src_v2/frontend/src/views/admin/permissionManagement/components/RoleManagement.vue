@@ -29,7 +29,7 @@ const loadRoles = async () => {
       roles.value = data.data || []
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '加载角色列表失败')
+      ElMessage.error(error.message || '加载角色列表失败')
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '加载角色列表失败')
@@ -54,7 +54,7 @@ const handleCreateRole = async () => {
       loadRoles()
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '创建角色失败')
+      ElMessage.error(error.message || '创建角色失败')
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '创建角色失败')
@@ -101,7 +101,7 @@ const handleDeleteRole = async (role: Role) => {
       loadRoles()
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '删除角色失败')
+      ElMessage.error(error.message || '删除角色失败')
     }
   } catch (error: any) {
     if (error !== 'cancel') {

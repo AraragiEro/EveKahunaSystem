@@ -23,7 +23,7 @@ const loadUsers = async () => {
       users.value = data.data || []
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '加载用户列表失败')
+      ElMessage.error(error.message || '加载用户列表失败')
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '加载用户列表失败')
@@ -59,7 +59,7 @@ const openUserRoleDialog = async (user: User) => {
       }
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '加载用户角色失败')
+      ElMessage.error(error.message || '加载用户角色失败')
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '加载用户角色失败')
@@ -116,7 +116,7 @@ const handleRemoveRoleFromUser = async (roleName: string) => {
       }
     } else {
       const error = await response.json()
-      ElMessage.error(error.error || '移除用户角色失败')
+      ElMessage.error(error.message || '移除用户角色失败')
     }
   } catch (error: any) {
     if (error !== 'cancel') {
