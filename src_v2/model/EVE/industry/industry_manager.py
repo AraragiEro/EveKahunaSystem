@@ -1,10 +1,11 @@
 # 标准库导入
 import asyncio
+from copy import deepcopy
 import json
 from asyncio import Queue
 from enum import Flag
 from itertools import product
-from math import ceil
+from math import ceil, sqrt
 from typing import Dict, List, Tuple
 
 # 本地导入 - 核心工具
@@ -39,44 +40,28 @@ from src_v2.model.EVE.sde.database import InvTypes, MarketGroups
 from .blueprint import BPManager as BPM
 from .plan_configflow_operate import ConfigFlowOperateCenter
 
-# 异步计数器
-class AsyncCounter():
-    def __init__(self):
-        self.node_counter = 0
-        self.relation_counter = 0
-        self._lock = asyncio.Lock()
-    
-    async def next_node(self) -> int:
-        """
-        返回当前node计数并+1
-        
-        Returns:
-            int: 返回当前的node_counter值，然后将其+1
-        """
-        async with self._lock:
-            current = self.node_counter
-            self.node_counter += 1
-            return current
-    
-    async def next_relation(self) -> int:
-        """
-        返回当前relation计数并+1
-        
-        Returns:
-            int: 返回当前的relation_counter值，然后将其+1
-        """
-        async with self._lock:
-            current = self.relation_counter
-            self.relation_counter += 1
-            return current
-    
-    async def init_count(self):
-        """
-        重置所有计数器为0
-        """
-        async with self._lock:
-            self.node_counter = 0
-            self.relation_counter = 0
+# 本地导入 - industry_utils 工具模块
+from .industry_utils import (
+    AsyncCounter,
+    MarketTree,
+    get_market_tree,
+    create_config_flow_config,
+    fetch_recommended_presets,
+    delete_config_flow_config,
+    get_config_flow_config_list,
+    add_config_to_plan,
+    get_config_flow_list,
+    delete_config_from_plan,
+    save_config_flow_to_plan,
+    add_industrypermision,
+    delete_industrypermision,
+    get_user_all_container_permission,
+    get_structure_list,
+    get_structure_assign_keyword_suggestions,
+    get_material_type,
+    get_item_info,
+    get_type_list
+)
 
 
 
@@ -280,23 +265,8 @@ class IndustryManager(metaclass=SingletonMeta):
 
     @classmethod
     async def _get_material_type(cls, type_id: int):
-        group = SdeUtils.get_groupname_by_id(type_id)
-        category = SdeUtils.get_category_by_id(type_id)
-        # 根据 group 或 category 进行判断和分类
-        if group == "Mineral":
-            return "矿石"
-        elif group == 'Ice Product':
-            return "冰矿产物"
-        elif group == "Fuel Block":
-            return "燃料块"
-        elif group == "Moon Materials":
-            return "元素"
-        elif group == "Harvestable Cloud":
-            return "气云"
-        elif category == "Planetary Commodities":
-            return "行星工业"
-        else:
-            return "杂货"
+        """获取材料类型（内部方法，调用工具模块）"""
+        return await get_material_type(type_id)
 
     @classmethod
     async def get_plan_tableview_data(cls, op: ConfigFlowOperateCenter):
@@ -449,6 +419,8 @@ class IndustryManager(metaclass=SingletonMeta):
                     "runs": work["runs"],
                     "bp_object": work["bp_object"],
                     "type_order_id": node["order_id"],
+                    "mater_eff": work["mater_eff"],
+                    "time_eff": work["time_eff"],
                 } for work in node.get("real_job_list", []) if work
             ])
 
@@ -456,11 +428,98 @@ class IndustryManager(metaclass=SingletonMeta):
             await rdm.r.hset(op.current_progress_key, mapping={"name": "整理蓝图库存", "progress": 50, "is_indeterminate": 1})
             node['bp_quantity'], node['bp_jobs'] = await op.get_bp_status(node['type_id'])
         await tqdm_manager.complete_mission(f"分类节点 {plan_name}")
-        # for marterial_type, material_nodes in material_output.items():
-        #     for material_node in material_nodes:
-        #         material_node.update({
-        #             "purchase_price": None
-        #         })
+        
+        # 整理物流信息
+        # 建筑需求
+        structure_material_need_dict = {}
+        for work in [work for work in work_flow if work['avaliable']]:
+            assign_structure_info = await op.get_type_assign_structure_info(work['type_id'])
+            if assign_structure_info:
+                if assign_structure_info['structure_id'] not in structure_material_need_dict:
+                    structure_material_need_dict[assign_structure_info['structure_id']] = deepcopy(assign_structure_info)
+                    structure_material_need_dict[assign_structure_info['structure_id']]["material_need"] = {}
+
+                structure_node = structure_material_need_dict[assign_structure_info['structure_id']]
+                work_material_need = await op.get_work_material_need(work)
+                for material_type_id, material_quantity in work_material_need.items():
+                    structure_node["material_need"][material_type_id] = \
+                        structure_node["material_need"].get(material_type_id, 0) + material_quantity
+        # 建筑供给
+        structure_material_provide_dict = await op.get_structure_material_provide_dict()
+
+        # 处理本地库存
+        for structure_id, structure_info in structure_material_need_dict.items():
+            for material_type_id, material_quantity in structure_info["material_need"].items():
+                if structure_info["structure_id"] in structure_material_provide_dict:
+                    provide_quantity = structure_material_provide_dict[structure_info["structure_id"]]["material_provide"].get(material_type_id, 0)
+                    if provide_quantity >= material_quantity:
+                        provide_quantity -= material_quantity
+                        material_quantity = 0
+                    else:
+                        material_quantity -= provide_quantity
+                        provide_quantity = 0
+                    structure_material_provide_dict[structure_info["structure_id"]]["material_provide"][material_type_id] = provide_quantity
+                    structure_info["material_need"][material_type_id] = material_quantity
+
+        # 处理异地建筑供给
+        # 计算物流线路
+        # 遍历缺少物资的建筑与物资
+        logistic_dict = {}
+        for lack_structure_id, lack_structure_info in structure_material_need_dict.items():
+            for lack_type_id, lack_quantity in lack_structure_info["material_need"].items():
+                # 遍历供给的建筑与物资，寻找匹配
+                for provide_structure_id, provide_structure_info in structure_material_provide_dict.items():
+                    if lack_structure_id == provide_structure_id:
+                        continue
+                    if lack_quantity <= 0:
+                        break
+                    if lack_type_id in provide_structure_info["material_provide"]:
+                        provide_quantity = provide_structure_info["material_provide"][lack_type_id]
+                        if provide_quantity >= lack_quantity:
+                            provide_quantity -= lack_quantity
+                            lack_quantity = 0
+                        else:
+                            lack_quantity -= provide_quantity
+                            provide_quantity = 0
+                        # 匹配成功，更新供给和需求，记录物流线路
+                        provide_structure_info["material_provide"][lack_type_id] = provide_quantity
+                        lack_structure_info["material_need"][lack_type_id] = lack_quantity
+                        if (lack_structure_id, provide_structure_id, lack_type_id) not in logistic_dict:
+                            logistic_dict[(lack_structure_id, provide_structure_id, lack_type_id)] = {
+                                "provide_quantity": provide_quantity,
+                                "provide_structure_info": provide_structure_info,
+                                "lack_structure_info": lack_structure_info,
+                            }
+                        else:
+                            logistic_dict[(lack_structure_id, provide_structure_id, lack_type_id)]["provide_quantity"] += provide_quantity
+        # 整理为可以持计划的数据
+        save_logistic_data = []
+        for (lack_structure_id, provide_structure_id, lack_type_id), logistic_info in logistic_dict.items():
+            light_year = 9.461e15
+            provide_system_info = SdeUtils.get_system_info_by_id(provide_structure_info["system_id"])
+            lack_system_info = SdeUtils.get_system_info_by_id(lack_structure_info["system_id"])
+            save_logistic_data.append({
+                "lack_structure_id": lack_structure_id,
+                "lack_structure_name": lack_structure_info["structure_name"],
+                "provide_structure_id": provide_structure_id,
+                "provide_structure_name": provide_structure_info["structure_name"],
+                "provide_system_id": provide_structure_info["system_id"],
+                "provide_system_name": provide_structure_info["system_name"],
+                "provide_system_coordinate": [provide_system_info["x"] / light_year, provide_system_info["y"] / light_year, provide_system_info["z"] / light_year],
+                "lack_system_id": lack_structure_info["system_id"],
+                "lack_system_name": lack_structure_info["system_name"],
+                "lack_system_coordinate": [lack_system_info["x"] / light_year, lack_system_info["y"] / light_year, lack_system_info["z"] / light_year],
+                "provide_system_distance": sqrt(
+                    (provide_system_info["x"] - lack_system_info["x"])**2 +
+                    (provide_system_info["y"] - lack_system_info["y"])**2 +
+                    (provide_system_info["z"] - lack_system_info["z"])**2
+                ) / light_year,
+                "lack_type_id": lack_type_id,
+                "lack_type_name": SdeUtils.get_cn_name_by_id(lack_type_id),
+                "provide_quantity": logistic_info["provide_quantity"],
+                "provide_volume": SdeUtils.get_volume_by_type_id(lack_type_id) * logistic_info["provide_quantity"],
+            })
+
 
         # 获取劳动力数据
         await rdm.r.hset(op.current_progress_key, mapping={"name": "获取劳动力数据", "progress": 50, "is_indeterminate": 1})
@@ -473,59 +532,14 @@ class IndustryManager(metaclass=SingletonMeta):
             "eiv_cost_dict": eiv_cost_dict,
             "work_flow": work_flow,
             "purchase_output": None,
-            "running_job_tableview_data": running_job_tableview_data
+            "running_job_tableview_data": running_job_tableview_data,
+            "logistic_dict": save_logistic_data
         }
 
     @staticmethod
     async def get_market_tree(node) -> List[Dict]:
-        """获取市场树
-        
-        Returns:
-            List[Dict]: 节点字典列表
-        """
-        async with neo4j_manager.get_session() as session:
-            if node == "root":
-                query = """
-                match (a:MarketGroup)
-                where not exists { (a)-[]->() }
-                return a
-                """
-                result = await session.run(query)
-                nodes = []
-                async for record in result:
-                    node_obj = record["a"]
-                    if node_obj:
-                        node_dict = dict(node_obj)
-                        node_dict["hasChildren"] = True
-                        node_dict['row_id'] = node_dict['market_group_id']
-                        node_dict["name"] = node_dict["name_id_zh"]
-                        nodes.append(node_dict)
-                return nodes
-            else:
-                query = f"""
-                match (b)-[]->(a:MarketGroup {{market_group_id:{node}}}) return b
-                """
-                result = await session.run(query)
-                nodes = []
-                async for record in result:
-                    node_b = record.get("b")
-                    if node_b:
-                        node_dict_b = dict(node_b)
-                        if node_dict_b.get("type_id"):
-                            bp_id = await BPM.get_bp_id_by_prod_typeid(node_dict_b["type_id"])
-                            node_dict_b["hasChildren"] = False
-                            node_dict_b["row_id"] = node_dict_b["type_id"]
-                            node_dict_b["name"] = node_dict_b["type_name_zh"]
-                            if bp_id:
-                                node_dict_b["can_add_plan"] = True
-                            else:
-                                node_dict_b["can_add_plan"] = False
-                        else:
-                            node_dict_b["hasChildren"] = True
-                            node_dict_b['row_id'] = node_dict_b['market_group_id']
-                            node_dict_b["name"] = node_dict_b["name_id_zh"]
-                        nodes.append(node_dict_b)
-                return nodes
+        """获取市场树（代理方法，保持向后兼容）"""
+        return await get_market_tree(node)
 
     @classmethod
     async def _init_index_root_status(cls, plan_user_dict: dict, product_data: dict):
@@ -1001,362 +1015,70 @@ class IndustryManager(metaclass=SingletonMeta):
     async def update_plan_status(cls, plan_name: str, user_name: str, op: ConfigFlowOperateCenter):
         await cls._relation_moniter_process(user_name, plan_name, op)
 
+    # 权限管理方法（代理方法，保持向后兼容）
     @classmethod
     async def add_industrypermision(cls, user_id: str, data):
-        container_data = data['container']
-        asset_data = data['asset']
-        structure_data = data['structure']
-        system_data = data['system']
-
-        async for container in await EveIndustryAssetContainerPermissionDBUtils.select_all_by_user_name(user_id):
-            if container.asset_container_id == container_data['item_id']:
-                raise KahunaException(f"容器 {container_data['item_id']} 已存在")
-
-        permission_obj = EveIndustryAssetContainerPermissionDBUtils.get_obj()
-        permission_obj.user_name = user_id
-        permission_obj.asset_owner_id = asset_data['owner_id']
-        permission_obj.asset_container_id = container_data['item_id']
-        permission_obj.structure_id = structure_data['structure_id']
-        permission_obj.system_id = system_data['system_id']
-        permission_obj.tag = data['tag']
-        await EveIndustryAssetContainerPermissionDBUtils.save_obj(permission_obj)
+        return await add_industrypermision(user_id, data)
 
     @classmethod
     async def delete_industrypermision(cls, user_id: str, data):
-        asset_owner_id = data['asset_owner_id']
-        asset_container_id = data['asset_container_id']
-
-        async for permission in await EveIndustryAssetContainerPermissionDBUtils.select_all_by_user_name(user_id):
-            if permission.asset_owner_id == asset_owner_id and permission.asset_container_id == asset_container_id:
-                await EveIndustryAssetContainerPermissionDBUtils.delete_obj(permission)
-                return
-        raise KahunaException(f"许可不存在")
+        return await delete_industrypermision(user_id, data)
     
     @classmethod
     async def get_user_all_container_permission(cls, user_id: str):
-        cache_str = await rdm.r.get(f'container_permission:{user_id}:all_container_permission')
-        if cache_str:
-            return json.loads(cache_str)
+        return await get_user_all_container_permission(user_id)
 
-        all_container_permission = []
-        async for container in await EveIndustryAssetContainerPermissionDBUtils.select_all_by_user_name(user_id):
-            pull_mission = await EveAssetPullMissionDBUtils.select_mission_by_owner_id(container.asset_owner_id)
-            if not pull_mission:
-                continue
-            access_character = await CharacterManager().get_character_by_character_id(pull_mission.access_character_id)
-            owner_type = pull_mission.asset_owner_type
-            if owner_type == 'character':
-                owner = await eveesi.characters_character(pull_mission.asset_owner_id)
-                owner_name = owner['name']
-            elif owner_type == 'corp':
-                owner = await eveesi.corporations_corporation_id(pull_mission.asset_owner_id)
-                owner_name = owner['name']
-            system_info = SdeUtils.get_system_info_by_id(container.system_id)
-            structure_info_cache = await rdm.redis.hgetall(f'eveesi:universe_structures_structure:{container.structure_id}')
-            if not structure_info_cache:
-                structure_info_cache = await eveesi.universe_structures_structure(access_character.ac_token, container.structure_id)
-                structure_info_cache.pop("position")
-                await rdm.redis.hset(f'eveesi:universe_structures_structure:{container.structure_id}', mapping=structure_info_cache)
-            
-            container = {
-                "asset_owner_id": container.asset_owner_id,
-                "asset_container_id": container.asset_container_id,
-                "structure_id": container.structure_id,
-                "structure_name": structure_info_cache['name'],
-                "system_id": container.system_id,
-                "system_name": system_info['system_name'],
-                "owner_type": owner_type,
-                "owner_name": owner_name,
-                "tag": container.tag,
-            }
-            all_container_permission.append(container)
-
-        await rdm.r.set(f'container_permission:{user_id}:all_container_permission', json.dumps(all_container_permission), ex=60*60)
-        return all_container_permission
-
+    # 结构相关方法（代理方法，保持向后兼容）
     @classmethod
     async def get_structure_list(cls, user_id: str):
-        cache_str = await rdm.r.get(f'structure_suggestions:{user_id}:structure_list')
-        if cache_str:
-            return json.loads(cache_str)
-
-        structure_list = await NAU.get_structure_nodes()
-        res = [
-            {
-                "structure_id": structure["structure_id"],
-                "structure_name": structure["structure_name"],
-            } for structure in structure_list
-        ]
-        await rdm.r.set(f'structure_suggestions:{user_id}:structure_list', json.dumps(res), ex=60*60)
-        return res
+        return await get_structure_list(user_id)
 
     @classmethod
     async def get_structure_assign_keyword_suggestions(cls, assign_type: str, query):
-        output = []
-        if assign_type == 'group':
-            group_fuzz_list = SdeUtils.fuzz_group(query, list_len=10)
-            output.extend([{"value": item, "label": item} for item in group_fuzz_list])
-        elif assign_type == 'meta':
-            meta_fuzz_list = SdeUtils.fuzz_meta(query, list_len=10)
-            output.extend([{"value": item, "label": item} for item in meta_fuzz_list])
-        elif assign_type == 'blueprint':
-            blueprint_fuzz_list = SdeUtils.fuzz_blueprint(query, list_len=10)
-            output.extend([{"value": item, "label": item} for item in blueprint_fuzz_list])
-        elif assign_type == 'marketGroup':
-            market_group_fuzz_list = SdeUtils.fuzz_market_group(query, list_len=10)
-            output.extend([{"value": item, "label": item} for item in market_group_fuzz_list])
-        elif assign_type == 'category':
-            category_fuzz_list = SdeUtils.fuzz_category(query, list_len=10)
-            output.extend([{"value": item, "label": item} for item in category_fuzz_list])
+        return await get_structure_assign_keyword_suggestions(assign_type, query)
 
-        return output
-
+    # 类型列表方法（代理方法，保持向后兼容）
     @classmethod
     async def get_type_list(cls):
-        output = []
-        output.extend([{"value": res.typeName, "label": res.typeName} for res in InvTypes.select(InvTypes.typeName)])
-        output.extend([{"value": res.typeName, "label": res.typeName} for res in InvTypes_zh.select(InvTypes_zh.typeName)])
-        return output
+        return await get_type_list()
 
+    # 配置管理方法（代理方法，保持向后兼容）
     @classmethod
     async def create_config_flow_config(cls, user_id: str, data):
-        config_obj = EveIndustryPlanConfigFlowConfigDBUtils.get_obj()
-        config_obj.user_name = user_id
-        config_obj.config_type = data['config_type']
-        config_obj.config_value = data['config_value']
-        await EveIndustryPlanConfigFlowConfigDBUtils.save_obj(config_obj)
+        return await create_config_flow_config(user_id, data)
 
     @classmethod
     async def fetch_recommended_presets(cls, user_id: str):
-        from .config import DEFAULT_MATERIAL_CONFIG, DEFAULT_BLUEPRINT_CONFIG
-
-        for config in DEFAULT_MATERIAL_CONFIG:
-            config_obj = EveIndustryPlanConfigFlowConfigDBUtils.get_obj()
-            config_obj.user_name = user_id
-            config_obj.config_type = config['config_type']
-            config_obj.config_value = config['config_value']
-            await EveIndustryPlanConfigFlowConfigDBUtils.save_obj(config_obj)
-        for config in DEFAULT_BLUEPRINT_CONFIG:
-            config_obj = EveIndustryPlanConfigFlowConfigDBUtils.get_obj()
-            config_obj.user_name = user_id
-            config_obj.config_type = config['config_type']
-            config_obj.config_value = config['config_value']
-            await EveIndustryPlanConfigFlowConfigDBUtils.save_obj(config_obj)
+        return await fetch_recommended_presets(user_id)
 
     @classmethod
     async def delete_config_flow_config(cls, user_id: str, data):
-        config_id = data['config_id']
-        config_obj = await EveIndustryPlanConfigFlowConfigDBUtils.select_by_id(config_id)
-        if not config_obj:
-            raise KahunaException(f"配置不存在")
-
-        user_config_list = []
-        async for config in await EveIndustryPlanConfigFlowDBUtils.select_all_by_user_name(user_id):
-            user_config_list.append(config)
-        async with postgres_manager.get_session() as session:
-            for config_list in user_config_list:
-                if config_id in config_list.config_list:
-                    config_list.config_list.remove(config_id)
-                    await EveIndustryPlanConfigFlowDBUtils.merge(config_list, session)
-
-            await EveIndustryPlanConfigFlowConfigDBUtils.delete_obj(config_obj)
+        return await delete_config_flow_config(user_id, data)
 
     @classmethod
     async def get_config_flow_config_list(cls, user_id: str):
-        res_list = []
-        async for config in await EveIndustryPlanConfigFlowConfigDBUtils.select_all_by_user_name(user_id):
-            config_data = {
-                "config_id": config.id,
-                "config_type": config.config_type,
-                "config_value": config.config_value
-            }
-            if config.config_type == 'StructureRigConfig':
-                structure_info = await NIU.get_structure_node_by_id(config.config_value['structure_id'])
-                config_data['config_value'].update({
-                    "structure_name": structure_info.get('structure_name', None)
-                })
-            res_list.append(config_data)
-        return res_list
+        return await get_config_flow_config_list(user_id)
 
     @classmethod
     async def add_config_to_plan(cls, user_id: str, data):
-        plan_name = data['plan_name']
-        config_id = data['config_id']
-        config = await EveIndustryPlanConfigFlowConfigDBUtils.select_by_id(config_id)
-        if not config:
-            raise KahunaException(f"配置不存在")
-        plan_config_obj = await EveIndustryPlanConfigFlowDBUtils.select_configflow_by_user_name_and_plan_name(user_id, plan_name)
-        if not plan_config_obj:
-            plan_config_obj = EveIndustryPlanConfigFlowDBUtils.get_obj()
-            plan_config_obj.user_name = user_id
-            plan_config_obj.plan_name = plan_name
-            plan_config_obj.config_list = [config_id]
-            await EveIndustryPlanConfigFlowDBUtils.save_obj(plan_config_obj)
-        else:
-            if config_id in plan_config_obj.config_list:
-                raise KahunaException(f"配置已存在")
-            plan_config_obj.config_list.insert(0, config_id)
-            await EveIndustryPlanConfigFlowDBUtils.merge(plan_config_obj)
+        return await add_config_to_plan(user_id, data)
 
     @classmethod
     async def get_config_flow_list(cls, user_id: str, plan_name: str):
-        plan_config_flow_obj = await EveIndustryPlanConfigFlowDBUtils.select_configflow_by_user_name_and_plan_name(user_id, plan_name)
-        if not plan_config_flow_obj:
-            return []
-
-        config_id_list = plan_config_flow_obj.config_list
-        config_list = []
-        for config_id in config_id_list:
-            config = await EveIndustryPlanConfigFlowConfigDBUtils.select_by_id(config_id)
-            if not config:
-                raise KahunaException(f"配置{config_id}不存在")
-            config_list.append({
-                "config_id": config.id,
-                "config_type": config.config_type,
-                "config_value": config.config_value
-            })
-            if config.config_type == 'StructureRigConfig':
-                structure_info = await NIU.get_structure_node_by_id(config.config_value['structure_id'])
-                config_list[-1]['config_value']['structure_name'] = structure_info.get('structure_name', None)
-        return config_list
+        return await get_config_flow_list(user_id, plan_name)
 
     @classmethod
     async def delete_config_from_plan(cls, user_id: str, data):
-        plan_name = data['plan_name']
-        config_id = data['config_id']
-        plan_config_flow_obj = await EveIndustryPlanConfigFlowDBUtils.select_configflow_by_user_name_and_plan_name(user_id, plan_name)
-        if not plan_config_flow_obj:
-            raise KahunaException(f"配置不存在")
-        plan_config_flow_obj.config_list.remove(config_id)
-        await EveIndustryPlanConfigFlowDBUtils.merge(plan_config_flow_obj)
+        return await delete_config_from_plan(user_id, data)
 
     @classmethod
     async def save_config_flow_to_plan(cls, user_id: str, plan_name: str, data):
-        config_id_list = [d["config_id"] for d in data["config_list"]]
-        config_flow_obj = await EveIndustryPlanConfigFlowDBUtils.select_configflow_by_user_name_and_plan_name(user_id, plan_name)
-        if not config_flow_obj:
-            config_flow_obj = EveIndustryPlanConfigFlowDBUtils.get_obj()
-            config_flow_obj.user_name = user_id
-            config_flow_obj.plan_name = plan_name
-            config_flow_obj.config_list = config_id_list
-            await EveIndustryPlanConfigFlowDBUtils.save_obj(config_flow_obj)
-        else:
-            config_flow_obj.config_list = config_id_list
-            await EveIndustryPlanConfigFlowDBUtils.merge(config_flow_obj)
+        return await save_config_flow_to_plan(user_id, plan_name, data)
 
+    # 物品信息方法（代理方法，保持向后兼容）
     @classmethod
     async def get_item_info(cls, type_id: int):
-        return {
-            "type_id": type_id,
-            "type_name": SdeUtils.get_name_by_id(type_id),
-            "type_name_zh": SdeUtils.get_cn_name_by_id(type_id),
-            "meta": SdeUtils.get_metaname_by_typeid(type_id),
-            "group": SdeUtils.get_groupname_by_id(type_id),
-            "market_group_list": "-".join(SdeUtils.get_market_group_list(type_id))
-        }
+        return await get_item_info(type_id)
 
-class MarketTree():
-    def __init__(self):
-        pass
-
-    @classmethod
-    async def init_market_tree(cls, clean=False):
-        # 市场组入数据库
-        # 拉取全量market_group数据
-        if clean:
-            await NIU.delete_label_node("MarketGroup")
-        
-        # 先创建所有节点
-        async def create_market_group_node_with_semaphore(market_group: MarketGroups):
-            async with neo4j_manager.semaphore:
-                cn_name = SdeUtils.get_market_group_name_by_groupid(market_group.marketGroupID, zh=True)
-                await NIU.merge_node(
-                    "MarketGroup",
-                    {"market_group_id": market_group.marketGroupID},
-                    {
-                        "market_group_id": market_group.marketGroupID,
-                        "has_types": market_group.hasTypes,
-                        "icon_id": market_group.iconID,
-                        "name_id": market_group.nameID,
-                        "name_id_zh": cn_name,
-                    }
-                )
-                await tqdm_manager.update_mission("init_market_tree", 1)
-        tasks = []
-        market_group_data = MarketGroups.select()
-        await tqdm_manager.add_mission("init_market_tree", len(market_group_data))
-        for market_group in market_group_data:
-            tasks.append(asyncio.create_task(create_market_group_node_with_semaphore(market_group)))
-        await asyncio.gather(*tasks)
-        await tqdm_manager.complete_mission("init_market_tree")
-
-        # 再创建所有关系
-        async def link_market_group_to_market_group_with_semaphore(market_group: MarketGroups):
-            async with neo4j_manager.semaphore:
-                cn_name = SdeUtils.get_market_group_name_by_groupid(market_group.marketGroupID, zh=True)
-                await NIU.link_node(
-                    "MarketGroup",
-                    {"market_group_id": market_group.marketGroupID},
-                    {"market_group_id": market_group.marketGroupID},
-                    "EVE_MARKET_GROUP",
-                    {},
-                    {},
-                    "MarketGroup",
-                    {"market_group_id": market_group.parentGroupID},
-                    {"market_group_id": market_group.parentGroupID},
-                )
-                await tqdm_manager.update_mission("link_type_to_market_group", 1)
-        market_group_data = MarketGroups.select()
-        tasks = []
-        await tqdm_manager.add_mission("init_market_tree", len(market_group_data))
-        for market_group in market_group_data:
-            if market_group.parentGroupID:
-                tasks.append(asyncio.create_task(link_market_group_to_market_group_with_semaphore(market_group)))
-        await asyncio.gather(*tasks)
-        await tqdm_manager.complete_mission("init_market_tree")
-
-    @classmethod
-    async def link_type_to_market_group(cls, clean=False):
-        # type 数据入库
-        # 拉取全量type数据
-        if clean:
-            await NIU.delete_label_node("Type")
-
-        async def link_type_to_market_group_with_semaphore(type: InvTypes):
-            async with neo4j_manager.semaphore:
-                cn_name = SdeUtils.get_cn_name_by_id(type.typeID)
-                meta_group_name = SdeUtils.get_metaname_by_metaid(type.typeID)
-                category_name = SdeUtils.get_category_by_id(type.typeID)
-                category_name_zh = SdeUtils.get_category_by_id(type.typeID, zh=True)
-                bp_id = await BPM.get_bp_id_by_prod_typeid(type.typeID)
-
-                await NIU.link_node(
-                    "Type",
-                    {"type_id": type.typeID},
-                    {
-                        "type_id": type.typeID,
-                        "type_name": type.typeName,
-                        "type_name_zh": cn_name,
-                        "meta_group_name": meta_group_name,
-                        "category_name": category_name,
-                        "category_name_zh": category_name_zh,
-                        "bp_id": bp_id
-                    },
-                    "EVE_MARKET_GROUP",
-                    {},
-                    {},
-                    "MarketGroup",
-                    {"market_group_id": type.marketGroupID},
-                    {"market_group_id": type.marketGroupID}
-                )
-                await tqdm_manager.update_mission("link_type_to_market_group", 1)
-        type_data = InvTypes.select()
-        tasks = []
-        await tqdm_manager.add_mission("link_type_to_market_group", len(type_data))
-        for type in type_data:
-            if type.marketGroupID:
-                tasks.append(asyncio.create_task(link_type_to_market_group_with_semaphore(type)))
-            else:
-                await tqdm_manager.update_mission("link_type_to_market_group", 1)
-        await asyncio.gather(*tasks)
-        await tqdm_manager.complete_mission("link_type_to_market_group")
+# MarketTree 类（代理类，保持向后兼容）
+# 注意：MarketTree 类在 industry_utils 中定义，这里通过导入使用

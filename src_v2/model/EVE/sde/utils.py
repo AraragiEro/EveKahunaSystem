@@ -320,7 +320,10 @@ class SdeUtils:
                 model.MapSolarSystems.solarSystemName.alias('system_name'),
                 model.MapSolarSystems.solarSystemID.alias('system_id'),
                 model.MapSolarSystems.regionID.alias('region_id'),
-                model.MapRegions.regionName.alias('region_name')
+                model.MapRegions.regionName.alias('region_name'),
+                model.MapSolarSystems.x.alias('x'),
+                model.MapSolarSystems.y.alias('y'),
+                model.MapSolarSystems.z.alias('z')
             )
             .join(model.MapRegions, on=(model.MapSolarSystems.regionID == model.MapRegions.regionID))
             .where(model.MapSolarSystems.solarSystemID == system_id)

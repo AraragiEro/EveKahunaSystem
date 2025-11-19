@@ -380,6 +380,18 @@ class Neo4jAssetUtils:
             return nodes
 
     @staticmethod
+    async def get_structure_node_by_structure_id(structure_id: int) -> Dict:
+        query = """
+        match (a:Structure {structure_id: $structure_id}) return a
+        """
+        async with neo4j_manager.get_session() as session:
+            result = await session.run(query, {"structure_id": structure_id})
+            record = await result.single()
+            if record:
+                return dict(record["a"])
+            return {}
+
+    @staticmethod
     async def get_asset_by_type_id_in_container_list(type_id: int, container_list: List[int]) -> List[Dict]:
         query = """
         match (a:Asset {type_id: $type_id}) where a.location_id in $container_list return a
@@ -393,6 +405,25 @@ class Neo4jAssetUtils:
 
     @staticmethod
     async def get_asset_in_container_list(container_list: List[int]) -> List[Dict]:
+        """
+        
+        Args:
+            container_list: 容器列表
+        Returns:
+            List[Dict]: 资产列表
+            {
+                "is_blueprint_copy": bool,
+                "is_singleton": bool,
+                "item_id": int,
+                "location_flag": str,
+                "location_id": int,
+                "location_type": str,
+                "owner_id": int,
+                "quantity": int,
+                "type_id": int,
+                "type_name": str,
+            }
+        """
         query = """
         match (a:Asset) where a.location_id in $container_list return a
         """

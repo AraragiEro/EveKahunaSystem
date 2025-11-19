@@ -125,7 +125,7 @@ async def main():
     # await redis_manager.r.flushall()
 
     # TODO 市场信息节点初始化，参数控制。
-    # from src_v2.model.EVE.industry.industry_manager import MarketTree
+    # from src_v2.model.EVE.industry.industry_utils import MarketTree
     # await MarketTree.init_market_tree()
     # await MarketTree.link_type_to_market_group()
     # TODO 蓝图信息节点初始化，参数控制。

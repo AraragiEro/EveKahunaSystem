@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 import json
 import time
 from math import ceil
@@ -15,9 +16,8 @@ from src_v2.model.EVE.character.character_manager import CharacterManager
 from src_v2.core.user.user_manager import UserManager
 from src_v2.core.database.kahuna_database_utils_v2 import EveIndustryPlanDBUtils
 from src_v2.model.EVE.eveesi import eveesi
-from src_v2.model.EVE.industry.industry_manager import BPM
 from src_v2.model.EVE.sde import SdeUtils
-from src_v2.model.EVE.industry.blueprint import BPManager
+from src_v2.model.EVE.industry.blueprint import BPManager as BPM
 
 from src_v2.core.database.connect_manager import redis_manager as rds
 
@@ -240,7 +240,7 @@ class ConfigFlowOperateCenter():
             if job['output_location_id'] not in access_container_list:
                 continue
             character_public_info = await CharacterManager().get_public_character_info_by_character_id(job['installer_id'])
-            active_type = await BPManager.get_activity_id_by_product_typeid(job['product_type_id'])
+            active_type = await BPM.get_activity_id_by_product_typeid(job['product_type_id'])
             if active_type == 1:
                 activity_name = "制造"
             elif active_type == 11:
@@ -261,7 +261,7 @@ class ConfigFlowOperateCenter():
     async def _is_match_keyword(self, conf_list, type_id: int):
         group_list = [SdeUtils.get_groupname_by_id(type_id), SdeUtils.get_groupname_by_id(type_id, zh=True)]
         meta_list = [SdeUtils.get_metaname_by_typeid(type_id), SdeUtils.get_metaname_by_typeid(type_id, zh=True)]
-        bp_name_list = [await BPManager.get_bp_name_by_typeid(type_id), await BPManager.get_bp_name_by_typeid(type_id, zh=True)]
+        bp_name_list = [await BPM.get_bp_name_by_typeid(type_id), await BPM.get_bp_name_by_typeid(type_id, zh=True)]
         category_list = [SdeUtils.get_category_by_id(type_id), SdeUtils.get_category_by_id(type_id, zh=True)]
         market_group_list = SdeUtils.get_market_group_list(type_id)
         market_group_list.extend(SdeUtils.get_market_group_list(type_id, zh=True))
@@ -304,7 +304,7 @@ class ConfigFlowOperateCenter():
             h, m ,s = conf["max_time_date"].split(":")
             day = conf["max_time_day"]
             max_time = day * 24 * 3600 + int(h) * 3600 + int(m) * 60 + int(s)
-            active_time = await BPManager.get_production_time(type_id)
+            active_time = await BPM.get_production_time(type_id)
 
             # TODO 系数计算
 
@@ -402,7 +402,7 @@ class ConfigFlowOperateCenter():
     async def get_bp_object(self, type_id: int, less_job_run: bool, considerate_bp_relation: bool):
         if not self._bp_prepare:
             await self.prepare_bp_asset()
-        bp_type_id = await BPManager.get_bp_id_by_prod_typeid(type_id)
+        bp_type_id = await BPM.get_bp_id_by_prod_typeid(type_id)
         
         fake_bp = {
             "type_id": bp_type_id,
@@ -486,7 +486,7 @@ class ConfigFlowOperateCenter():
         if not self._bp_prepare:
             await self.prepare_bp_asset()
         
-        bp_type_id = await BPManager.get_bp_id_by_prod_typeid(type_id)
+        bp_type_id = await BPM.get_bp_id_by_prod_typeid(type_id)
         bpc_list = self._bp_asset.get(bp_type_id, {}).get("bpc", [])
         bpo_list = self._bp_asset.get(bp_type_id, {}).get("bpo", [])
 
@@ -499,6 +499,23 @@ class ConfigFlowOperateCenter():
         return bp_quantity, bp_jobs
 
     async def get_type_assign_structure_info(self, type_id: int):
+        """
+        Args:
+            type_id: int
+        Returns:
+            None or 
+        structure_info: {
+            "item_id": int,
+            "owner_id": int,
+            "region_id": int,
+            "region_name": str,
+            "structure_id": int,
+            "structure_name": str,
+            "structure_type": str,
+            "system_id": int,
+            "system_name": str,
+        }
+        """
         if type_id in self.type_assign_structure_info_cache:
             return self.type_assign_structure_info_cache[type_id]
 
@@ -540,7 +557,7 @@ class ConfigFlowOperateCenter():
 
         # 找到物品分配的建筑
         res, conf = await self._is_match_keyword(self.structure_assign_confs, type_id)
-        active_type = await BPManager.get_activity_id_by_product_typeid(type_id)
+        active_type = await BPM.get_activity_id_by_product_typeid(type_id)
         if res:
             # 获取建筑
             structure_name = conf['structure_name']
@@ -630,6 +647,54 @@ class ConfigFlowOperateCenter():
 
         return self._asset_allocate[(type_id, index_id)]
 
+    async def get_structure_material_provide_dict(self):
+        """
+        Returns:
+            Dict: 建筑物资供给字典
+            {
+                "structure_id": {
+                    "structure_name": str,
+                    "structure_type": str,
+                    "system_id": int,
+                    "system_name": str,
+                    "region_id": int,
+                    "region_name": str,
+                    "material_provide": Dict[int, int]
+                }
+            }
+        """
+        structure_material_provide_dict = {}
+        contaier_conf_dict = {conf['asset_container_id']: conf for conf in self.load_asset_confs}
+
+        assets = await NAU.get_asset_in_container_list(list(contaier_conf_dict.keys()))
+        for asset in assets:
+            asset_container_conf = contaier_conf_dict.get(asset['location_id'], None)
+            if not asset_container_conf:
+                continue
+            if asset_container_conf["structure_id"] not in structure_material_provide_dict:
+                structure_info = await NAU.get_structure_node_by_structure_id(asset_container_conf["structure_id"])
+                if structure_info:
+                    structure_material_provide_dict[structure_info["structure_id"]] = structure_info
+                else:
+                    logger.error(f"structure_info {asset_container_conf['structure_id']} not found")
+                    continue
+                structure_material_provide_dict[structure_info["structure_id"]]["material_provide"] = {}
+            else:
+                structure_info = structure_material_provide_dict[asset_container_conf["structure_id"]]
+            structure_node = structure_material_provide_dict[structure_info["structure_id"]]
+            structure_node["material_provide"][asset['type_id']] = structure_node["material_provide"].get(asset['type_id'], 0) + asset['quantity']
+
+        return structure_material_provide_dict
+
+    async def get_work_material_need(self, work: dict):
+        material_need = await BPM.get_bp_materials(work['type_id'])
+        runs = work['runs']
+        mater_eff = work['mater_eff']
+        material_need_dict = {}
+        for material_type_id, material_quantity in material_need.items():
+            material_need_dict[material_type_id] = ceil(material_quantity * runs * (mater_eff if material_quantity != 1 else 1))
+        return material_need_dict
+
     async def calculate_work_material_avaliable(self, work_list: list):
         if not self._asset_prepare:
             await self.prepare_asset()
@@ -638,7 +703,7 @@ class ConfigFlowOperateCenter():
             if disable:
                 work['avaliable'] = False
                 continue
-            material_need = await BPManager.get_bp_materials(work['type_id'])
+            material_need = await BPM.get_bp_materials(work['type_id'])
             runs = work['runs']
             mater_eff = work['mater_eff']
             
@@ -659,7 +724,6 @@ class ConfigFlowOperateCenter():
                 self._material_allocate[material_type_id] -= ceil(material_quantity * runs * (mater_eff if material_quantity != 1 else 1))
             work['avaliable'] = True
         
-
     async def prepare_running_asset(self):
         async with running_asset_prepare_lock:
             if self._running_asset_prepare:

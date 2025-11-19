@@ -42,7 +42,8 @@ async def test2():
     # await AssetManager().clean_asset_pull_mission_assets(mission_obj)
     # await AssetManager().processing_asset_pull_mission(mission_obj)
 
-    from src_v2.model.EVE.industry.industry_manager import IndustryManager, MarketTree
+    from src_v2.model.EVE.industry.industry_manager import IndustryManager
+    from src_v2.model.EVE.industry.industry_utils import MarketTree
     plan_dict = {
         "plan_name": "test",
         "user_name": "111111",

@@ -9,6 +9,7 @@ from quart import current_app as app
 from src_v2.backend.auth import auth_required, verify_token
 from src_v2.core.database.connect_manager import redis_manager
 from werkzeug.security import check_password_hash, generate_password_hash
+from sqlalchemy.exc import IntegrityError
 
 from src_v2.core.user.user_manager import UserManager
 from src.service.log_server import logger
@@ -378,6 +379,12 @@ async def create_config_flow_config():
         return jsonify({"message": "创建配置流配置成功", "status": 200})
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
+    except IntegrityError as e:
+        logger.error(f"创建配置流配置失败 - 数据库完整性错误: {traceback.format_exc()}")
+        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+        if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
+            return jsonify({"status": 500, "message": "创建配置流配置失败：ID冲突，请稍后重试"}), 500
+        return jsonify({"status": 500, "message": f"创建配置流配置失败：{error_msg}"}), 500
     except Exception as e:
         logger.error(f"创建配置流配置失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "创建配置流配置失败"}), 500
