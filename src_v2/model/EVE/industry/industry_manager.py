@@ -494,7 +494,10 @@ class IndustryManager(metaclass=SingletonMeta):
                             logistic_dict[(lack_structure_id, provide_structure_id, lack_type_id)]["provide_quantity"] += provide_quantity
         # 整理为可以持计划的数据
         save_logistic_data = []
-        for (lack_structure_id, provide_structure_id, lack_type_id), logistic_info in logistic_dict.items():
+        for d, logistic_info in logistic_dict.items():
+            lack_structure_id, provide_structure_id, lack_type_id = d
+            provide_structure_info = logistic_info["provide_structure_info"]
+            lack_structure_info = logistic_info["lack_structure_info"]
             light_year = 9.461e15
             provide_system_info = SdeUtils.get_system_info_by_id(provide_structure_info["system_id"])
             lack_system_info = SdeUtils.get_system_info_by_id(lack_structure_info["system_id"])

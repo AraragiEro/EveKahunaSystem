@@ -78,6 +78,17 @@ const tableData = computed(() => {
     }))
 })
 
+// 计算总体积总和
+const totalVolume = computed(() => {
+    if (!tableData.value || tableData.value.length === 0) {
+        return 0
+    }
+    return tableData.value.reduce((sum, item) => {
+        const volume = item.provide_volume || 0
+        return sum + (typeof volume === 'number' ? volume : parseFloat(volume) || 0)
+    }, 0)
+})
+
 // 图表相关
 const graphContainerRef = ref<HTMLElement>()
 let chartInstance: echarts.ECharts | null = null
@@ -225,7 +236,7 @@ const graphData = computed(() => {
                     source,
                     target,
                     volume,
-                    curveness: -0.3
+                    curveness: 0.1
                 })
             } else {
                 // 反向边未处理，当前边使用正curveness
@@ -233,7 +244,7 @@ const graphData = computed(() => {
                     source,
                     target,
                     volume,
-                    curveness: 0.3
+                    curveness: 0.1
                 })
             }
         } else {
@@ -490,7 +501,7 @@ onUnmounted(() => {
                     <el-col :span="24">
                         <el-card shadow="never" class="chart-card">
                             <template #header>
-                                <span>物流关系图</span>
+                                <span>星系图</span>
                             </template>
                             <div ref="graphContainerRef" class="chart-container"></div>
                         </el-card>
@@ -499,7 +510,7 @@ onUnmounted(() => {
                     <el-col :span="24">
                         <el-card shadow="never" class="table-card">
                             <template #header>
-                                <span>物流数据表格</span>
+                                <span>运力表</span>
                             </template>
                             <el-table
                                 :data="tableData"
@@ -519,7 +530,13 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="总体积 (m³)" prop="provide_volume" width="120">
+                                <el-table-column label="总体积 (m³)" prop="provide_volume" width="150">
+                                    <template #header>
+                                        <span>总体积 (m³)</span>
+                                        <div style="font-size: 12px; color: #909399; font-weight: normal; margin-top: 4px;">
+                                            总计: {{ formatAccounting(totalVolume) }}
+                                        </div>
+                                    </template>
                                     <template #default="{ row }">
                                         <div 
                                             class="copyable-cell" 
@@ -530,7 +547,7 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="出发地" prop="provide_structure_name" width="150">
+                                <el-table-column label="出发地" prop="provide_structure_name" width="250">
                                     <template #default="{ row }">
                                         <div 
                                             class="copyable-cell" 
@@ -541,7 +558,7 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="目的地" prop="lack_structure_name" width="150">
+                                <el-table-column label="目的地" prop="lack_structure_name" width="250">
                                     <template #default="{ row }">
                                         <div 
                                             class="copyable-cell" 
@@ -552,7 +569,7 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="距离" prop="provide_system_distance" width="100">
+                                <el-table-column label="距离(Ly)" prop="provide_system_distance" width="100">
                                     <template #default="{ row }">
                                         <div 
                                             class="copyable-cell" 
