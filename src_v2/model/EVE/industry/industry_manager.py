@@ -898,7 +898,7 @@ class IndustryManager(metaclass=SingletonMeta):
         actype = "manufacturing" if self_relation['activity_id'] == 1 else "reaction"
         if "manufacturing" not in system_cost:
             logger.error(f"system_cost {system_cost} not have {actype}")
-        eiv_cost = float(system_cost[actype] + 0.04) * material_adjust_price * self_relation['material_num']
+        eiv_cost = float(float(system_cost[actype]) + 0.04) * material_adjust_price * self_relation['material_num']
         real_eiv_cost_list = [eiv_cost * work['runs'] for work in job_list]
         quantity_material_need = sum(quantity_material_need_list)
         real_quantity_material_need = sum(real_quantity_material_need_list)
