@@ -10,6 +10,7 @@ from hypercorn.asyncio import serve
 from src_v2.backend.app import get_app, serve_vue
 from src_v2.core import init_database
 from src_v2.model.EVE.eveesi import init_esi_manager
+from src_v2.core.permission.permission_manager import permission_manager
 
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
@@ -120,6 +121,7 @@ async def main():
     # 初始化数据库和基础服务
     await init_database()
     await init_esi_manager()
+    await permission_manager.init_base_roles()
 
     from src_v2.core.database.connect_manager import redis_manager
     # await redis_manager.r.flushall()
