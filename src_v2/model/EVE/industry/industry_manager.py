@@ -1010,7 +1010,7 @@ class IndustryManager(metaclass=SingletonMeta):
             all_relation_list = await NIU.get_relations("PLAN_BP_DEPEND_ON", {"user_name": user_name, "plan_name": plan_name})
             mission_count = await tqdm_manager.get_mission_count("relation_moniter_process")
             now_progress = mission_count / len(all_relation_list) * 100
-            if now_progress > last_progress + 10:
+            if now_progress > last_progress + 1:
                 await rdm.r.hset(op.current_progress_key, mapping={"name": "更新树状态", "progress": now_progress, "is_indeterminate": 0})
                 last_progress = now_progress
         await tqdm_manager.complete_mission("relation_moniter_process")
