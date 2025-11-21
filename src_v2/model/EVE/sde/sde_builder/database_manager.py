@@ -218,6 +218,34 @@ class SDEDatabaseManager:
                 except Exception as e:
                     logger.warning(f"关闭数据库会话时出错: {e}")
     
+    @asynccontextmanager
+    async def get_readonly_session(self):
+        """获取只读数据库会话（异步上下文管理器，无事务开销）
+        
+        使用 autocommit 模式，不开启事务，适合所有只读查询操作。
+        相比 get_session()，减少了事务开启和提交的开销。
+        """
+        if not self._session_maker:
+            raise RuntimeError("数据库未初始化，请先调用 init() 方法")
+        
+        # 使用信号量限制并发连接数，防止连接池耗尽
+        async with self.semaphore:
+            session = self._session_maker()
+            try:
+                # 对于只读查询，不需要事务，直接执行
+                # SQLAlchemy 默认情况下，如果没有显式开启事务，查询会在 autocommit 模式下执行
+                yield session
+                # 不提交事务（因为没有开启事务，避免不必要的 commit 开销）
+            except Exception:
+                # 只读查询失败时也不需要回滚（因为没有事务）
+                raise
+            finally:
+                # 无论如何都要关闭会话，将连接返回到连接池
+                try:
+                    await session.close()
+                except Exception as e:
+                    logger.warning(f"关闭只读数据库会话时出错: {e}")
+    
     async def close(self):
         """关闭数据库连接"""
         if self.engine:

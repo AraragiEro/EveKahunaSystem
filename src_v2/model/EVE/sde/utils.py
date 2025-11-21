@@ -92,7 +92,7 @@ class SdeUtils:
             if result_list is not None:
                 return result_list
             
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 if zh:
                     stmt = select(InvTypes.typeName_zh).where(InvTypes.marketGroupID.isnot(None))
                     result = await session.execute(stmt)
@@ -119,7 +119,7 @@ class SdeUtils:
             if result_list is not None:
                 return result_list
             
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 if zh:
                     stmt = select(InvGroups.groupName_zh)
                     result = await session.execute(stmt)
@@ -146,7 +146,7 @@ class SdeUtils:
             if result_list is not None:
                 return result_list
             
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 if zh:
                     stmt = select(MetaGroups.nameID_zh)
                     result = await session.execute(stmt)
@@ -173,7 +173,7 @@ class SdeUtils:
             if result_list is not None:
                 return result_list
             
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 if zh:
                     name_field = InvTypes.typeName_zh
                     stmt = (
@@ -212,7 +212,7 @@ class SdeUtils:
             if result_list is not None:
                 return result_list
             
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 if zh:
                     stmt = select(MarketGroups.nameID_zh)
                     result = await session.execute(stmt)
@@ -239,7 +239,7 @@ class SdeUtils:
             if result_list is not None:
                 return result_list
             
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 if zh:
                     stmt = select(InvCategories.categoryName_zh)
                     result = await session.execute(stmt)
@@ -255,7 +255,7 @@ class SdeUtils:
     @cached(ttl=3600, serializer=PickleSerializer())
     async def get_t2_ship(zh: bool = False) -> List[str]:
         """获取所有 T2 舰船名称列表"""
-        async with (await get_db_manager()).get_session() as session:
+        async with (await get_db_manager()).get_readonly_session() as session:
             name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
             category_name_field = InvCategories.categoryName_zh if zh else InvCategories.categoryName_en
             meta_name_field = MetaGroups.nameID_zh if zh else MetaGroups.nameID_en
@@ -277,7 +277,7 @@ class SdeUtils:
     @cached(ttl=3600, serializer=PickleSerializer())
     async def get_battleship(zh: bool = False) -> List[str]:
         """获取所有战列舰名称列表"""
-        async with (await get_db_manager()).get_session() as session:
+        async with (await get_db_manager()).get_readonly_session() as session:
             name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
             category_name_field = InvCategories.categoryName_zh if zh else InvCategories.categoryName_en
             
@@ -305,7 +305,7 @@ class SdeUtils:
     @cached(ttl=3600, serializer=PickleSerializer())
     async def get_capital_ship(zh: bool = False) -> List[str]:
         """获取所有旗舰名称列表"""
-        async with (await get_db_manager()).get_session() as session:
+        async with (await get_db_manager()).get_readonly_session() as session:
             name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
             category_name_field = InvCategories.categoryName_zh if zh else InvCategories.categoryName_en
             
@@ -340,7 +340,7 @@ class SdeUtils:
     async def get_groupname_by_id(invtpye_id: int, zh: bool = False) -> Optional[str]:
         """根据 typeID 获取组名称"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 group_name_field = InvGroups.groupName_zh if zh else InvGroups.groupName_en
                 stmt = (
                     select(group_name_field)
@@ -359,7 +359,7 @@ class SdeUtils:
     async def get_groupid_by_groupname(group_name: str) -> Optional[int]:
         """根据组名称获取 groupID"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 is_zh = SdeUtils.maybe_chinese(group_name)
                 group_name_field = InvGroups.groupName_zh if is_zh else InvGroups.groupName_en
                 stmt = select(InvGroups.groupID).where(group_name_field == group_name)
@@ -374,7 +374,7 @@ class SdeUtils:
     async def get_invtpye_node_by_id(invtpye_id: int):
         """根据 typeID 获取 InvTypes 对象"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 stmt = select(InvTypes).where(InvTypes.typeID == invtpye_id)
                 result = await session.execute(stmt)
                 return result.scalar_one_or_none()
@@ -387,7 +387,7 @@ class SdeUtils:
     async def get_invtype_packagedvolume_by_id(invtpye_id: int) -> float:
         """根据 typeID 获取 packagedVolume"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 stmt = select(InvTypes.packagedVolume).where(InvTypes.typeID == invtpye_id)
                 result = await session.execute(stmt)
                 volume = result.scalar()
@@ -401,7 +401,7 @@ class SdeUtils:
     async def get_metaname_by_metaid(meta_id: int, zh: bool = False) -> Optional[str]:
         """根据 metaGroupID 获取 meta 名称"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 name_field = MetaGroups.nameID_zh if zh else MetaGroups.nameID_en
                 stmt = select(name_field).where(MetaGroups.metaGroupID == meta_id)
                 result = await session.execute(stmt)
@@ -415,7 +415,7 @@ class SdeUtils:
     async def get_metaname_by_typeid(typeid: int, zh: bool = False) -> Optional[str]:
         """根据 typeID 获取 meta 名称"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 name_field = MetaGroups.nameID_zh if zh else MetaGroups.nameID_en
                 stmt = (
                     select(name_field)
@@ -434,7 +434,7 @@ class SdeUtils:
     async def get_metadid_by_metaname(meta_name: str) -> Optional[int]:
         """根据 meta 名称获取 metaGroupID"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 is_zh = SdeUtils.maybe_chinese(meta_name)
                 name_field = MetaGroups.nameID_zh if is_zh else MetaGroups.nameID_en
                 stmt = select(MetaGroups.metaGroupID).where(name_field == meta_name)
@@ -449,7 +449,7 @@ class SdeUtils:
     async def get_id_by_name(name: str) -> Optional[int]:
         """根据物品名称获取 typeID"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 is_zh = SdeUtils.maybe_chinese(name)
                 name_field = InvTypes.typeName_zh if is_zh else InvTypes.typeName_en
                 stmt = select(InvTypes.typeID).where(name_field == name)
@@ -464,7 +464,7 @@ class SdeUtils:
     async def get_name_by_id(type_id: int, zh: bool = False) -> Optional[str]:
         """根据 typeID 获取物品名称"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
                 stmt = select(name_field).where(InvTypes.typeID == type_id)
                 result = await session.execute(stmt)
@@ -491,7 +491,7 @@ class SdeUtils:
         """获取市场组树（NetworkX 图）"""
         if not cls._market_tree:
             g = nx.DiGraph()
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 stmt = select(MarketGroups.marketGroupID, MarketGroups.parentGroupID)
                 result = await session.execute(stmt)
                 for row in result:
@@ -507,7 +507,7 @@ class SdeUtils:
     async def get_market_group_name_by_groupid(market_group_id: int, zh: bool = False) -> Optional[str]:
         """根据 marketGroupID 获取市场组名称"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 name_field = MarketGroups.nameID_zh if zh else MarketGroups.nameID_en
                 stmt = select(name_field).where(MarketGroups.marketGroupID == market_group_id)
                 result = await session.execute(stmt)
@@ -521,7 +521,7 @@ class SdeUtils:
     async def get_market_groupid_by_name(market_group_name: str) -> Optional[int]:
         """根据市场组名称获取 marketGroupID"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 is_zh = SdeUtils.maybe_chinese(market_group_name)
                 name_field = MarketGroups.nameID_zh if is_zh else MarketGroups.nameID_en
                 stmt = select(MarketGroups.marketGroupID).where(name_field == market_group_name)
@@ -536,7 +536,7 @@ class SdeUtils:
     async def get_market_group_list(cls, type_id: int, zh: bool = False) -> List[str]:
         """根据 typeID 获取市场组列表（从根到叶子）"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 # 获取物品信息和市场组ID
                 type_name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
                 stmt = select(InvTypes.marketGroupID, type_name_field).where(InvTypes.typeID == type_id)
@@ -598,7 +598,7 @@ class SdeUtils:
     async def get_category_by_id(type_id: int, zh: bool = False) -> Optional[str]:
         """根据 typeID 获取类别名称"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 category_name_field = InvCategories.categoryName_zh if zh else InvCategories.categoryName_en
                 stmt = (
                     select(category_name_field)
@@ -618,7 +618,7 @@ class SdeUtils:
     async def get_system_info_by_id(system_id: int, zh: bool = False) -> Optional[dict]:
         """根据 systemID 获取星系信息"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 system_name_field = MapSolarSystems.solarSystemName_zh if zh else MapSolarSystems.solarSystemName_en
                 region_name_field = MapRegions.regionName_zh if zh else MapRegions.regionName_en
                 
@@ -801,7 +801,7 @@ class SdeUtils:
     @cached(ttl=3600, serializer=PickleSerializer())
     async def get_all_type_id_in_market() -> List[int]:
         """获取所有在市场中的 typeID 列表"""
-        async with (await get_db_manager()).get_session() as session:
+        async with (await get_db_manager()).get_readonly_session() as session:
             stmt = select(InvTypes.typeID).where(InvTypes.marketGroupID.isnot(None))
             result = await session.execute(stmt)
             return [row[0] for row in result]
@@ -820,7 +820,7 @@ class SdeUtils:
         ]
         category_list = category_list_zh if zh else category_list_en
         
-        async with (await get_db_manager()).get_session() as session:
+        async with (await get_db_manager()).get_readonly_session() as session:
             category_name_field = InvCategories.categoryName_zh if zh else InvCategories.categoryName_en
             stmt = (
                 select(InvTypes.typeID)
@@ -838,7 +838,7 @@ class SdeUtils:
     async def get_volume_by_type_id(type_id: int) -> float:
         """根据 typeID 获取体积"""
         try:
-            async with (await get_db_manager()).get_session() as session:
+            async with (await get_db_manager()).get_readonly_session() as session:
                 stmt = select(InvTypes.volume).where(InvTypes.typeID == type_id)
                 result = await session.execute(stmt)
                 volume = result.scalar()
