@@ -26,7 +26,7 @@ async def corporations_corporation_assets(access_token, corporation_id: int, pag
         ac_token = await access_token
     else:
         ac_token = access_token
-    data, pages = await get_request_async(
+    data, pages, _ = await get_request_async(
         f"https://esi.evetech.net/latest/corporations/{corporation_id}/assets/",
         headers={"Authorization": f"Bearer {ac_token}"}, params={"page": page}, log=log, max_retries=max_retries,
         no_retry_code=[OUT_PAGE_ERROR]
@@ -66,7 +66,7 @@ async def characters_character_assets(access_token, character_id: int, page: int
         ac_token = await access_token
     else:
         ac_token = access_token
-    data, pages = await get_request_async(
+    data, pages, _ = await get_request_async(
         f"https://esi.evetech.net/latest/characters/{character_id}/assets/",
         headers={"Authorization": f"Bearer {ac_token}"}, params={"page": page}, log=log, max_retries=max_retries,
         no_retry_code=[OUT_PAGE_ERROR]

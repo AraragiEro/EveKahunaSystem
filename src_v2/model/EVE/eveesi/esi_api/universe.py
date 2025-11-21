@@ -28,7 +28,7 @@ async def universe_structures_structure(access_token, structure_id: int, log=Tru
         ac_token = await access_token
     else:
         ac_token = access_token
-    data, _ = await get_request_async(f"https://esi.evetech.net/universe/structures/{structure_id}/",
+    data, _, _ = await get_request_async(f"https://esi.evetech.net/universe/structures/{structure_id}/",
                        headers={"Authorization": f"Bearer {ac_token}"}, log=log, no_retry_code=[FORBIDDEN_ERROR])
     return data
 
@@ -37,5 +37,5 @@ async def universe_structures_structure(access_token, structure_id: int, log=Tru
 # https://esi.evetech.net/universe/stations/{station_id}
 @esi_request
 async def universe_stations_station(station_id, log=True):
-    data, _ = await get_request_async(f"https://esi.evetech.net/latest/universe/stations/{station_id}/", log=log)
+    data, _, _ = await get_request_async(f"https://esi.evetech.net/latest/universe/stations/{station_id}/", log=log)
     return data

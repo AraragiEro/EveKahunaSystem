@@ -331,7 +331,7 @@ class IndustryManager(metaclass=SingletonMeta):
                 })
                 if op.get_node_type(relation['material']) != "product":
                     material_type_node = await cls._get_material_type(relation['material'])
-                    jita_buy_price = await rdm.r.hget(f"market:price:jita:{relation['material']}", "max_buy")
+                    jita_buy_price = await rdm.r.hget(f"market_price:jita:{relation['material']}", "max_buy")
                     eiv_cost_dict[top_product_type_id]['children'].append({
                         "type_id": relation['material'],
                         "type_name": await SdeUtils.get_name_by_id(relation['material']),
@@ -399,8 +399,8 @@ class IndustryManager(metaclass=SingletonMeta):
             node['tpye_name_zh'] = await SdeUtils.get_cn_name_by_id(node['type_id'])
             if op.get_node_type(node['type_id']) != "product":
                 material_type_node = await cls._get_material_type(node['type_id'])
-                buy_price = await rdm.r.hget(f"market:price:jita:{node['type_id']}", "max_buy")
-                sell_price = await rdm.r.hget(f"market:price:jita:{node['type_id']}", "min_sell")
+                buy_price = await rdm.r.hget(f"market_price:jita:{node['type_id']}", "max_buy")
+                sell_price = await rdm.r.hget(f"market_price:jita:{node['type_id']}", "min_sell")
                 node['buy_price'] = buy_price if buy_price else 0
                 node['sell_price'] = sell_price if sell_price else 0
                 material_output[material_type_node]['children'].append(node)

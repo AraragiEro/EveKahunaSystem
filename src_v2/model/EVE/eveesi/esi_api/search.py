@@ -18,7 +18,7 @@ async def search(
     log=True
 ):
     ac_token = await parse_token(access_token)
-    data, _ = await get_request_async(
+    data, _, _ = await get_request_async(
         f"https://esi.evetech.net/characters/{character_id}/search",
         headers={"Authorization": f"Bearer {ac_token}"},
         params={"categories": categories, "search": search},

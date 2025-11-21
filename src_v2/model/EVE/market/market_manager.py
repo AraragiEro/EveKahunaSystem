@@ -31,11 +31,11 @@ class MarketManager(metaclass=SingletonMeta):
     async def _batch_insert_redis(self, batch: list):
         """批量插入Redis的辅助方法"""
         for type_id, price_data in batch:
-            await rdm.r.hset(f"market:price:jita:{type_id}", mapping=price_data)
+            await rdm.r.hset(f"market_price:jita:{type_id}", mapping=price_data)
 
     async def update_jita_price(self):
         async with self.update_jita_price_lock:
-            update_flag = await rdm.r.get(f"market:update_flag:jita")
+            update_flag = await rdm.r.get(f"market_update_flag:jita")
             if update_flag:
                 return
 
@@ -72,7 +72,7 @@ class MarketManager(metaclass=SingletonMeta):
         # 等待所有批次完成
         await asyncio.gather(*tasks)
 
-        await rdm.r.set(f"market:update_flag:jita", "1", ex=60 *60)
+        await rdm.r.set(f"market_update_flag:jita", "1", ex=60*60*4)
 
 
 # class MarketManagerOld():

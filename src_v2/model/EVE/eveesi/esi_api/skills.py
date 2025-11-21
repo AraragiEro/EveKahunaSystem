@@ -11,6 +11,6 @@ from src_v2.core.utils import tqdm_manager
 @esi_request
 async def character_character_id_skills(access_token, character_id, log=True):
     ac_token = await access_token
-    data, _ = await get_request_async(f"https://esi.evetech.net/latest/characters/{character_id}/skills/",
+    data, _, _ = await get_request_async(f"https://esi.evetech.net/latest/characters/{character_id}/skills/",
                        headers={"Authorization": f"Bearer {ac_token}"}, log=log)
     return data

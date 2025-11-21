@@ -16,5 +16,5 @@ permission_set = set()
 
 @esi_request
 async def verify_token(access_token, log=True):
-    data, _ = await get_request_async("https://esi.evetech.net/verify/", headers={"Authorization": f"Bearer {access_token}"}, log=log)
+    data, _, _ = await get_request_async("https://esi.evetech.net/verify/", headers={"Authorization": f"Bearer {access_token}"}, log=log)
     return data

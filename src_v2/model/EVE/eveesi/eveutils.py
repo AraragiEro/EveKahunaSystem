@@ -48,35 +48,39 @@ async def get_request_async(
         log: 是否记录日志
         max_retries: 最大重试次数
         timeout: 超时时间（秒）
+    Returns:
+        (data, pages, status_code): 成功时返回数据和页数及状态码
+        (None, 0, status_code): 失败时返回None和状态码
     """
     for attempt in range(max_retries):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params, headers=headers,
                                        timeout=aiohttp.ClientTimeout(total=timeout)) as response:
-                    if response.status == 200:
+                    status_code = response.status
+                    if status_code == 200:
                         try:
                             data = await asyncio.wait_for(response.json(), timeout=timeout)
                             pages = response.headers.get('X-Pages')
                             if pages:
                                 pages = int(pages)
 
-                            return data, pages
+                            return data, pages, status_code
                         except asyncio.TimeoutError:
                             if log:
                                 logger.warning(f"JSON解析超时 (尝试 {attempt + 1}/{max_retries}): {url}")
                             if attempt == max_retries - 1:
                                 raise
                             continue
-                    elif no_retry_code and response.status in no_retry_code:
-                        return [], 0
+                    elif no_retry_code and status_code in no_retry_code:
+                        return [], 0, status_code
                     else:
                         response_text = await response.text()
                         if log:
                             logger.warning(f"请求失败 (尝试 {attempt + 1}/{max_retries}): {url}")
-                            logger.warning(f'{response.status}:{response_text}')
+                            logger.warning(f'{status_code}:{response_text}')
                         if attempt == max_retries - 1:
-                            return None, 0
+                            return None, 0, status_code
                         await asyncio.sleep(1 * (attempt + 1))  # 指数退避
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             if log:
@@ -84,12 +88,12 @@ async def get_request_async(
             if attempt == max_retries - 1:
                 if log:
                     logger.error(traceback.format_exc())
-                return [], 0
+                return [], 0, 0  # 网络错误，状态码为0
             await asyncio.sleep(1 * (attempt + 1))  # 指数退避
         except Exception as e:
             if log:
                 logger.error(traceback.format_exc())
-            return [], 0
+            return [], 0, 0  # 其他异常，状态码为0
 
 async def parse_token(token):
     if not isinstance(token, str):

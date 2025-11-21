@@ -14,7 +14,7 @@ async def markets_structures(access_token, structure_id: int, page: int=1, test=
         ac_token = await access_token
     else:
         ac_token = access_token
-    data, pages = await get_request_async(
+    data, pages, _ = await get_request_async(
         f"https://esi.evetech.net/markets/structures/{structure_id}/",
         headers={"Authorization": f"Bearer {ac_token}"}, params={"page": page}, log=log, max_retries=max_retries,
         no_retry_code=[OUT_PAGE_ERROR]
@@ -40,12 +40,12 @@ async def markets_structures(access_token, structure_id: int, page: int=1, test=
 
 # List orders in a region
 # https://esi.evetech.net/markets/{region_id}/orders
-@esi_request
+@esi_request(limit=20)
 async def markets_region_orders(region_id: int, type_id: int = None, page: int=1, max_retries=3, log=True):
     params = {"page": page}
     if type_id is not None:
         params["type_id"] = type_id
-    data, pages = await get_request_async(
+    data, pages, _ = await get_request_async(
         f"https://esi.evetech.net/markets/{region_id}/orders/", headers={},
        params=params, log=log, max_retries=max_retries, no_retry_code=[OUT_PAGE_ERROR]
     )
@@ -69,14 +69,14 @@ async def markets_region_orders(region_id: int, type_id: int = None, page: int=1
 # https://esi.evetech.net/markets/prices
 @esi_request
 async def markets_prices(log=True):
-    data, _ = await get_request_async(f'https://esi.evetech.net/markets/prices/', log=log)
+    data, _, _ = await get_request_async(f'https://esi.evetech.net/markets/prices/', log=log)
     return data
 
 # List historical market statistics in a region
 # https://esi.evetech.net/markets/{region_id}/history
 @esi_request
 async def markets_region_history(region_id: int, type_id: int, log=True):
-    data, _ = await get_request_async(f"https://esi.evetech.net/markets/{region_id}/history/", headers={},
+    data, _, _ = await get_request_async(f"https://esi.evetech.net/markets/{region_id}/history/", headers={},
                        params={"type_id": type_id, "region_id": region_id}, log=log, max_retries=1)
     return data
 
@@ -89,7 +89,7 @@ async def characters_character_orders_history(access_token, character_id: int, p
         ac_token = await access_token
     else:
         ac_token = access_token
-    data, pages = await get_request_async(
+    data, pages, _ = await get_request_async(
         f"https://esi.evetech.net/characters/{character_id}/orders/history/",
         headers={"Authorization": f"Bearer {ac_token}"},
         params={"page": page},
@@ -119,7 +119,7 @@ async def characters_character_orders_history(access_token, character_id: int, p
 @esi_request
 async def characters_character_orders(access_token, character_id: int, log=True):
     ac_token = await access_token
-    data, _ = await get_request_async(
+    data, _, _ = await get_request_async(
         f"https://esi.evetech.net/characters/{character_id}/orders/",
         headers={"Authorization": f"Bearer {ac_token}"},
         log=log
