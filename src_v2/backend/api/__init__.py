@@ -6,6 +6,7 @@ def init_api(app):
     from .api_user import api_user_bp
     from .api_permission import api_permission_bp
     from .api_invite_code import api_invite_code_bp
+    from .api_vip import api_vip_bp
     from .EVE.api_industry import api_industry_bp
 
     app.register_blueprint(api_EVE_asset_bp)
@@ -15,4 +16,5 @@ def init_api(app):
     app.register_blueprint(api_user_bp)
     app.register_blueprint(api_permission_bp)
     app.register_blueprint(api_invite_code_bp)
+    app.register_blueprint(api_vip_bp)
     app.register_blueprint(api_industry_bp)

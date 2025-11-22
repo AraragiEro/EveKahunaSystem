@@ -775,4 +775,42 @@ class VipStateDBUtils(_CommonUtils):
             stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
             result = await session.execute(stmt)
             return result.scalars().first()
+
+    @classmethod
+    async def select_all_vip_states(cls):
+        """查询所有VIP状态记录"""
+        return await cls.select_all()
+
+    @classmethod
+    async def update_vip_state(cls, user_name: str, vip_level: str = None, vip_end_date = None):
+        """更新指定用户的VIP状态
+        
+        :param user_name: 用户名
+        :param vip_level: VIP等级（可选）
+        :param vip_end_date: VIP到期时间（可选，datetime对象）
+        """
+        async with dbm.get_session() as session:
+            # 先查询现有记录
+            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
+            result = await session.execute(stmt)
+            vip_state = result.scalars().first()
+            
+            if vip_state:
+                # 更新现有记录
+                if vip_level is not None:
+                    vip_state.vip_level = vip_level
+                if vip_end_date is not None:
+                    vip_state.vip_end_date = vip_end_date
+                await session.merge(vip_state)
+            else:
+                # 创建新记录
+                vip_state = cls.cls_model(
+                    user_name=user_name,
+                    vip_level=vip_level,
+                    vip_end_date=vip_end_date
+                )
+                session.add(vip_state)
+            
+            await session.commit()
+            return vip_state
             
