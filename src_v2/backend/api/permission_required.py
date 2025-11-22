@@ -62,6 +62,14 @@ def role_required(req_roles: list[str], res_code = 403, message: str = '权限�
                 descendant_roles = await permission_manager.get_all_descendant_roles(role)
                 all_roles.update(descendant_roles)
             
+            # 获取vip等级
+            vip_state = await permission_manager.get_vip_state(user_id)
+            if vip_state:
+                logger.info(f"vip_state: {vip_state.vip_level}")
+                all_roles.add(vip_state.vip_level)
+            else:
+                logger.info(f"vip_state: None")
+
             # 检查所需的角色是否在扩展后的角色集合中
             role_access = all(role in all_roles for role in req_roles)
             logger.info(f"all_roles: {all_roles}")

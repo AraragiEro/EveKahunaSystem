@@ -94,6 +94,14 @@ async def login():
         if not user:
             raise KeyError
         token = create_token(username, ",".join(await user.roles))
+        roles = await user.roles
+        # 获取vip等级
+        vip_state = await permission_manager.get_vip_state(username)
+        if vip_state:
+            logger.info(f"vip_state: {vip_state.vip_level}")
+            roles.append(vip_state.vip_level)
+        else:
+            logger.info(f"vip_state: None")
 
         return jsonify({
             "status": 200,
@@ -101,7 +109,7 @@ async def login():
             "user": {
                 "id": username,
                 "username": username,
-                "roles": await user.roles
+                "roles": list(set(roles))
             }
         })
     except KahunaException as e:

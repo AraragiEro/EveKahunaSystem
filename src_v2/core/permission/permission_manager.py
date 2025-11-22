@@ -7,7 +7,8 @@ from ..database.kahuna_database_utils_v2 import (
     UserPermissionsDBUtils,
     UserDBUtils,
     InvitCodeDBUtils,
-    InviteCodeUsedHistoryDBUtils
+    InviteCodeUsedHistoryDBUtils,
+    VipStateDBUtils
 )
 from ..database.connect_manager import postgres_manager as dbm, redis_manager as rdm
 from ..log import logger
@@ -459,6 +460,12 @@ class PermissionManager():
             })
         return users
 
-    
+    async def get_vip_state(self, user_name: str):
+        vip_state_obj = await VipStateDBUtils.select_vip_state_by_user_name(user_name)
+        if not vip_state_obj:
+            return None
+        if vip_state_obj.vip_end_date < datetime.now():
+            return None
+        return vip_state_obj
 
 permission_manager = PermissionManager()

@@ -765,3 +765,14 @@ class InviteCodeUsedHistoryDBUtils(_CommonUtils):
         """根据用户查询使用记录"""
         stmt = select(cls.cls_model).where(cls.cls_model.used_user_name == used_user_name).order_by(cls.cls_model.used_date.desc())
         return await _AsyncIteratorWrapper.from_stmt(stmt)
+
+class VipStateDBUtils(_CommonUtils):
+    cls_model = model.VipState
+
+    @classmethod
+    async def select_vip_state_by_user_name(cls, user_name: str):
+        async with dbm.get_session() as session:
+            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+            

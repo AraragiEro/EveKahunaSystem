@@ -116,6 +116,160 @@ python run_server.py --prod --host 0.0.0.0 --port 9527
 
 启动成功后，访问 `http://localhost:9527` 即可使用平台。
 
+## 数据库部署
+
+### 使用 Docker 部署 PostgreSQL 和 Redis
+
+推荐使用 Docker Compose 快速部署 PostgreSQL 和 Redis 数据库。
+
+#### 创建 docker-compose.yml
+
+在项目根目录创建 `docker-compose.yml` 文件：
+
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kahuna-postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: kahuna
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: kahuna-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+```
+
+#### 启动数据库服务
+
+```bash
+# 启动服务
+docker-compose up -d
+
+# 查看服务状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs -f
+```
+
+#### 停止数据库服务
+
+```bash
+# 停止服务（保留数据）
+docker-compose stop
+
+# 停止并删除容器（保留数据卷）
+docker-compose down
+
+# 停止并删除容器及数据卷（⚠️ 警告：会删除所有数据）
+docker-compose down -v
+```
+
+#### 数据持久化
+
+数据会保存在 Docker 卷中，即使删除容器也不会丢失数据。卷的位置可以通过以下命令查看：
+
+```bash
+docker volume ls
+docker volume inspect <volume_name>
+```
+
+#### 配置说明
+
+启动数据库后，需要在 `config.toml` 中配置数据库连接信息：
+
+```toml
+[POSTGREDB]
+Host = "localhost"
+Port = 5432
+Database = "kahuna"
+User = "admin"
+Password = "secret"
+
+[REDIS]
+Host = "localhost"
+Port = 6379
+```
+
+### 手动创建 SDE 数据库
+
+如果使用 PostgreSQL 作为 SDE 数据库，需要手动创建数据库。以下是几种创建方法：
+
+#### 方法一：使用 psql 命令行工具
+
+1. 连接到 PostgreSQL：
+
+```bash
+psql -U admin -h localhost -p 5432 -d postgres
+```
+
+2. 创建 SDE 数据库：
+
+```sql
+CREATE DATABASE "sde";
+```
+
+3. 退出 psql：
+
+```sql
+\q
+```
+
+#### 方法二：使用 SQL 命令（需要管理员权限）
+
+```sql
+CREATE DATABASE "sde";
+```
+
+#### 方法三：使用图形化工具（如 pgAdmin）
+
+1. 连接到 PostgreSQL 服务器（`localhost:5432`）
+2. 右键点击 `Databases` -> `Create` -> `Database...`
+3. 输入数据库名称：`sde`
+4. 点击 `Save` 保存
+
+#### 配置 SDE 数据库
+
+创建数据库后，在 `config.toml` 中配置 SDE 数据库连接信息：
+
+```toml
+[SDEDB]
+Host = "localhost"
+Port = 5432
+Database = "sde"
+User = "admin"
+Password = "secret"
+```
+
 ## 配置说明
 
 ### 配置文件
@@ -129,7 +283,7 @@ python run_server.py --prod --host 0.0.0.0 --port 9527
 [APP]
 # 图片渲染代理 (留空则不使用)
 PIC_RENDER_PROXY = ""
-# 代理服务器地址
+# 代理服务器地址 用于访问esi，自行配置
 PROXY = "127.0.0.1"
 # 代理端口
 PORT = 7890
@@ -220,6 +374,145 @@ publicData = false
 ### 配置文件位置
 
 配置文件应命名为 `config.toml` 并放置在项目根目录。
+
+## 数据库初始化脚本
+
+项目提供了两个数据库初始化脚本，用于初始化和更新数据库数据。
+
+### update_sde.py - SDE 数据更新工具
+
+用于更新 EVE Online 的 SDE (Static Data Export) 数据库。该脚本会自动下载最新的 SDE 数据并导入到 PostgreSQL 数据库中。
+
+#### 功能说明
+
+- 自动检查最新版本
+- 下载并解析 SDE 数据
+- 导入到 PostgreSQL 数据库
+- 支持版本检查和强制更新
+
+#### 使用方法
+
+```bash
+# 检查当前版本和最新版本（不执行更新）
+python update_sde.py --check-only
+
+# 正常更新（仅在新版本时更新）
+python update_sde.py
+
+# 强制更新（即使版本相同也更新）
+python update_sde.py --force
+
+# 更新到指定版本
+python update_sde.py --version <版本号>
+```
+
+#### 参数说明
+
+- `--check-only`: 仅检查版本信息，不执行更新
+- `--force`: 强制更新，即使版本相同也会重新导入数据
+- `--version <版本号>`: 更新到指定的版本号
+
+#### 使用示例
+
+```bash
+# 检查是否需要更新
+python update_sde.py --check-only
+
+# 执行更新
+python update_sde.py
+
+# 如果需要强制重新导入数据
+python update_sde.py --force
+```
+
+#### 注意事项
+
+- 更新过程可能需要较长时间，请耐心等待
+- 确保 PostgreSQL 数据库已正确配置并可以连接
+- 确保已创建 SDE 数据库（参考 [手动创建 SDE 数据库](#手动创建-sde-数据库) 部分）
+- 更新过程中会占用一定的系统资源，建议在服务器负载较低时执行
+
+### init_neo4j.py - Neo4j 数据库初始化脚本
+
+用于初始化 Neo4j 图数据库中的市场树和蓝图树数据。该脚本会从 SDE 数据库中读取数据并构建图数据库结构。
+
+#### 功能说明
+
+脚本会执行以下 5 个步骤：
+
+1. **初始化数据库连接** - 连接 PostgreSQL、Redis、Neo4j 和 SDE 数据库
+2. **初始化市场树** - 构建市场分组树形结构
+3. **链接类型到市场组** - 将物品类型链接到对应的市场组
+4. **清理现有蓝图节点** - 清理旧的蓝图数据（如果使用 `--clean` 参数）
+5. **初始化蓝图数据** - 导入蓝图相关数据到 Neo4j
+
+#### 使用方法
+
+```bash
+# 正常初始化（保留现有数据，仅初始化缺失的数据）
+python init_neo4j.py
+
+# 清理模式（清理现有数据后重新初始化）
+python init_neo4j.py --clean
+
+# 或使用简写形式
+python init_neo4j.py -c
+```
+
+#### 参数说明
+
+- `--clean` 或 `-c`: 清理现有数据后重新初始化。使用此参数会删除所有现有的市场树和蓝图数据，然后重新构建。
+
+#### 使用示例
+
+```bash
+# 首次初始化
+python init_neo4j.py
+
+# 如果需要重新初始化所有数据
+python init_neo4j.py --clean
+```
+
+#### 注意事项
+
+- 确保 PostgreSQL、Redis 和 Neo4j 数据库已正确配置并可以连接
+- 确保 SDE 数据库已更新到最新版本（使用 `update_sde.py` 更新）
+- 初始化过程可能需要较长时间，请耐心等待
+- 使用 `--clean` 参数会删除所有现有数据，请谨慎使用
+- 初始化过程中会占用一定的系统资源，建议在服务器负载较低时执行
+
+#### 执行流程
+
+脚本执行时会显示详细的进度信息：
+
+```
+============================================================
+Neo4j 初始化脚本
+============================================================
+[模式] 正常模式：保留现有数据，仅初始化缺失的数据
+
+[步骤 1/5] 初始化数据库连接...
+  ✓ PostgreSQL 连接成功
+  ✓ Redis 连接成功
+  ✓ Neo4j 连接成功
+  ✓ SDE 数据库连接成功
+
+[步骤 2/5] 初始化市场树...
+  ✓ 市场树初始化完成
+
+[步骤 3/5] 链接类型到市场组...
+  ✓ 类型链接完成
+
+[步骤 4/5] 清理现有蓝图节点...
+  ✓ 已清理 X 个 Blueprint 节点
+
+[步骤 5/5] 初始化蓝图数据...
+  ✓ 蓝图数据初始化完成
+
+============================================================
+✓ 所有初始化步骤完成！
+============================================================
+```
 
 ## 开发计划
 
