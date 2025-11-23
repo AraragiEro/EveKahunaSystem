@@ -1,0 +1,14 @@
+# .gitattributes
+# 企业版特有文件，不推送到公开仓库
+src_v2/enterprise/** filter=git-crypt diff=git-crypt
+src_v2/frontend/src/views/enterprise/** filter=git-crypt diff=git-crypt
+src_v2/frontend/src/components/enterprise/** filter=git-crypt diff=git-crypt
+src_v2/frontend/src/router/enterprise.ts filter=git-crypt diff=git-crypt
+config.enterprise.toml filter=git-crypt diff=git-crypt
+.env.enterprise filter=git-crypt diff=git-crypt
+
+# 或者使用更简单的方式：标记为不导出
+src_v2/enterprise/** export-ignore
+src_v2/frontend/src/views/enterprise/** export-ignore
+src_v2/frontend/src/components/enterprise/** export-ignore
+src_v2/frontend/src/router/enterprise.ts export-ignore

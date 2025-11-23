@@ -1,0 +1,91 @@
+# docker-compose.yml
+# NAPCAT_UID=$(id -u) NAPCAT_GID=$(id -g) docker-compose -f ./compose/astrbot.yml up -d
+services:
+  napcat:
+    environment:
+      - NAPCAT_UID=${NAPCAT_UID:-1000}
+      - NAPCAT_GID=${NAPCAT_GID:-1000}
+      - MODE=astrbot
+      - TZ='Asia/Shanghai'
+    ports:
+      - 6099:6099
+    container_name: napcat
+    restart: always
+    image: mlikiowa/napcat-docker:latest
+    volumes:
+      - ./data:/AstrBot/data
+      - ./napcat:/app/napcat
+      - ./ntqq:/app/.config/QQ
+    networks:
+      - astrbot_network
+    mac_address: "02:42:ac:11:00:02"
+  astrbot:
+    image: soulter/astrbot:latest
+    container_name: astrbot
+    restart: always
+    ports:
+      - "6185:6185"
+      - "6195:6195"
+      - "6199:6199"
+    volumes:
+      - ./data:/AstrBot/data
+      - ./napcat:/app/napcat
+      - ./ntqq:/app/.config/QQ
+    networks:
+      - astrbot_network
+    environment:
+      - TZ='Asia/Shanghai'
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=6201
+      - POSTGRES_DB=kahunabot
+      - POSTGRES_USER=kahunabot
+      - POSTGRES_PASSWORD=kahunabot
+      - REDIS_HOST=redis
+      - REDIS_PORT=6202
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: always
+    ports:
+      - "6201:5432"
+    environment:
+      - POSTGRES_DB=kahunabot
+      - POSTGRES_USER=kahunabot
+      - POSTGRES_PASSWORD=kahunabot
+      - TZ='Asia/Shanghai'
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    networks:
+      - astrbot_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kahunabot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    ports:
+      - "6202:6379"
+    command: redis-server --appendonly yes
+    environment:
+      - TZ='Asia/Shanghai'
+    volumes:
+      - ./redis_data:/data
+    networks:
+      - astrbot_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  astrbot_network:
+    driver: bridge

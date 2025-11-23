@@ -1,0 +1,7 @@
+{
+    "mcpServers": {
+        "example_cmp_server": {
+            "script_path": "path/to/cmp/server/script.py"
+        }
+    }
+}

@@ -1,0 +1,165 @@
+name: Sync to Public Repository
+
+on:
+  push:
+    branches:
+      - main  # 私有仓库使用 main 分支
+    paths-ignore:
+      # 忽略企业版相关文件的变更，这些不会同步到公开仓库
+      - 'src_v2/enterprise/**'
+      - 'src_v2/frontend/src/views/enterprise/**'
+      - 'src_v2/frontend/src/components/enterprise/**'
+      - 'src_v2/frontend/src/router/enterprise.ts'
+      - 'config.enterprise.toml'
+      - '.env.enterprise'
+      - '.github/workflows/sync-to-public.yml'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout private repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+      
+      - name: Remove enterprise files
+        run: |
+          # 删除企业版相关文件和目录
+          rm -rf src_v2/enterprise/
+          rm -rf src_v2/frontend/src/views/enterprise/
+          rm -rf src_v2/frontend/src/components/enterprise/
+          rm -f src_v2/frontend/src/router/enterprise.ts
+          rm -f config.enterprise.toml
+          rm -f .env.enterprise
+          
+          # 从 .gitignore 中移除企业版相关条目（如果存在）
+          if [ -f .gitignore ]; then
+            sed -i '/enterprise/d' .gitignore || true
+          fi
+      
+      - name: Create orphan branch
+        run: |
+          # 创建新的孤立分支，不包含任何历史记录
+          git checkout --orphan public-sync
+          # 移除所有已暂存的文件（孤立分支开始时是空的）
+          git rm -rf --cached . || true
+          # 添加所有清理后的文件
+          git add -A
+      
+      - name: Setup Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+      
+      - name: Commit changes
+        run: |
+          # 检查是否有文件需要提交
+          if [ -z "$(git ls-files)" ]; then
+            echo "没有文件需要同步"
+            exit 0
+          fi
+          # 使用通用的提交信息，避免泄露任何功能细节
+          git commit -m "chore: 同步代码更新 [skip ci]" || exit 0
+      
+      - name: Push to public repository
+        env:
+          PUBLIC_REPO_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+        run: |
+          # 检查 token 是否存在
+          if [ -z "$PUBLIC_REPO_TOKEN" ] || [ "$PUBLIC_REPO_TOKEN" == "" ]; then
+            echo "⚠️ 警告: PUBLIC_REPO_TOKEN 未设置，跳过同步"
+            echo "请在仓库 Settings > Secrets 中添加 PUBLIC_REPO_TOKEN"
+            exit 0
+          fi
+          
+          echo "Token 已设置，开始同步..."
+          
+          # 清除可能存在的 Git 凭证缓存，避免使用错误的 token
+          git config --global --unset credential.helper || true
+          rm -f ~/.git-credentials
+          
+          # 移除可能存在的旧远程仓库
+          git remote remove public || true
+          
+          # 添加公开仓库作为远程仓库（不包含 token，避免在 URL 中暴露）
+          git remote add public https://github.com/AraragiEro/EveKahunaSystem.git
+          
+          # 验证远程仓库是否添加成功
+          echo "远程仓库配置："
+          git remote -v
+          
+          # 测试连接（不推送，只验证权限）
+          echo "测试仓库访问权限..."
+          git -c credential.helper='!f() { echo "username=${PUBLIC_REPO_TOKEN}"; echo "password=${PUBLIC_REPO_TOKEN}"; }; f' ls-remote public master || {
+            echo "❌ 错误: 无法访问公开仓库"
+            echo "可能的原因："
+            echo "1. Token 没有访问该仓库的权限"
+            echo "2. Token 没有写入权限（需要 repo 权限）"
+            echo "3. 仓库不存在或不可访问"
+            echo "4. Token 已过期"
+            exit 1
+          }
+          
+          # 验证 token 权限（测试 API 访问）
+          echo "验证 Token 权限..."
+          TOKEN_TEST=$(curl -s -H "Authorization: token ${PUBLIC_REPO_TOKEN}" https://api.github.com/user)
+          if [ $? -ne 0 ] || [ -z "$TOKEN_TEST" ]; then
+            echo "⚠️ 警告: Token 验证失败，但继续尝试推送..."
+          else
+            echo "✅ Token 验证成功"
+          fi
+          
+          # 推送到公开仓库的 master 分支（公开仓库使用 master 分支）
+          # 只推送孤立分支，不包含任何历史记录
+          echo "正在推送到公开仓库的 master 分支..."
+          
+          # 配置 Git 使用 token 进行认证
+          git config --global credential.helper store
+          echo "https://${PUBLIC_REPO_TOKEN}@github.com" > ~/.git-credentials
+          chmod 600 ~/.git-credentials
+          
+          # 清除可能影响认证的环境变量
+          unset GITHUB_TOKEN || true
+          
+          # 直接使用包含 token 的 URL 进行推送，确保使用正确的 token
+          # 推送孤立分支 public-sync 到公开仓库的 master 分支，不包含任何历史
+          git push https://oauth2:${PUBLIC_REPO_TOKEN}@github.com/AraragiEro/EveKahunaSystem.git public-sync:master --force || {
+            echo "❌ 推送失败"
+            echo ""
+            echo "可能的原因和解决方案："
+            echo "1. Token 权限不足："
+            echo "   - 确保 PAT 有 'repo' 权限（完整仓库权限）"
+            echo "   - 如果使用 Fine-grained tokens，确保有 'Contents: Write' 权限"
+            echo ""
+            echo "2. 仓库访问权限："
+            echo "   - 确认 Token 所属账户有访问目标仓库的权限"
+            echo "   - 如果是组织仓库，确认 Token 有组织权限"
+            echo ""
+            echo "3. 分支保护："
+            echo "   - 检查目标仓库是否有分支保护规则"
+            echo "   - 可能需要临时禁用分支保护或添加例外"
+            echo ""
+            echo "4. Token 类型："
+            echo "   - 建议使用 Classic PAT（不是 Fine-grained token）"
+            echo "   - Classic PAT 需要勾选 'repo' 权限"
+            echo ""
+            echo "5. 重新创建 Token："
+            echo "   - 访问 https://github.com/settings/tokens"
+            echo "   - 创建新的 Classic PAT，确保勾选 'repo' 权限"
+            echo "   - 更新仓库 Secrets 中的 PUBLIC_REPO_TOKEN"
+            exit 1
+          }
+          
+          echo "✅ 同步完成！"
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          git remote remove public || true
+

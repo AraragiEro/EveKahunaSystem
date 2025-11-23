@@ -1,0 +1,46 @@
+/test.py
+.idea
+*.db
+tmp
+*.zip
+*.sqlite
+*.png
+*.db-wal
+config.ini
+*.sql
+**/*.pyc
+
+# IDE and editor files
+.cursor/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment and credentials
+credentials.json
+.python-version
+uv.lock
+
+# Build and cache
+.vite/
+node_modules/
+dist/
+build/
+*.log
+config.toml
+
+# 环境变量文件（忽略实际配置文件，但保留示例文件）
+.env
+.env.local
+.env.*.local
+
+# 环境变量示例文件（不忽略，可以提交到仓库）
+!.env.example
+!src_v2/frontend/.env.example
+
+# 应该在私有仓库中被正常提交，工作流会自动在推送到公开仓库前删除它们
+# 因此这里不再忽略这些文件
+
+# 版本标识
+.edition
