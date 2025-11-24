@@ -322,8 +322,7 @@ Password = "password"
 CLIENT_ID = "your_client_id"
 SECRET_KEY = "your_secret_key"
 # 回调地址
-CALLBACK_LOCAL_HOST = ""
-CALLBACK_LOCAL_ADD = "https://localhost:9527/"
+CALLBACK_LOCAL_HOST = "localhost:9527/"
 ```
 
 #### [ESI] - ESI API 权限配置
