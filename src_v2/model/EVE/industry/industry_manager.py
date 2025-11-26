@@ -175,8 +175,10 @@ class IndustryManager(metaclass=SingletonMeta):
         if not plan_data["products"]:
             raise KahunaException(f"计划 {plan_name} 没有添加产品")
         
-        await rdm.r.hset(op.current_progress_key, mapping={"name": "删除计划", "progress": 100})
-        await cls.delete_plan(plan_name, user_id)
+        # 这里只需要清理 Neo4j 中旧的计划节点和关系，不能删除 PostgreSQL 中的计划与产品配置，
+        # 否则后续在 get_plan_tableview_data 中将无法读取到 plan_settings，导致 plan_obj 为 None。
+        await rdm.r.hset(op.current_progress_key, mapping={"name": "删除计划节点", "progress": 100})
+        await cls.delete_plan_nodes(plan_name, user_id)
         await rdm.r.set(op.total_progress_key, 20)
         
         await rdm.r.hset(op.current_progress_key, mapping={"name": "创建计划节点", "progress": 100})
@@ -271,17 +273,22 @@ class IndustryManager(metaclass=SingletonMeta):
             plan_name: 计划名称
             user_name: 用户名
         """
-        # 删除 PostgreSQL 数据库中的相关数据
+        # 删除 PostgreSQL 数据库中的相关数据（完整删除接口使用）
         # 1. 删除计划产品
         await EveIndustryPlanProductDBUtils.delete_all_by_user_name_and_plan_name(user_name, plan_name)
-        
         # 2. 删除计划配置流
         await EveIndustryPlanConfigFlowDBUtils.delete_by_user_name_and_plan_name(user_name, plan_name)
-        
         # 3. 删除计划设置
         await EveIndustryPlanDBUtils.delete_by_user_name_and_plan_name(user_name, plan_name)
-        
-        # 删除 Neo4j 数据库中的计划节点及其关系
+        # 4. 删除 Neo4j 中的计划节点及其关系
+        await cls.delete_plan_nodes(plan_name, user_name)
+
+    @classmethod
+    async def delete_plan_nodes(cls, plan_name: str, user_name: str):
+        """仅删除 Neo4j 中的计划节点及其 PLAN_BP_DEPEND_ON 树
+
+        用于重新计算计划时清理旧的图数据，保留 PostgreSQL 中的计划与产品配置。
+        """
         await NIU.delete_tree(
             "Plan",
             {"plan_name": plan_name, "user_name": user_name},
