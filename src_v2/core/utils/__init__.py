@@ -2,6 +2,9 @@ import math
 import asyncio
 import traceback
 import sys
+import random
+import secrets
+import string
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from math import trunc
@@ -155,6 +158,27 @@ class async_tqdm_manager:
                 self.mission[mission_id]["bar"].close()
                 del self.mission[mission_id]
                 self.mission_count -= 1
+
+# 生成指定长度的随机大小写数字字符串
+def get_random_token(length: int = 10) -> str:
+    """
+    生成指定长度的随机字母数字字符串（大小写字母和数字）
+    
+    使用 secrets 模块生成加密安全的随机字符串，适合用于 token、会话ID等安全场景。
+    理论上可能重复，但概率极低（62^length 种可能组合）。
+    
+    Args:
+        length: 字符串长度，默认为10
+        
+    Returns:
+        随机生成的字符串
+        
+    Note:
+        - 对于10位长度，可能的组合数约为 8.39 × 10^17，重复概率极低
+        - 如需确保绝对不重复，建议在调用方维护已使用的 token 集合进行检查
+    """
+    characters = string.ascii_letters + string.digits  # 大小写字母 + 数字
+    return ''.join(secrets.choice(characters) for _ in range(length))
 
 
 tqdm_manager = async_tqdm_manager()

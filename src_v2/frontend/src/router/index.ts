@@ -133,6 +133,12 @@ const baseRoutes = [
       meta: { requiresAuth: false }
     },
     {
+      path: '/storage/:sid',
+      name: 'publicStorage',
+      component: () => import('../views/public/storage.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
       path: '/setting/characterSetting/auth/close',
       name: 'characterAuthClose',
       component: () => import('../views/setting/characterAuthClose.vue'),
@@ -141,7 +147,7 @@ const baseRoutes = [
 ]
 
 // 条件添加企业版路由
-const routes = [...baseRoutes]
+const routes: RouteRecordRaw[] = [...baseRoutes]
 
 if (APP_EDITION === 'enterprise') {
   // 使用动态导入，但不在顶层使用 await

@@ -84,10 +84,21 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
         max-height="75vh"
         show-overflow-tooltip
         :row-class-name="LackRowClassName"
+        style="font-size: 16px;"
     >
-        <el-table-column label="类型" prop="layer_id" />
-        <el-table-column label="物品id" prop="type_id" />
-        <el-table-column label="物品名en" prop="type_name">
+        <el-table-column label="类型" prop="layer_id" width="110">
+            <template #default="{ row }">
+                <img 
+                    v-if="row?.type_id"
+                    :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" 
+                    alt="类型" 
+                    width="40" 
+                    height="40" 
+                />
+            </template>
+        </el-table-column>
+        <el-table-column label="物品id" prop="type_id" width="90"/>
+        <el-table-column label="物品名en" prop="type_name" width="200">
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
@@ -98,7 +109,7 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                 </div>
             </template>
         </el-table-column>
-        <el-table-column label="物品名zh" prop="tpye_name_zh">
+        <el-table-column label="物品名zh" prop="tpye_name_zh" width="200">
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
@@ -109,9 +120,9 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                 </div>
             </template>
         </el-table-column>
-        <el-table-column label="缺失" prop="real_quantity" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
-        <el-table-column label="总需求" prop="quantity" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
-        <el-table-column label="库存" prop="store_quantity" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
+        <el-table-column label="缺失" prop="real_quantity" width="150" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
+        <el-table-column label="总需求" prop="quantity" width="150" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
+        <el-table-column label="库存" prop="store_quantity" width="150" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)"/>
     </el-table>
 </template>
 

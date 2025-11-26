@@ -9,7 +9,8 @@ export function setupAuthGuards(router: Router): void {
     
     // 定义公开页面列表（不需要认证即可访问）
     const publicPages = ['/login', '/forbidden', '/setting/characterSetting/auth/close']
-    const isPublicPage = publicPages.includes(to.path)
+    // 支持动态路径匹配：/storage/:sid
+    const isPublicPage = publicPages.includes(to.path) || to.path.startsWith('/storage/')
     
     // 如果已经登录，访问登录页时跳转到首页
     if (to.path === '/login' && authStore.isAuthenticated) {

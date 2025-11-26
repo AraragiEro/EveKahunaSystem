@@ -7,7 +7,6 @@ const authStore = useAuthStore()
 const segmentItems = ref<{index: number, label: string, route: string}[]>([]);
 
 const userRoles = authStore.user?.roles || []
-segmentItems.value.push({index: 1, label: '总览视图', route: '/industry/overview'})
 if (userRoles.includes('vip_alpha')) {
   segmentItems.value.push({index: 2, label: '库存管理', route: '/industry/assetView'})
 }

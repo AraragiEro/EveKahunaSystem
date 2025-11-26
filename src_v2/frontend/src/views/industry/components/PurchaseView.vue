@@ -36,6 +36,52 @@ const filterTreeByRealQuantity = (nodes: any[]): any[] => {
 const filteredPurchaseTableView = computed(() => {
     return filterTreeByRealQuantity(props.materialData)
 })
+// 递归计算树结构中的总价
+const calculateTotalPrice = (nodes: any[]): number => {
+    let total = 0
+    nodes.forEach((node: any) => {
+        // 如果有 children，递归处理子节点
+        if (node.children && Array.isArray(node.children) && node.children.length > 0) {
+            total += calculateTotalPrice(node.children)
+        }
+        // 如果是叶子节点或有 real_quantity 的节点，计算价格
+        if (node.real_quantity !== undefined && node.real_quantity > 0) {
+            const sellPrice = Number(node.sell_price) || 0
+            const realQuantity = Number(node.real_quantity) || 0
+            total += sellPrice * realQuantity
+        }
+    })
+    return total
+}
+
+const jitaSellTotalPrice = computed(() => {
+    const total_price = calculateTotalPrice(filteredPurchaseTableView.value)
+    return total_price
+})
+
+
+const calculateTotalBuyPrice = (nodes: any[]): number => {
+    let total = 0
+    nodes.forEach((node: any) => {
+        // 如果有 children，递归处理子节点
+        if (node.children && Array.isArray(node.children) && node.children.length > 0) {
+            total += calculateTotalBuyPrice(node.children)
+        }
+        // 如果是叶子节点或有 real_quantity 的节点，计算价格
+        if (node.real_quantity !== undefined && node.real_quantity > 0) {
+            const buyPrice = Number(node.buy_price) || 0
+            const realQuantity = Number(node.real_quantity) || 0
+            total += buyPrice * realQuantity
+        }
+    })
+    return total
+}
+const jitaBuyTotalPrice = computed(() => {
+    const total_price = calculateTotalBuyPrice(filteredPurchaseTableView.value)
+    return total_price
+})
+
+
 
 // 递归提取树结构中的物品名和缺失数量
 const extractPurchaseData = (nodes: any[]): Array<{ type_name: string, real_quantity: number }> => {
@@ -133,6 +179,7 @@ const copyPurchaseList = async () => {
             border
             max-height="75vh"
             show-overflow-tooltip
+            style="font-size: 16px;"
         >
             <el-table-column label="类型" prop="layer_id" width="120">
                 <template #header>
@@ -141,8 +188,17 @@ const copyPurchaseList = async () => {
                         <span>复制清单</span>
                     </el-button>
                 </template>
+                <template #default="{ row }">
+                    <img 
+                        v-if="row?.type_id"
+                        :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" 
+                        alt="类型" 
+                        width="40" 
+                        height="40" 
+                    />
+                </template>
             </el-table-column>
-            <el-table-column label="物品名en" prop="type_name">
+            <el-table-column label="物品名en" prop="type_name" width="200">
                 <template #default="{ row }">
                     <div 
                         class="copyable-cell" 
@@ -153,7 +209,7 @@ const copyPurchaseList = async () => {
                     </div>
                 </template>
             </el-table-column>
-            <el-table-column label="物品名zh" prop="tpye_name_zh">
+            <el-table-column label="物品名zh" prop="tpye_name_zh" width="200">
                 <template #default="{ row }">
                     <div 
                         class="copyable-cell" 
@@ -167,6 +223,7 @@ const copyPurchaseList = async () => {
             <el-table-column
                 label="缺失"
                 prop="real_quantity"
+                width="150"
             >
                 <template #default="{ row }">
                     <div 
@@ -178,35 +235,44 @@ const copyPurchaseList = async () => {
                     </div>
                 </template>
             </el-table-column>
-            <el-table-column label="JITA 出单">
+            <el-table-column label="JITA 出单" width="150">
                 <template #default="{ row }">
                     <div v-if="row.real_quantity > 0">
                         {{ formatAccounting(row.sell_price) }}
                     </div>
                 </template>
             </el-table-column>
-            <el-table-column label="JITA 出单 总价">
+            <el-table-column label="JITA 出单 总价" width="200">
+                <template #header>
+                    JITA 出单 总价 {{ formatAccounting(jitaSellTotalPrice) }}
+                </template>
                 <template #default="{ row }">
                     <div v-if="row.real_quantity > 0">
                         {{ formatAccounting(row.sell_price * row.real_quantity) }}
                     </div>
                 </template>
             </el-table-column>
-            <el-table-column label="JITA 收单">
+            <el-table-column label="JITA 收单" width="150">
                 <template #default="{ row }">
                     <div v-if="row.real_quantity > 0">
                         {{ formatAccounting(row.buy_price) }}
                     </div>
                 </template>
             </el-table-column>
-            <el-table-column label="JITA 收单 总价">
+            <el-table-column label="JITA 收单 总价" width="200">
+                <template #header>
+                    JITA 收单 总价 {{ formatAccounting(jitaBuyTotalPrice) }}
+                </template>
                 <template #default="{ row }">
                     <div v-if="row.real_quantity > 0">
                         {{ formatAccounting(row.buy_price * row.real_quantity) }}
                     </div>
                 </template>
             </el-table-column>
-            <el-table-column label="扫单成本增加">
+            <el-table-column label="扫单成本增加" width="200">
+                <template #header>
+                    扫单成本增加 总价 {{ formatAccounting(jitaSellTotalPrice - jitaBuyTotalPrice) }}
+                </template>
                 <template #default="{ row }">
                     <div v-if="row.real_quantity > 0">
                         {{ formatAccounting(row.sell_price * row.real_quantity - row.buy_price * row.real_quantity) }}

@@ -4,6 +4,7 @@ import { Setting, SuccessFilled, CircleCloseFilled, Plus, CloseBold, Delete, Ref
 import { http } from '@/http'
 import { ElMessage } from 'element-plus';
 import AssetViewIndustrypermision from './components/AssetViewIndustrypermision.vue'
+import AssetViewViewList from './components/AssetViewViewList.vue'
 
 const form = ref({
   allow_personal_asset: false,
@@ -389,10 +390,10 @@ const handleDeleteMission = async (row: Mission) => {
 
 const handleCreateMission = async () => {
   // 暂不支持角色创建资产拉取任务
-  if (createForm.value.subject_type === 'character') {
-    ElMessage.error('暂不支持角色创建资产拉取任务')
-    return
-  }
+  // if (createForm.value.subject_type === 'character') {
+  //   ElMessage.error('暂不支持角色创建资产拉取任务')
+  //   return
+  // }
 
   // 验证权限
   if (createForm.value.subject_type === 'corp' && !form.value.is_edit_corp_setting_allowed) {
@@ -576,7 +577,7 @@ onUnmounted(() => {
 <template>
 <el-tabs>
   <el-tab-pane label="资产浏览">
-
+    <AssetViewViewList />
   </el-tab-pane>
   <el-tab-pane label="工业访问许可">
     <AssetViewIndustrypermision />

@@ -58,20 +58,15 @@ Kahuna System 是一个专为 EVE Online 玩家设计的 Web 应用平台，集�
 1. **克隆项目**
 
 ```bash
-git clone https://github.com/AraragiEro/astrbot_plugin_kahunabot.git
-cd astrbot_plugin_kahunabot
+git clone https://github.com/AraragiEro/EveKahunaSystem.git
+cd EveKahunaSystem
 ```
 
 2. **安装后端依赖**
 
-使用 `uv` (推荐):
+使用 `uv`
 ```bash
 uv sync
-```
-
-或使用 `pip`:
-```bash
-pip install -r requirements.txt
 ```
 
 3. **安装前端依赖**
@@ -287,6 +282,15 @@ PIC_RENDER_PROXY = ""
 PROXY = "127.0.0.1"
 # 代理端口
 PORT = 7890
+```
+
+### [ADMIN] 管理员账号初始化配置
+```toml
+[ADMIN]
+# 是否创建默认管理员账号
+create_admin = false
+admin_user = "kahuna"
+admin_passwd = "kahuna"
 ```
 
 #### [POSTGREDB] - PostgreSQL 数据库配置 (可选)

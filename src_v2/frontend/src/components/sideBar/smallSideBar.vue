@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Setting } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
+import logoImg from '@/assets/logo.jpg'
 
 // 定义菜单项类型
 interface MenuItem {
@@ -51,8 +51,7 @@ const handleMouseLeave = () => {
 >
   <div class="sidebar-header">
     <div class="logo-container">
-      <!-- <img src="/favicon.svg" alt="Logo" class="logo" /> -->
-      <Setting />
+      <img :src="logoImg" alt="Logo" class="logo" />
     </div>
   </div>
   
@@ -126,9 +125,10 @@ const handleMouseLeave = () => {
 }
 
 .logo {
-  width: 24px;
-  height: 24px;
-  filter: brightness(0) invert(1);
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: contain;
 }
 
 .sidebar-scrollbar {

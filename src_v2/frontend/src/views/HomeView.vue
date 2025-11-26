@@ -40,20 +40,21 @@ const todoItems = ref<TodoItem[]>([
         children: [
           { id: 'product-list', title: '可调整的产品清单', completed: true },
           { id: 'calc-config', title: '可调整的计算配置', completed: true },
-          {
-            id: 'data-report',
-            title: '详细的数据报表',
-            completed: true,
-            children: [
-              { id: 'plan-tree', title: '计划分解树', completed: true },
-              { id: 'material-list', title: '材料清单', completed: true },
-              { id: 'workflow', title: '可参考可执行的工作流', completed: true },
-              { id: 'purchase-list', title: '可复制的采购清单', completed: true },
-              { id: 'cost-analysis', title: '成本成分比例分析', completed: true },
-              { id: 'salary-calc', title: '合作工业的薪水计算', completed: true },
-              { id: 'logistics', title: '可参考的物流计划', completed: true }
-            ]
-          }
+        ]
+      },
+      {
+        id: 'data-report',
+        title: '详细的数据报表',
+        completed: false,
+        children: [
+          { id: 'plan-tree', title: '计划分解树', completed: true },
+          { id: 'material-list', title: '材料清单', completed: true },
+          { id: 'workflow', title: '可参考可执行的工作流', completed: true },
+          { id: 'purchase-list', title: '可复制的采购清单', completed: true },
+          { id: 'cost-analysis', title: '成本成分比例分析', completed: true },
+          { id: 'salary-calc', title: '合作工业的薪水计算', completed: true },
+          { id: 'logistics', title: '可参考的物流计划', completed: true },
+          { id: 'data-report', title: '化矿购买推荐', completed: false },
         ]
       },
       {
@@ -77,10 +78,22 @@ const todoItems = ref<TodoItem[]>([
     children: [
       { id: 'permission', title: '服务权限分级', completed: true },
       { id: 'invite-code', title: '邀请码生成', completed: true },
-      { id: 'help-doc', title: '内建使用说明', completed: false },
+      { id: 'help-doc', title: '内建使用说明', completed: true },
       { id: 'performance', title: '性能优化', completed: false },
-      { id: 'ux-improve', title: '用户体验改进', completed: false },
-      { id: 'docs', title: '文档完善', completed: false }
+      { id: 'ux-improve', title: '用户体验改进', completed: false,
+        children: [
+          { id: 'ux-improve-1', title: '带管理员账号的初始化', completed: false },
+          { id: 'ux-improve-2', title: '可直接部署的docker镜像', completed: false },
+        ]
+      },
+      { id: 'docs', title: '文档完善', completed: false,
+        children: [
+          { id: 'getting-start', title: '如何开始', completed: true },
+          { id: 'industry-plan', title: '工业计划', completed: true },
+          { id: 'storage', title: '库存管理', completed: true },
+          { id: 'setting', title: '设置', completed: true },
+        ]
+      }
     ]
   }
 ])

@@ -657,6 +657,17 @@ class EveIndustryPlanDBUtils(_CommonUtils):
             result = await session.execute(stmt)
             return result.scalars().first()
 
+    @classmethod
+    async def delete_by_user_name_and_plan_name(cls, user_name: str, plan_name: str, session=None):
+        if not session:
+            async with dbm.get_session() as session:
+                stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
+                await session.execute(stmt)
+                await session.commit()
+        else:
+            stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
+            await session.execute(stmt)
+
 class EveIndustryPlanProductDBUtils(_CommonUtils):
     cls_model = model.EveIndustryPlanProduct
 
@@ -676,6 +687,7 @@ class EveIndustryPlanProductDBUtils(_CommonUtils):
             async with dbm.get_session() as session:
                 stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
                 await session.execute(stmt)
+                await session.commit()
         else:
             stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
             await session.execute(stmt)
@@ -717,6 +729,39 @@ class EveIndustryPlanConfigFlowDBUtils(_CommonUtils):
     async def select_all_by_user_name(cls, user_name: str):
         stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
+
+    @classmethod
+    async def delete_by_user_name_and_plan_name(cls, user_name: str, plan_name: str, session=None):
+        if not session:
+            async with dbm.get_session() as session:
+                stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
+                await session.execute(stmt)
+                await session.commit()
+        else:
+            stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.plan_name == plan_name)
+            await session.execute(stmt)
+
+class EveIndustrryPlanConfigFlowPresetDBUtils(_CommonUtils):
+    cls_model = model.EveIndustrryPlanConfigFlowPreset
+
+    @classmethod
+    async def select_all_by_user_name(cls, user_name: str):
+        stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        return await _AsyncIteratorWrapper.from_stmt(stmt)
+
+    @classmethod
+    async def select_by_user_name_and_preset_name(cls, user_name: str, preset_name: str):
+        async with dbm.get_session() as session:
+            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).where(cls.cls_model.preset_name == preset_name)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def select_by_id(cls, id: int):
+        async with dbm.get_session() as session:
+            stmt = select(cls.cls_model).where(cls.cls_model.id == id)
+            result = await session.execute(stmt)
+            return result.scalars().first()
 
 class InvitCodeDBUtils(_CommonUtils):
     cls_model = model.InvitCode
@@ -814,3 +859,18 @@ class VipStateDBUtils(_CommonUtils):
             await session.commit()
             return vip_state
             
+
+class EveAssetViewDBUtils(_CommonUtils):
+    cls_model = model.EveAssetView
+
+    @classmethod
+    async def select_by_sid(cls, sid: str):
+        async with dbm.get_session() as session:
+            stmt = select(cls.cls_model).where(cls.cls_model.sid == sid)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def select_by_user_name(cls, user_name: str):
+        stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
+        return await _AsyncIteratorWrapper.from_stmt(stmt)

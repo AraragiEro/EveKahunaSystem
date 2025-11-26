@@ -574,10 +574,11 @@ class ConfigFlowOperateCenter():
             structure_name = conf['structure_name']
             from src_v2.model.EVE.industry.industry_utils.config_utils import VIRTUAL_STRUCTURE_DICT
             if structure_name in VIRTUAL_STRUCTURE_DICT:
+                virtual_structure_type = structure_name.split('-')[1]
                 structure_info = {
                     "structure_id": VIRTUAL_STRUCTURE_DICT[structure_name],
                     "structure_name": structure_name,
-                    "structure_type": "Virtual",
+                    "structure_type": virtual_structure_type,
                     "system_id": 0,
                     "system_name": "虚拟",
                     "item_id": VIRTUAL_STRUCTURE_DICT[structure_name],
@@ -804,15 +805,26 @@ class ConfigFlowOperateCenter():
             await self.refresh_system_cost()
 
             system_cost = await rds.r.hgetall(f"system_cost_cache:{solar_system_id}")
+            
             self._system_cost[solar_system_id] = system_cost
 
+            if not system_cost or "manufacturing" not in system_cost or "reaction" not in system_cost:
+                return {
+                    "manufacturing": 0.14 / 100 + 0.04,
+                    "reaction": 0.14 / 100 + 0.04
+                }
             return system_cost
 
         if solar_system_id in self._system_cost:
+            if not self._system_cost[solar_system_id] or "manufacturing" not in self._system_cost[solar_system_id] or "reaction" not in self._system_cost[solar_system_id]:
+                return {
+                    "manufacturing": 0.14 / 100 + 0.04,
+                    "reaction": 0.14 / 100 + 0.04
+                }
             return self._system_cost[solar_system_id]
 
         system_cost = await rds.r.hgetall(f"system_cost_cache:{solar_system_id}")
-        if not system_cost:
+        if not system_cost or "manufacturing" not in system_cost or "reaction" not in system_cost:
             return {
                 "manufacturing": 0.14 / 100 + 0.04,
                 "reaction": 0.14 / 100 + 0.04

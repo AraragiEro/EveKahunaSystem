@@ -98,7 +98,18 @@ class HttpService {
   }
 
   async get(endpoint: string, data?: any) {
-    return this.request(endpoint, { method: 'GET', body: data !== undefined ? JSON.stringify(data) : undefined })
+    const config: AxiosRequestConfig = {
+      url: endpoint,
+      method: 'GET'
+    }
+
+    // GET 请求将 data 转换为查询参数
+    if (data !== undefined) {
+      config.params = data
+    }
+
+    const res = await this.client.request(config)
+    return new AxiosResponseAdapter(res)
   }
 
   async post(endpoint: string, data?: any) {

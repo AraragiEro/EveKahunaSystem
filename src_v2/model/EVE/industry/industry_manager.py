@@ -7,6 +7,7 @@ from enum import Flag
 from itertools import product
 from math import ceil, sqrt
 from typing import Dict, List, Tuple
+from datetime import date, datetime
 
 # 本地导入 - 核心工具
 from src_v2.core.database.connect_manager import (
@@ -45,6 +46,7 @@ from .industry_utils import (
     MarketTree,
     get_market_tree,
     create_config_flow_config,
+    modify_config_flow_config,
     fetch_recommended_presets,
     delete_config_flow_config,
     get_config_flow_config_list,
@@ -52,6 +54,9 @@ from .industry_utils import (
     get_config_flow_list,
     delete_config_from_plan,
     save_config_flow_to_plan,
+    save_config_flow_preset,
+    get_config_flow_presets,
+    load_config_flow_preset,
     add_industrypermision,
     delete_industrypermision,
     get_user_all_container_permission,
@@ -260,6 +265,23 @@ class IndustryManager(metaclass=SingletonMeta):
 
     @classmethod
     async def delete_plan(cls, plan_name: str, user_name: str):
+        """删除计划及其所有相关数据
+        
+        Args:
+            plan_name: 计划名称
+            user_name: 用户名
+        """
+        # 删除 PostgreSQL 数据库中的相关数据
+        # 1. 删除计划产品
+        await EveIndustryPlanProductDBUtils.delete_all_by_user_name_and_plan_name(user_name, plan_name)
+        
+        # 2. 删除计划配置流
+        await EveIndustryPlanConfigFlowDBUtils.delete_by_user_name_and_plan_name(user_name, plan_name)
+        
+        # 3. 删除计划设置
+        await EveIndustryPlanDBUtils.delete_by_user_name_and_plan_name(user_name, plan_name)
+        
+        # 删除 Neo4j 数据库中的计划节点及其关系
         await NIU.delete_tree(
             "Plan",
             {"plan_name": plan_name, "user_name": user_name},
@@ -494,7 +516,7 @@ class IndustryManager(metaclass=SingletonMeta):
                             }
                         else:
                             logistic_dict[(lack_structure_id, provide_structure_id, lack_type_id)]["provide_quantity"] += provide_quantity
-        # 整理为可以持计划的数据
+        # 整理为可执行的计划的数据
         save_logistic_data = []
         for d, logistic_info in logistic_dict.items():
             lack_structure_id, provide_structure_id, lack_type_id = d
@@ -778,19 +800,19 @@ class IndustryManager(metaclass=SingletonMeta):
                     #   如果是in_order, 取min(蓝图支持的流程， real_work_waiting_to_split, max_job_run)
                     #       如果bpc不切分，则上两个min不考虑max_job_run
                     bp = await op.get_bp_object(product_type_id, real_work_waiting_to_split, plan_settings.get('considerate_bp_relation', False))
-
+                    this_round_max_job_run = max_job_run
                     if bp['fake'] or bp["runs"] < 0:
                         bp_support_runs = max_job_run
                     else:
                         bp_support_runs = bp["runs"]
 
                     if plan_settings.get("full_use_bp_cp", False) and bp["runs"] > 0:
-                        max_job_run = bp_support_runs
+                        this_round_max_job_run = bp_support_runs
 
                     if plan_settings.get("work_type", "whole") == "whole":
-                        this_round_work = min(bp_support_runs, op.set_uped_jobs[product_type_id], max_job_run)
+                        this_round_work = min(bp_support_runs, op.set_uped_jobs[product_type_id], this_round_max_job_run)
                     elif plan_settings.get("work_type", "whole") == "in_order":
-                        this_round_work = min(bp_support_runs, real_work_waiting_to_split, max_job_run)
+                        this_round_work = min(bp_support_runs, real_work_waiting_to_split, this_round_max_job_run)
 
                     real_work_list.append({
                         "type_id": product_type_id,
@@ -895,7 +917,7 @@ class IndustryManager(metaclass=SingletonMeta):
         material_adjust_price = await op.get_type_adjust_price(material_type_id)
         
         actype = "manufacturing" if self_relation['activity_id'] == 1 else "reaction"
-        if "manufacturing" not in system_cost:
+        if "manufacturing" not in system_cost or "reaction" not in system_cost:
             logger.error(f"system_cost {system_cost} not have {actype}")
         eiv_cost = float(float(system_cost[actype]) + 0.04) * material_adjust_price * self_relation['material_num']
         real_eiv_cost_list = [eiv_cost * work['runs'] for work in job_list]
@@ -932,12 +954,13 @@ class IndustryManager(metaclass=SingletonMeta):
         await tqdm_manager.update_mission("relation_moniter_process", 1)
 
     @classmethod
-    async def _is_update_complete(cls, user_name: str, plan_name: str):
+    async def _get_uncomplete_relation_list(cls, user_name: str, plan_name: str):
         all_relation_list = await NIU.get_relations("PLAN_BP_DEPEND_ON", {"user_name": user_name, "plan_name": plan_name})
+        res = []
         for relation in all_relation_list:
             if relation['relation']['status'] != "complete":
-                return False
-        return True
+                res.append(relation)
+        return res
 
     @classmethod
     async def _is_relation_calculate_avaliable(cls, relation: dict) -> Tuple[bool, List[dict], List[dict], dict]:
@@ -996,23 +1019,24 @@ class IndustryManager(metaclass=SingletonMeta):
         
         # finished_relation_set = set()
         last_progress = 0
-        while not await cls._is_update_complete(user_name, plan_name):
+        while uncomplete_relation_list := await cls._get_uncomplete_relation_list(user_name, plan_name):
             check_tasks = [
-                asyncio.create_task(cls._is_relation_calculate_avaliable(relation)) for relation in all_relation_list
+                asyncio.create_task(cls._is_relation_calculate_avaliable(relation)) for relation in uncomplete_relation_list
             ]
             check_results = await asyncio.gather(*check_tasks)
-            
+
             calculate_tasks = [
                 asyncio.create_task(relation_calculater_with_semaphore(relation, product_node_in_relation, same_route_relations))
                 for res, product_node_in_relation, same_route_relations, relation in check_results if res == True
             ]
             await asyncio.gather(*calculate_tasks)
-            all_relation_list = await NIU.get_relations("PLAN_BP_DEPEND_ON", {"user_name": user_name, "plan_name": plan_name})
+
             mission_count = await tqdm_manager.get_mission_count("relation_moniter_process")
             now_progress = mission_count / len(all_relation_list) * 100
             if now_progress > last_progress + 1:
                 await rdm.r.hset(op.current_progress_key, mapping={"name": "更新树状态", "progress": now_progress, "is_indeterminate": 0})
                 last_progress = now_progress
+
         await tqdm_manager.complete_mission("relation_moniter_process")
         logger.info(f"plan {plan_name} status update complete")
 
@@ -1053,8 +1077,12 @@ class IndustryManager(metaclass=SingletonMeta):
         return await create_config_flow_config(user_id, data)
 
     @classmethod
-    async def fetch_recommended_presets(cls, user_id: str):
-        return await fetch_recommended_presets(user_id)
+    async def fetch_recommended_presets(cls, user_id: str, preset_name: str):
+        return await fetch_recommended_presets(user_id, preset_name)
+
+    @classmethod
+    async def modify_config_flow_config(cls, user_id: str, data):
+        return await modify_config_flow_config(user_id, data)
 
     @classmethod
     async def delete_config_flow_config(cls, user_id: str, data):
@@ -1079,6 +1107,18 @@ class IndustryManager(metaclass=SingletonMeta):
     @classmethod
     async def save_config_flow_to_plan(cls, user_id: str, plan_name: str, data):
         return await save_config_flow_to_plan(user_id, plan_name, data)
+
+    @classmethod
+    async def save_config_flow_preset(cls, user_id: str, preset_name: str, config_list):
+        return await save_config_flow_preset(user_id, preset_name, config_list)
+
+    @classmethod
+    async def get_config_flow_presets(cls, user_id: str):
+        return await get_config_flow_presets(user_id)
+
+    @classmethod
+    async def load_config_flow_preset(cls, user_id: str, preset_id: int, plan_name: str):
+        return await load_config_flow_preset(user_id, preset_id, plan_name)
 
     # 物品信息方法（代理方法，保持向后兼容）
     @classmethod

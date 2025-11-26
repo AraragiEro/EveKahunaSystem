@@ -179,6 +179,22 @@ class EveIndustryAssetContainerPermission(PostgreModel):
     tag = Column(Text)
 all_model.append(EveIndustryAssetContainerPermission)
 
+# 资产视图
+class EveAssetView(PostgreModel):
+    __tablename__ = 'eve_asset_view'
+    sid = Column(Text, primary_key=True)
+    user_name = Column(Text, index=True)
+    asset_owner_id = Column(BigInteger)
+    asset_container_id = Column(BigInteger, index=True)
+    structure_id = Column(BigInteger)
+    system_id = Column(Integer)
+    tag = Column(Text)
+    public = Column(Boolean, default=False)
+    view_type = Column(Text, default='default')
+    config = Column(JSONB)
+    filter = Column(JSONB)
+all_model.append(EveAssetView)
+
 # 工业计划
 class EveIndustryPlan(PostgreModel):
     __tablename__ = 'eve_industry_plan'
@@ -214,6 +230,14 @@ class EveIndustryPlanConfigFlow(PostgreModel):
     plan_name = Column(Text, index=True)
     config_list = Column(ARRAY(Integer))
 all_model.append(EveIndustryPlanConfigFlow)
+
+class EveIndustrryPlanConfigFlowPreset(PostgreModel):
+    __tablename__ = 'eve_industry_plan_config_flow_preset'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(Text, index=True)
+    preset_name = Column(Text)
+    config_list = Column(ARRAY(Integer))
+all_model.append(EveIndustrryPlanConfigFlowPreset)
 
 class EveIndustryPlanConfigFlowPresupposition(PostgreModel):
     __tablename__ = 'eve_industry_plan_config_flow_presupposition'

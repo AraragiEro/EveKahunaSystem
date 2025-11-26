@@ -459,7 +459,8 @@ class PostgreDatabaseManager():
                 
                 # 步骤3：数据完整性验证
                 check_null_sql = text(f'SELECT COUNT(*) FROM "{table_name}" WHERE "{col_name}" IS NULL')
-                null_count = await conn.execute(check_null_sql).scalar() or 0
+                result = await conn.execute(check_null_sql)
+                null_count = result.scalar() or 0
                 
                 if null_count > 0:
                     if not col.nullable:
@@ -481,7 +482,8 @@ class PostgreDatabaseManager():
                             update_sql = text(f'UPDATE "{table_name}" SET "{col_name}" = {default_value_sql} WHERE "{col_name}" IS NULL')
                             await conn.execute(update_sql)
                             # 再次检查
-                            null_count = await conn.execute(check_null_sql).scalar() or 0
+                            result = await conn.execute(check_null_sql)
+                            null_count = result.scalar() or 0
                             if null_count > 0:
                                 error_msg = f"列 {col_name} 仍有 {null_count} 行NULL值，无法添加NOT NULL约束"
                                 if is_dev:
@@ -529,10 +531,11 @@ class PostgreDatabaseManager():
                     SELECT COUNT(*) FROM information_schema.columns 
                     WHERE table_name = :ref_table AND column_name = :ref_col
                 """)
-                ref_col_exists = await conn.execute(ref_col_check, {
+                ref_col_result = await conn.execute(ref_col_check, {
                     "ref_table": ref_table,
                     "ref_col": ref_col
-                }).scalar() > 0
+                })
+                ref_col_exists = ref_col_result.scalar() > 0
                 
                 if not ref_col_exists:
                     raise ValueError(f"无法添加外键约束 {fk_name}：引用列 {ref_table}.{ref_col} 不存在")

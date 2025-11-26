@@ -393,14 +393,31 @@ async def create_config_flow_config():
         logger.error(f"创建配置流配置失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "创建配置流配置失败"}), 500
 
-@api_industry_bp.route("/fetchRecommendedPresets", methods=["POST"])
+@api_industry_bp.route("/modifyConfigFlowConfig", methods=["POST"])
+@auth_required
+async def modify_config_flow_config():
+    data = await request.json
+    user_id = g.current_user["user_id"]
+    
+    logger.info(f"修改配置流配置: {data}")
+    try:
+        await IndustryManager.modify_config_flow_config(user_id, data)
+        return jsonify({"message": "修改配置流配置成功", "status": 200})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"修改配置流配置失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "修改配置流配置失败"}), 500
+
+@api_industry_bp.route("/fetchRecommendedPresets", methods=["GET"])
 @auth_required
 async def fetch_recommended_presets():
     data = await request.json
     user_id = g.current_user["user_id"]
-    
+    preset_name = "default_bp_and_material"
+
     try:
-        recommended_presets = await IndustryManager.fetch_recommended_presets(user_id)
+        recommended_presets = await IndustryManager.fetch_recommended_presets(user_id, preset_name)
         return jsonify({"data": recommended_presets, "status": 200})
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
@@ -487,6 +504,57 @@ async def save_config_flow_to_plan():
         logger.error(f"保存配置流失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "保存配置流失败"}), 500
 
+# 保存配置流预设
+@api_industry_bp.route("/saveConfigFlowPreset", methods=["POST"])
+@auth_required
+async def save_config_flow_preset():
+    data = await request.json
+    user_id = g.current_user["user_id"]
+
+    try:
+        preset_name = data["preset_name"]
+        config_list = data["config_list"]
+        await IndustryManager.save_config_flow_preset(user_id, preset_name, config_list)
+        return jsonify({"message": "保存预设成功", "status": 200})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"保存预设失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "保存预设失败"}), 500
+
+# 获取用户所有预设
+@api_industry_bp.route("/getConfigFlowPresets", methods=["GET"])
+@auth_required
+async def get_config_flow_presets():
+    user_id = g.current_user["user_id"]
+
+    try:
+        presets = await IndustryManager.get_config_flow_presets(user_id)
+        return jsonify({"data": presets, "status": 200})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"获取预设列表失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "获取预设列表失败"}), 500
+
+# 加载预设到计划
+@api_industry_bp.route("/loadConfigFlowPreset", methods=["POST"])
+@auth_required
+async def load_config_flow_preset():
+    data = await request.json
+    user_id = g.current_user["user_id"]
+
+    try:
+        preset_id = data["preset_id"]
+        plan_name = data["plan_name"]
+        await IndustryManager.load_config_flow_preset(user_id, preset_id, plan_name)
+        return jsonify({"message": "加载预设成功", "status": 200})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"加载预设失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "加载预设失败"}), 500
+
 # # 获取计划设置
 @api_industry_bp.route("/modifyPlanSettings", methods=["POST"])
 @auth_required
@@ -502,6 +570,25 @@ async def modify_plan_settings():
     except Exception as e:
         logger.error(f"修改计划设置失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "修改计划设置失败"}), 500
+
+@api_industry_bp.route("/deletePlan", methods=["POST"])
+@auth_required
+async def delete_plan():
+    data = await request.json
+    user_id = g.current_user["user_id"]
+
+    try:
+        plan_name = data.get("plan_name")
+        if not plan_name:
+            return jsonify({"status": 400, "message": "计划名称不能为空"}), 400
+        
+        await IndustryManager.delete_plan(plan_name, user_id)
+        return jsonify({"message": "计划删除成功", "status": 200})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"删除计划失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "删除计划失败"}), 500
 
 @api_industry_bp.route("/getItemInfo", methods=["POST"])
 @auth_required

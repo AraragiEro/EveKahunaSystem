@@ -11,6 +11,9 @@ import docStorage1 from '@/assets/doc-storage-1.png'
 import docStorage2 from '@/assets/doc-storage-2.png'
 import docStorage3 from '@/assets/doc-storage-3.png'
 import docSetting1 from '@/assets/doc-setting-1.png'
+import docQA1 from '@/assets/doc-QA-1.png'
+import docQA2 from '@/assets/doc-QA-2.png'
+import docQA3 from '@/assets/doc-QA-3.png'
 
 // 创建图片路径映射
 const imageMap: Record<string, string> = {
@@ -20,7 +23,10 @@ const imageMap: Record<string, string> = {
   '/assets/doc-storage-1.png': docStorage1,
   '/assets/doc-storage-2.png': docStorage2,
   '/assets/doc-storage-3.png': docStorage3,
-  '/assets/doc-setting-1.png': docSetting1
+  '/assets/doc-setting-1.png': docSetting1,
+  '/assets/doc-QA-1.png': docQA1,
+  '/assets/doc-QA-2.png': docQA2,
+  '/assets/doc-QA-3.png': docQA3
 }
 
 // 配置 marked

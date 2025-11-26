@@ -3,18 +3,24 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 import json
 import pathlib
+import uuid
 
 from tqdm.std import tqdm
 
-from src_v2.core.database.connect_manager import redis_manager as rdm, neo4j_manager
+from src_v2.core.database.connect_manager import redis_manager as rdm, neo4j_manager, postgres_manager as dbm
 from src_v2.core.utils import SingletonMeta, tqdm_manager
-from src_v2.core.utils import KahunaException, get_beijing_utctime
+from src_v2.core.utils import KahunaException, get_beijing_utctime, get_random_token
 
 from src_v2.model.EVE.character.character_manager import CharacterManager
 from src_v2.core.user.user_manager import UserManager
 
-from src_v2.core.database.kahuna_database_utils_v2 import EveAssetPullMissionDBUtils
+from src_v2.core.database.kahuna_database_utils_v2 import (
+    EveAssetPullMissionDBUtils,
+    EveAssetViewDBUtils,
+    EveIndustryAssetContainerPermissionDBUtils
+)
 from src_v2.core.database.model import EveAssetPullMission as M_EveAssetPullMission
+from src_v2.core.database.model import EveAssetView as M_EveAssetView
 
 from src_v2.core.database.neo4j_models import Asset
 from src_v2.core.database.neo4j_utils import Neo4jAssetUtils as NAU
@@ -422,7 +428,9 @@ class AssetManager(metaclass=SingletonMeta):
             
             # 星系信息
             if structure_info['solar_system_id'] != 'unknown':
-                system_info = SdeUtils.get_system_info_by_id(structure_info["solar_system_id"])
+                system_info = await SdeUtils.get_system_info_by_id(int(structure_info["solar_system_id"]))
+                if not system_info:
+                    raise KahunaException(f"建筑{forbidden_structure_node["item_id"]}无星系信息")
                 solar_system_node = {
                     'system_id': system_info['system_id'],
                     'system_name': system_info['system_name'],
@@ -582,3 +590,201 @@ class AssetManager(metaclass=SingletonMeta):
                     output['system'] = node
             output_list.append(output)
         return output_list
+
+
+    async def get_asset_view_of_user(self, user_name: str):
+        asset_view_list = []
+        async for asset_view in await EveAssetViewDBUtils.select_by_user_name(user_name):
+            asset_view_list.append({
+                'sid': asset_view.sid,
+                'asset_owner_id': asset_view.asset_owner_id,
+                'asset_container_id': asset_view.asset_container_id,
+                'structure_id': asset_view.structure_id,
+                'system_id': asset_view.system_id,
+                'tag': asset_view.tag,
+                'public': asset_view.public if hasattr(asset_view, 'public') else False,
+                'view_type': asset_view.view_type,
+                'config': asset_view.config,
+                'filter': asset_view.filter,
+            })
+        return asset_view_list
+
+    async def get_public_asset_view_data(self, sid: str):
+        """获取公开的资产视图数据
+        
+        :param sid: 资产视图SID
+        :raises KahunaException: 如果资产视图不存在或未公开
+        """
+        asset_view = await EveAssetViewDBUtils.select_by_sid(sid)
+        if not asset_view:
+            raise KahunaException('资产视图不存在')
+        
+        if not asset_view.public:
+            raise KahunaException('该资产视图未公开')
+        
+        return await self.get_asset_view_data(sid), asset_view.tag
+
+    async def get_asset_view_data(self, sid: str):
+        asset_view = await EveAssetViewDBUtils.select_by_sid(sid)
+        if not asset_view:
+            raise KahunaException('资产视图不存在')
+
+        asset_data = await NAU.get_asset_in_container_list([asset_view.asset_container_id])
+
+        async def check_filter(asset: dict):
+            view_filter = asset_view.filter
+            for f in view_filter:
+                if f['type'] == 'location_flag' and asset.get('location_flag', None) != f['value']:
+                    return False
+                if f['type'] == 'type_id' and asset.get('type_id', None) != f['value']:
+                    return False
+                if f['type'] == 'group':
+                    group = await SdeUtils.get_groupname_by_id(asset.get('type_id', None))
+                    group_zh = await SdeUtils.get_groupname_by_id(asset.get('type_id', None), True)
+                    if group != f['value'] and group_zh != f['value']:
+                        return False
+                if f['type'] == 'meta':
+                    meta = await SdeUtils.get_metaname_by_typeid(asset.get('type_id', None))
+                    meta_zh = await SdeUtils.get_metaname_by_typeid(asset.get('type_id', None), True)
+                    if meta != f['value'] and meta_zh != f['value']:
+                        return False
+                if f['type'] == 'marketGroup':
+                    market_group_list = await SdeUtils.get_market_group_list(asset.get('type_id', None))
+                    market_group_list_zh = await SdeUtils.get_market_group_list(asset.get('type_id', None), True)
+                    if f['value'] not in market_group_list and f['value'] not in market_group_list_zh:
+                        return False
+                if f['type'] == 'category':
+                    category = await SdeUtils.get_category_by_id(asset.get('type_id', None))
+                    category_zh = await SdeUtils.get_category_by_id(asset.get('type_id', None), True)
+                    if category != f['value'] and category_zh != f['value']:
+                        return False
+            return True
+
+        asset_dict = {}
+        for asset in asset_data:
+            type_id = asset['type_id']
+            if not await check_filter(asset):
+                continue
+            if type_id not in asset_dict:
+                asset_dict[type_id] = {
+                    'type_id': type_id,
+                    'type_name': await SdeUtils.get_name_by_id(type_id),
+                    'type_name_zh': await SdeUtils.get_name_by_id(type_id, 'zh'),
+                    'quantity': 0
+                }
+            asset_dict[type_id]['quantity'] += asset['quantity']
+
+
+        return asset_dict
+
+    async def get_asset_view_by_sid(self, sid: str):
+        return await EveAssetViewDBUtils.select_by_sid(sid)
+
+    async def fill_sell_price_data(self, output: dict, config: dict):
+        res = {}
+        price_base = config.get('price_base', 'jita_sell')
+        percent = config.get('percent', 1.0)
+        for type_id, item in output.items():
+            price_data = await rdm.r.hgetall(f"market_price:jita:{type_id}")
+            if not price_data:
+                continue
+            max_buy = float(price_data['max_buy'])
+            min_sell = float(price_data['min_sell'])
+            res[type_id] = item
+            if price_base == 'jita_sell':
+                item['price'] = min_sell * percent
+            elif price_base == 'jita_mid':
+                item['price'] = max_buy + (min_sell - max_buy) * percent
+            elif price_base == 'jita_buy':
+                item['price'] = max_buy * percent
+        return res
+
+    async def save_asset_view_config(
+        self,
+        user_name: str,
+        sid: str,
+        tag: str = None,
+        public: bool = None,
+        filter_list: list = None,
+        view_type: str = None,
+        config: dict = None
+    ):
+        """保存资产视图配置（部分更新）
+        
+        :param user_name: 用户名
+        :param sid: 资产视图SID
+        :param tag: 标签（可选）
+        :param public: 是否公开（可选）
+        :param filter_list: 过滤条件列表，格式为 [{"type": str, "value": str}, ...]（可选）
+        :param view_type: 视图类型（可选）
+        :param config: 配置字典（可选，会与现有配置合并）
+        """
+        asset_view = await EveAssetViewDBUtils.select_by_sid(sid)
+        if not asset_view:
+            raise KahunaException('资产视图不存在')
+        
+        # 检查权限：只能修改自己的资产视图
+        if asset_view.user_name != user_name:
+            raise KahunaException('无权修改此资产视图')
+        
+        # 只更新传递的参数
+        if tag is not None:
+            asset_view.tag = tag
+        if public is not None:
+            asset_view.public = public
+        if filter_list is not None:
+            asset_view.filter = filter_list
+        if view_type is not None:
+            asset_view.view_type = view_type
+        if config is not None:
+            # 合并配置，而不是完全替换
+            current_config = asset_view.config or {}
+            if isinstance(current_config, str):
+                # 如果 config 是字符串，尝试解析为字典
+                try:
+                    current_config = json.loads(current_config)
+                except:
+                    current_config = {}
+            merged_config = {**current_config, **config}
+            asset_view.config = merged_config
+        
+        # 保存到数据库
+        async with dbm.get_session() as session:
+            await session.merge(asset_view)
+            await session.commit()
+
+    async def create_asset_view_from_container_permission(self, user_name: str, container_tag: str):
+        """从容器许可创建资产视图
+        
+        :param user_name: 用户名
+        :param container_tag: 容器许可的 tag
+        :raises KahunaException: 如果容器许可不存在或已存在相同的资产视图
+        """
+        # 查找对应的容器许可
+        container_permission = None
+        async for cp in await EveIndustryAssetContainerPermissionDBUtils.select_all_by_user_name(user_name):
+            if cp.tag == container_tag:
+                container_permission = cp
+                break
+        
+        if not container_permission:
+            raise KahunaException(f'未找到标签为 {container_tag} 的容器许可')
+        
+        # 生成唯一的 sid
+        sid = get_random_token(20)
+        
+        # 创建资产视图对象
+        asset_view = M_EveAssetView(
+            sid=sid,
+            user_name=user_name,
+            asset_owner_id=container_permission.asset_owner_id,
+            asset_container_id=container_permission.asset_container_id,
+            structure_id=container_permission.structure_id,
+            system_id=container_permission.system_id,
+            tag=container_permission.tag,
+            public=False,
+            filter=[],
+            view_type='default'
+        )
+        
+        await EveAssetViewDBUtils.save_obj(asset_view)

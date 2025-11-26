@@ -162,6 +162,11 @@ const workFlowTableView = computed(() => {
         max-height="75vh"
         show-overflow-tooltip
     >
+        <el-table-column label="icon" width="120">
+            <template #default="{ row }">
+                <img :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" alt="类型" width="40" height="40" />
+            </template>
+        </el-table-column>
         <el-table-column label="物品id" prop="type_id" width="100" />
         <el-table-column label="物品名en" prop="type_name" width="200">
             <template #default="{ row }">

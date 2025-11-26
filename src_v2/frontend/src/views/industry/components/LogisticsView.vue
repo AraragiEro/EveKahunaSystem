@@ -69,6 +69,7 @@ const tableData = computed(() => {
     }
     return props.logisticsData.map(item => ({
         lack_type_name: item.lack_type_name || '',
+        provide_quantity: item.provide_quantity || 0,
         provide_volume: item.provide_volume || 0,
         provide_system_name: item.provide_system_name || '',
         lack_system_name: item.lack_system_name || '',
@@ -527,6 +528,17 @@ onUnmounted(() => {
                                             :title="`点击复制: ${row.lack_type_name || ''}`"
                                         >
                                             {{ row.lack_type_name }}
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="总数量" prop="provide_quantity" width="150">
+                                    <template #default="{ row }">
+                                        <div 
+                                            class="copyable-cell" 
+                                            @click="copyCellContent(row.provide_quantity, '总数量')"
+                                            :title="`点击复制: ${row.provide_quantity || ''}`"
+                                        >
+                                            {{ formatAccounting(row.provide_quantity) }}
                                         </div>
                                     </template>
                                 </el-table-column>

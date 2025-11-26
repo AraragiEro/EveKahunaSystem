@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight } from '@element-plus/icons-vue'
 import { http } from '@/http'
 import { VueDraggable } from 'vue-draggable-plus'
@@ -434,120 +434,327 @@ const handleConfirmModifyPlan = async () => {
   }
 }
 
-// TODO: 删除计划
-
+// 删除计划
 const deletePlanDialogVisible = ref(false)
 const openDeletePlanDialog = () => {
+  if (!selectedPlan.value) {
+    ElMessage.warning("请先选择要删除的计划")
+    return
+  }
   deletePlanDialogVisible.value = true
 }
 const cancelDeletePlan = () => {
   deletePlanDialogVisible.value = false
 }
 
+const handleConfirmDeletePlan = async () => {
+  if (!selectedPlan.value) {
+    ElMessage.warning("请先选择要删除的计划")
+    return
+  }
+
+  try {
+    // 使用 ElMessageBox 进行二次确认
+    await ElMessageBox.confirm(
+      `确定要删除计划 "${selectedPlan.value}" 吗？此操作不可恢复！`,
+      '删除计划',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        dangerouslyUseHTMLString: false
+      }
+    )
+
+    // 执行删除
+    const res = await http.post('/EVE/industry/deletePlan', {
+      plan_name: selectedPlan.value
+    })
+    const data = await res.json()
+    const code = res.status
+
+    if (code === 200) {
+      ElMessage.success("删除成功")
+      deletePlanDialogVisible.value = false
+      
+      // 如果删除的是当前选中的计划，清除选中状态
+      const deletedPlanName = selectedPlan.value
+      selectedPlan.value = null
+      localStorage.removeItem(STORAGE_KEY)
+      currentPlanProducts.value = []
+      current_plan_settings.value = {
+        name: '',
+        considerate_asset: false,
+        considerate_running_job: false,
+        split_to_jobs: false,
+        considerate_bp_relation: false,
+        full_use_bp_cp: false,
+        work_type: 'whole'
+      }
+      
+      // 刷新计划列表
+      await getPlanTableData()
+    } else {
+      ElMessage.error(data.message || "删除失败")
+    }
+  } catch (error: any) {
+    // 用户取消删除
+    if (error === 'cancel' || error === 'close') {
+      return
+    }
+    ElMessage.error(error.message || "删除失败")
+  }
+}
+
+// ============== 可拖拽分割线相关 ==============
+const RESIZE_STORAGE_KEYS = {
+  leftPanel: 'industry_plan_left_panel_width',
+  rightSplit: 'industry_plan_right_split_width'
+}
+
+// 左侧面板宽度（百分比）
+const getInitialLeftWidth = (): number => {
+  const saved = localStorage.getItem(RESIZE_STORAGE_KEYS.leftPanel)
+  return saved ? parseFloat(saved) : 30
+}
+const leftPanelWidth = ref<number>(getInitialLeftWidth())
+
+// 右侧分割宽度（百分比，相对于右侧容器）
+const getInitialRightSplit = (): number => {
+  const saved = localStorage.getItem(RESIZE_STORAGE_KEYS.rightSplit)
+  return saved ? parseFloat(saved) : 50
+}
+const rightSplitWidth = ref<number>(getInitialRightSplit())
+
+// 拖拽状态
+const isResizingLeft = ref(false)
+const isResizingRight = ref(false)
+const resizeStartX = ref(0)
+const resizeStartLeftWidth = ref(0)
+const resizeStartRightWidth = ref(0)
+
+// 左侧分割线拖拽
+const handleLeftResizeStart = (e: MouseEvent) => {
+  isResizingLeft.value = true
+  resizeStartX.value = e.clientX
+  resizeStartLeftWidth.value = leftPanelWidth.value
+  document.addEventListener('mousemove', handleLeftResizeMove)
+  document.addEventListener('mouseup', handleLeftResizeEnd)
+  e.preventDefault()
+}
+
+const handleLeftResizeMove = (e: MouseEvent) => {
+  if (!isResizingLeft.value) return
+  
+  const container = document.querySelector('.industry-plan-main-container') as HTMLElement
+  if (!container) return
+  
+  const containerWidth = container.offsetWidth
+  const deltaX = e.clientX - resizeStartX.value
+  const deltaPercent = (deltaX / containerWidth) * 100
+  
+  let newWidth = resizeStartLeftWidth.value + deltaPercent
+  
+  // 限制最小和最大宽度
+  newWidth = Math.max(15, Math.min(50, newWidth))
+  
+  leftPanelWidth.value = newWidth
+}
+
+const handleLeftResizeEnd = () => {
+  isResizingLeft.value = false
+  localStorage.setItem(RESIZE_STORAGE_KEYS.leftPanel, leftPanelWidth.value.toString())
+  document.removeEventListener('mousemove', handleLeftResizeMove)
+  document.removeEventListener('mouseup', handleLeftResizeEnd)
+}
+
+// 右侧分割线拖拽
+const handleRightResizeStart = (e: MouseEvent) => {
+  isResizingRight.value = true
+  resizeStartX.value = e.clientX
+  resizeStartRightWidth.value = rightSplitWidth.value
+  document.addEventListener('mousemove', handleRightResizeMove)
+  document.addEventListener('mouseup', handleRightResizeEnd)
+  e.preventDefault()
+}
+
+const handleRightResizeMove = (e: MouseEvent) => {
+  if (!isResizingRight.value) return
+  
+  const rightContainer = document.querySelector('.industry-plan-right-container') as HTMLElement
+  if (!rightContainer) return
+  
+  const containerWidth = rightContainer.offsetWidth
+  const deltaX = e.clientX - resizeStartX.value
+  const deltaPercent = (deltaX / containerWidth) * 100
+  
+  let newWidth = resizeStartRightWidth.value + deltaPercent
+  
+  // 限制最小和最大宽度（相对于右侧容器）
+  newWidth = Math.max(30, Math.min(70, newWidth))
+  
+  rightSplitWidth.value = newWidth
+}
+
+const handleRightResizeEnd = () => {
+  isResizingRight.value = false
+  localStorage.setItem(RESIZE_STORAGE_KEYS.rightSplit, rightSplitWidth.value.toString())
+  document.removeEventListener('mousemove', handleRightResizeMove)
+  document.removeEventListener('mouseup', handleRightResizeEnd)
+}
+
+// 计算容器高度（统一高度管理）
+const containerHeight = computed(() => {
+  // 假设顶部导航栏高度约为 60px，可以根据实际情况调整
+  return 'calc(94vh - 60px - 60px)'
+})
 
 onMounted(() => {
   getMarketRootTree()
   getPlanTableData()
 })
 
+onUnmounted(() => {
+  // 清理事件监听器
+  document.removeEventListener('mousemove', handleLeftResizeMove)
+  document.removeEventListener('mouseup', handleLeftResizeEnd)
+  document.removeEventListener('mousemove', handleRightResizeMove)
+  document.removeEventListener('mouseup', handleRightResizeEnd)
+})
+
 
 </script>
 
 <template>
-  <el-tabs class="industry-plan-tabs">
-    <el-tab-pane label="计划管理">
-      <div style="display: flex; flex-direction: row; justify-content: space-around; align-items: top;">
-        <div class="market-root-tree-container">
-          <el-scrollbar height="70vh">
-            <el-table
-              ref="marketRootTreeRef"
-              @row-click="handleRowClick"
-              @row-contextmenu="handleRowContextMenu"
-              class="market-root-tree-table"
-              :data="marketRootTree"
-              lazy
-              row-key="row_id"
-              :load="loadChildTree"
-            >
-              <el-table-column prop="name" label="名称">
-                <template #default="scope">
-                  <span
-                    :style="!('can_add_plan' in scope.row) ? 'color: gray;' : ''"
-                  >
-                    {{ scope.row.name }}
-                  </span>
-                </template>
-              </el-table-column>
-            </el-table>
-            
-            <!-- 右键菜单 -->
-            <div
-              v-if="contextMenuVisible"
-              class="context-menu"
-              :style="contextMenuStyle"
-              @click.stop
-            >
-              <el-menu @select="handleContextMenuSelect">
-                <el-menu-item
-                  v-if="contextMenuRow?.can_add_plan === true"
-                  index="add"
+  <div class="industry-plan-main-container" :style="{ height: containerHeight }">
+    <div class="industry-plan-layout">
+      <!-- 左侧市场树区域 -->
+      <div 
+        class="market-root-tree-container" 
+        :style="{ width: `${leftPanelWidth}%` }"
+      >
+        <el-scrollbar :height="`calc(${containerHeight} - 2vh)`">
+          <el-table
+            ref="marketRootTreeRef"
+            @row-click="handleRowClick"
+            @row-contextmenu="handleRowContextMenu"
+            class="market-root-tree-table"
+            :data="marketRootTree"
+            lazy
+            row-key="row_id"
+            :load="loadChildTree"
+          >
+            <el-table-column prop="name" label="名称">
+              <template #default="scope">
+                <span
+                  :style="!('can_add_plan' in scope.row) ? 'color: gray;' : ''"
                 >
-                  添加到计划
-                </el-menu-item>
-                <el-menu-item index="info">
-                  信息
-                </el-menu-item>
-              </el-menu>
-            </div>
-        </el-scrollbar>
-        </div>
-
-        <div class="industry-plan-table-container" style="display: flex; flex-direction: horizontal; justify-content: flex-start;">
-          <div class="industry-plan-table-product-list" style="min-width: 350px;">
-            <div style="padding: 10px;">
-              <span>当前计划: </span>
-              <el-select
-                placeholder="请选择计划"
-                v-model="selectedPlan"
-                style="width: 200px; margin-right: 10px;"
-                :options="IndustryPlanTableData"
-                :props="{value:'plan_name', label:'plan_name'}"
-                @change="handlePlanChange"
-              /><br/>
-              <el-button @click="saveCurrentPlan">
-                保存计划
-              </el-button>
-              <el-button @click="resetPlanModify">
-                重置修改
-              </el-button>
-              <el-button @click="openCreatePlanDialog">
-                新建计划
-              </el-button>
-              <el-button @click="openDeletePlanDialog">
-                删除计划
-              </el-button>
-              <el-button @click="openModifyPlanDialog">
-                修改计划设置
-              </el-button>
-            </div>
-            <VueDraggable
-              v-model="currentPlanProducts"
-              target="tbody"
-              :animation="150"
-            >
-              <industry-plan-plan-table :list="currentPlanProducts" />
-            </VueDraggable>
+                  {{ scope.row.name }}
+                </span>
+              </template>
+            </el-table-column>
+          </el-table>
+          
+          <!-- 右键菜单 -->
+          <div
+            v-if="contextMenuVisible"
+            class="context-menu"
+            :style="contextMenuStyle"
+            @click.stop
+          >
+            <el-menu @select="handleContextMenuSelect">
+              <el-menu-item
+                v-if="contextMenuRow?.can_add_plan === true"
+                index="add"
+              >
+                添加到计划
+              </el-menu-item>
+              <el-menu-item index="info">
+                信息
+              </el-menu-item>
+            </el-menu>
           </div>
-          <div class="industry-plan-table-fonfig-flow" style="min-width: 350px;">
+        </el-scrollbar>
+      </div>
+
+      <!-- 左侧分割线 -->
+      <div 
+        class="resize-handle resize-handle-vertical"
+        @mousedown="handleLeftResizeStart"
+        :class="{ 'resizing': isResizingLeft }"
+      ></div>
+
+      <!-- 右侧计划管理区域 -->
+      <div 
+        class="industry-plan-right-container"
+        :style="{ width: `${100 - leftPanelWidth}%` }"
+      >
+        <div class="industry-plan-right-layout">
+          <!-- 产品列表区域 -->
+          <div 
+            class="industry-plan-table-product-list"
+            :style="{ width: `${rightSplitWidth}%` }"
+          >
+            <div class="plan-control-panel">
+              <div class="plan-select-row">
+                <span class="plan-label">当前计划: </span>
+                <el-select
+                  placeholder="请选择计划"
+                  v-model="selectedPlan"
+                  class="plan-select"
+                  :options="IndustryPlanTableData"
+                  :props="{value:'plan_name', label:'plan_name'}"
+                  @change="handlePlanChange"
+                />
+              </div>
+              <div class="plan-buttons-row">
+                <el-button size="small" @click="saveCurrentPlan">
+                  保存计划
+                </el-button>
+                <el-button size="small" @click="resetPlanModify">
+                  重置修改
+                </el-button>
+                <el-button size="small" @click="openCreatePlanDialog">
+                  新建计划
+                </el-button>
+                <el-button size="small" @click="openDeletePlanDialog">
+                  删除计划
+                </el-button>
+                <el-button size="small" @click="openModifyPlanDialog">
+                  修改计划设置
+                </el-button>
+              </div>
+            </div>
+            <div class="product-table-wrapper">
+              <VueDraggable
+                v-model="currentPlanProducts"
+                target="tbody"
+                :animation="150"
+                style="height: 100%;"
+              >
+                <industry-plan-plan-table :list="currentPlanProducts" />
+              </VueDraggable>
+            </div>
+          </div>
+
+          <!-- 右侧分割线 -->
+          <div 
+            class="resize-handle resize-handle-vertical"
+            @mousedown="handleRightResizeStart"
+            :class="{ 'resizing': isResizingRight }"
+          ></div>
+
+          <!-- 配置流程区域 -->
+          <div 
+            class="industry-plan-table-config-flow"
+            :style="{ width: `${100 - rightSplitWidth}%` }"
+          >
             <industry-plan-config-flow v-if="selectedPlan" :selected-plan="selectedPlan" />
           </div>
         </div>
       </div>
-    </el-tab-pane>
-    <el-tab-pane label="配置">
-      <!-- 配置内容待实现 -->
-    </el-tab-pane>
-  </el-tabs>
+    </div>
+  </div>
 
   <!-- 添加产品弹窗 -->
   <el-dialog
@@ -800,31 +1007,206 @@ onMounted(() => {
       </span>
     </template>
   </el-dialog>
+
+  <!-- 删除计划弹窗 -->
+  <el-dialog
+    v-model="deletePlanDialogVisible"
+    title="删除计划"
+    width="500px"
+    :close-on-click-modal="false"
+  >
+    <div style="padding: 20px 0;">
+      <el-alert
+        v-if="selectedPlan"
+        :title="`确定要删除计划 '${selectedPlan}' 吗？`"
+        type="warning"
+        :closable="false"
+        show-icon
+      >
+        <template #default>
+          <div style="margin-top: 10px;">
+            <p style="margin: 0; color: #e6a23c;">此操作将永久删除计划及其所有相关数据，包括：</p>
+            <ul style="margin: 10px 0 0 20px; color: #e6a23c;">
+              <li>计划设置</li>
+              <li>计划产品列表</li>
+              <li>计划配置流</li>
+              <li>计划蓝图关系</li>
+            </ul>
+            <p style="margin: 10px 0 0; color: #e6a23c; font-weight: bold;">此操作不可恢复！</p>
+          </div>
+        </template>
+      </el-alert>
+      <el-alert
+        v-else
+        title="请先选择要删除的计划"
+        type="info"
+        :closable="false"
+        show-icon
+      />
+    </div>
+    
+    <template #footer>
+      <span class="dialog-footer">
+        <el-button @click="cancelDeletePlan">取消</el-button>
+        <el-button 
+          type="danger" 
+          @click="handleConfirmDeletePlan"
+          :disabled="!selectedPlan"
+        >
+          确定删除
+        </el-button>
+      </span>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
+/* 主容器 */
+.industry-plan-main-container {
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.industry-plan-layout {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* 左侧市场树容器 */
 .market-root-tree-container {
   background-color: #f5f7fa;
   min-width: 200px;
-  width: 30%;
-  max-width: 90vh;
-  padding: 10px;
-  margin-right: 10px;
-  border-radius: 10px;
-}
-.industry-plan-table-container {
-  width: 70%;
-  background-color: #f5f7fa;
-  padding: 10px;
-}
-.industry-plan-tabs {
-  height: 80vh;
-}
-.industry-plan-table-fonfig-flow {
-  width: 60%;
-  background-color: #f5f7fa;
+  max-width: 50%;
   padding: 10px;
   border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* 右侧主容器 */
+.industry-plan-right-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+}
+
+.industry-plan-right-layout {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* 产品列表区域 */
+.industry-plan-table-product-list {
+  background-color: #f5f7fa;
+  min-width: 300px;
+  max-width: 70%;
+  padding: 10px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* 计划控制面板 */
+.plan-control-panel {
+  padding: 10px;
+  background-color: #ffffff;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.plan-select-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 10px;
+}
+
+.plan-label {
+  font-weight: 500;
+  color: #606266;
+  white-space: nowrap;
+}
+
+.plan-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.plan-buttons-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.product-table-wrapper {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 配置流程区域 */
+.industry-plan-table-config-flow {
+  background-color: #f5f7fa;
+  min-width: 300px;
+  max-width: 70%;
+  padding: 10px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 可拖拽分割线 */
+.resize-handle {
+  background-color: #e4e7ed;
+  cursor: col-resize;
+  user-select: none;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+  transition: background-color 0.2s;
+}
+
+.resize-handle-vertical {
+  width: 4px;
+  min-width: 4px;
+}
+
+.resize-handle:hover {
+  background-color: #409eff;
+}
+
+.resize-handle.resizing {
+  background-color: #409eff;
+}
+
+.resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -2px;
+  right: -2px;
+  bottom: 0;
+  cursor: col-resize;
 }
 
 .context-menu {
@@ -1066,5 +1448,64 @@ onMounted(() => {
 .item-info-dialog :deep(.el-dialog__footer) {
   padding: 16px 24px;
   border-top: 1px solid #ebeef5;
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+  .plan-buttons-row {
+    flex-direction: column;
+  }
+  
+  .plan-buttons-row .el-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .industry-plan-layout {
+    flex-direction: column;
+  }
+  
+  .market-root-tree-container {
+    width: 100% !important;
+    max-width: 100%;
+    height: 200px;
+    min-height: 200px;
+  }
+  
+  .resize-handle-vertical {
+    width: 100%;
+    height: 4px;
+    cursor: row-resize;
+    min-width: 0;
+  }
+  
+  .industry-plan-right-container {
+    width: 100% !important;
+    flex: 1;
+  }
+  
+  .industry-plan-right-layout {
+    flex-direction: column;
+  }
+  
+  .industry-plan-table-product-list,
+  .industry-plan-table-config-flow {
+    width: 100% !important;
+    max-width: 100%;
+  }
+  
+  .plan-control-panel {
+    padding: 8px;
+  }
+  
+  .plan-select-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .plan-select {
+    width: 100%;
+  }
 }
 </style>

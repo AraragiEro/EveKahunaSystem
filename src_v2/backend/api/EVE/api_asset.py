@@ -14,6 +14,7 @@ from src_v2.core.database.kahuna_database_utils_v2 import EveAssetPullMissionDBU
 from src_v2.core.utils import get_beijing_utctime, KahunaException
 from datetime import datetime, timezone, timedelta
 from src_v2.core.database.model import EveAssetPullMission as M_EveAssetPullMission
+from src_v2.model.EVE.market.market_manager import MarketManager
 # from ..service.asset_server.asset_manager import AssetManager
 
 api_EVE_asset_bp = Blueprint('api_EVE_asset', __name__, url_prefix='/api/EVE/asset')
@@ -335,3 +336,99 @@ async def search_container_by_item_name_and_quantity():
     except Exception as e:
         logger.error(f"搜索容器失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "搜索容器失败"}), 500
+
+
+@api_EVE_asset_bp.route('/getAssetViewList', methods=['GET'])
+@auth_required
+async def get_asset_view_list():
+    try:
+        user_id = g.current_user["user_id"]
+        output = await AssetManager().get_asset_view_of_user(user_id)
+        return jsonify({"status": 200, "data": output})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+
+@api_EVE_asset_bp.route('/getAssetViewData', methods=['GET'])
+@auth_required
+async def get_asset_view_data():
+    try:
+        user_id = g.current_user["user_id"]
+
+        # GET 请求从查询参数中获取数据
+        asset_view_sid = request.args.get('asset_view_sid')
+        if not asset_view_sid:
+            return jsonify({"status": 400, "message": "缺少参数 asset_view_sid"}), 400
+        asset_view_obj = await AssetManager().get_asset_view_by_sid(asset_view_sid)
+        output = await AssetManager().get_asset_view_data(asset_view_sid)
+
+        # 出售视图增加价格
+        
+        if asset_view_obj.view_type == 'sell':
+            await MarketManager().update_jita_price()
+            output = await AssetManager().fill_sell_price_data(output, asset_view_obj.config)
+
+        return jsonify({"status": 200, "data": output, "view_type": asset_view_obj.view_type, "config": asset_view_obj.config})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"获取资产视图数据失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "获取资产视图数据失败"}), 500
+
+@api_EVE_asset_bp.route('/saveAssetViewConfig', methods=['POST'])
+@auth_required
+async def save_asset_view_config():
+    try:
+        user_id = g.current_user["user_id"]
+        # user_id 在这个系统中就是 user_name
+        user_name = user_id
+        data = await request.json
+        sid = data.get('sid')
+        
+        if not sid:
+            return jsonify({"status": 400, "message": "缺少参数 sid"}), 400
+        
+        # 只传递存在的参数，使用 None 表示不更新该字段
+        update_data = {}
+        if 'tag' in data:
+            update_data['tag'] = data.get('tag')
+        if 'public' in data:
+            update_data['public'] = data.get('public')
+        if 'filter' in data:
+            update_data['filter_list'] = data.get('filter')
+        if 'view_type' in data:
+            update_data['view_type'] = data.get('view_type')
+        if 'config' in data:
+            update_data['config'] = data.get('config')
+        
+        await AssetManager().save_asset_view_config(
+            user_name=user_name,
+            sid=sid,
+            **update_data
+        )
+        return jsonify({"status": 200, "message": "保存成功"})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"保存资产视图配置失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "保存资产视图配置失败"}), 500
+
+@api_EVE_asset_bp.route('/createAssetView', methods=['POST'])
+@auth_required
+async def create_asset_view():
+    try:
+        user_id = g.current_user["user_id"]
+        # user_id 在这个系统中就是 user_name
+        user_name = user_id
+        data = await request.json
+        container_tag = data.get('container_tag')
+        
+        if not container_tag:
+            return jsonify({"status": 400, "message": "缺少参数 container_tag"}), 400
+        
+        await AssetManager().create_asset_view_from_container_permission(user_name, container_tag)
+        return jsonify({"status": 200, "message": "创建监控成功"})
+    except KahunaException as e:
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        logger.error(f"创建资产视图失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "创建资产视图失败"}), 500

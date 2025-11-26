@@ -1,6 +1,6 @@
 <template>
   <div class="table-container">
-    <el-scrollbar height="56vh">
+    <el-scrollbar class="table-scrollbar">
     <table class="card-table">
       <thead>
         <tr class="table-header">
@@ -53,7 +53,16 @@ const handleDeleteProduct = (item: PlanProductTableData) => {
 <style scoped>
 .table-container {
   width: 100%;
+  height: 100%;
   padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.table-scrollbar {
+  flex: 1;
+  min-height: 0;
 }
 
 .card-table {

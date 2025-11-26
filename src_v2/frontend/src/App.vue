@@ -46,7 +46,7 @@ onUnmounted(() => {
 })
 
 // 定义公开页面列表（不需要认证和主布局）
-const publicPages = ['login', 'forbidden', 'characterAuthClose']
+const publicPages = ['login', 'forbidden', 'characterAuthClose', 'publicStorage']
 const isPublicPage = computed(() => publicPages.includes(route.name as string))
 
 // 主菜单配置 - 使用 computed 响应式地生成菜单项

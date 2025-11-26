@@ -29,7 +29,7 @@ async def get_structure_list(user_id: str):
             "structure_name": structure["structure_name"],
         } for structure in structure_list
     ]
-    await rdm.r.set(f'structure_suggestions:{user_id}:structure_list', json.dumps(res), ex=60*60)
+    await rdm.r.set(f'structure_suggestions:{user_id}:structure_list', json.dumps(res), ex=30)
     return res
 
 

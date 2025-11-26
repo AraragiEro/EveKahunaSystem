@@ -86,9 +86,20 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
         max-height="75vh"
         show-overflow-tooltip
         :row-class-name="CompleteRowClassName"
+        style="font-size: 16px;"
     >
-        <el-table-column label="层" prop="layer_id" width="60"/>
-        <el-table-column label="物品id" prop="type_id" width="70"/>
+        <el-table-column label="层" prop="layer_id" width="110">
+            <template #default="{ row }">
+                <img 
+                    v-if="row?.type_id"
+                    :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" 
+                    alt="类型" 
+                    width="40" 
+                    height="40" 
+                />
+            </template>
+        </el-table-column>
+        <el-table-column label="物品id" prop="type_id" width="90"/>
         <el-table-column label="物品名en" prop="type_name">
             <template #default="{ row }">
                 <div 
