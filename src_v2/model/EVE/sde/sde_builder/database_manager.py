@@ -28,16 +28,27 @@ class SDEDatabaseManager:
         # 限制并发连接数的信号量，设置为 80（略小于 max_overflow=80，确保不超过连接池大小）
         self.semaphore = asyncio.Semaphore(80)
     
-    async def create_async_session(self, host: str, port: int, database: str, user: str, password: str):
+    async def create_async_session(self, host: str, port: int, database: str, user: str, password: str, subprocess=False):
         """创建异步数据库会话"""
         # 构建 PostgreSQL 异步连接 URL
         database_url = f'postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}'
         
+        # 根据是否为子进程调整连接池大小
+        # 子进程通常只需要少量连接，避免多进程时连接数过多
+        if subprocess:
+            pool_size = 4  # 子进程使用较小的连接池
+            max_overflow = 5  # 子进程允许少量溢出
+            self.semaphore = asyncio.Semaphore(5)  # 子进程使用较小的信号量
+        else:
+            pool_size = 20  # 主进程使用正常大小的连接池
+            max_overflow = 80  # 主进程允许更多溢出
+            self.semaphore = asyncio.Semaphore(80)  # 主进程使用正常大小的信号量
+        
         # 创建异步引擎
         self.engine = create_async_engine(
             database_url,
-            pool_size=20,
-            max_overflow=80,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
             pool_timeout=300,
             pool_pre_ping=True,
             pool_recycle=1200,
@@ -147,12 +158,13 @@ class SDEDatabaseManager:
                 logger.error(f"4. 防火墙是否允许连接到 PostgreSQL 端口 {port}")
                 return False
     
-    async def init(self, base_classes: List[Type[DeclarativeMeta]] = None):
+    async def init(self, base_classes: List[Type[DeclarativeMeta]] = None, subprocess=False):
         """
         初始化数据库连接和表结构
         
         Args:
             base_classes: declarative_base 基类列表，用于创建表
+            subprocess: 是否为子进程模式，子进程模式下使用更小的连接池
         """
         logger.info("初始化 SDE PostgreSQL 异步数据库")
         
@@ -164,7 +176,7 @@ class SDEDatabaseManager:
             user = os.getenv('SDE_POSTGRES_USER') or config.get('SDEDB', 'User', fallback='sde')
             password = os.getenv('SDE_POSTGRES_PASSWORD') or config.get('SDEDB', 'Password', fallback='sde')
             
-            logger.info(f"SDE PostgreSQL 配置: {host}:{port}/{database} (用户: {user})")
+            logger.info(f"SDE PostgreSQL 配置: {host}:{port}/{database} (用户: {user}, subprocess={subprocess})")
         except Exception as e:
             logger.warning(f"读取 SDE PostgreSQL 配置失败，使用默认值: {e}")
             host = 'localhost'
@@ -180,15 +192,17 @@ class SDEDatabaseManager:
             raise RuntimeError(f"无法创建或连接到数据库: {database}")
         
         # 创建会话
-        await self.create_async_session(host, port, database, user, password)
+        await self.create_async_session(host, port, database, user, password, subprocess=subprocess)
         
         # 创建表结构
-        if base_classes and self.engine:
-            async with self.engine.begin() as conn:
-                from src_v2.core.database.connect_manager import PostgreDatabaseManager
-                db_manager = PostgreDatabaseManager()
-                for base_class in base_classes:
-                    await db_manager.create_default_table(conn, base_class)
+        # 子进程不创建表结构
+        if not subprocess:
+            if base_classes and self.engine:
+                async with self.engine.begin() as conn:
+                    from src_v2.core.database.connect_manager import PostgreDatabaseManager
+                    db_manager = PostgreDatabaseManager()
+                    for base_class in base_classes:
+                        await db_manager.create_default_table(conn, base_class)
         
         logger.info("SDE PostgreSQL 数据库初始化完成")
     

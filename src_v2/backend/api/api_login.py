@@ -97,20 +97,31 @@ async def login():
         roles = await user.roles
         # 获取vip等级
         vip_state = await permission_manager.get_vip_state(username)
+        vip_end_date_str = None
         if vip_state:
             logger.info(f"vip_state: {vip_state.vip_level}")
             roles.append(vip_state.vip_level)
+            # 格式化VIP到期日期
+            if vip_state.vip_end_date:
+                if hasattr(vip_state.vip_end_date, 'isoformat'):
+                    vip_end_date_str = vip_state.vip_end_date.isoformat()
+                else:
+                    vip_end_date_str = str(vip_state.vip_end_date)
         else:
             logger.info(f"vip_state: None")
+
+        user_data = {
+            "id": username,
+            "username": username,
+            "roles": list(set(roles))
+        }
+        if vip_end_date_str:
+            user_data["vipEndDate"] = vip_end_date_str
 
         return jsonify({
             "status": 200,
             "token": token,
-            "user": {
-                "id": username,
-                "username": username,
-                "roles": list(set(roles))
-            }
+            "user": user_data
         })
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
@@ -131,18 +142,31 @@ async def get_current_user():
         # 获取vip等级
         roles = await user.roles
         vip_state = await permission_manager.get_vip_state(user_id)
+        vip_end_date_str = None
         if vip_state:
             logger.info(f"vip_state: {vip_state.vip_level}")
             roles.append(vip_state.vip_level)
+            if vip_state.vip_level == 'vip_omega':
+                roles.append('vip_alpha')
+            # 格式化VIP到期日期
+            if vip_state.vip_end_date:
+                if hasattr(vip_state.vip_end_date, 'isoformat'):
+                    vip_end_date_str = vip_state.vip_end_date.isoformat()
+                else:
+                    vip_end_date_str = str(vip_state.vip_end_date)
         else:
             logger.info(f"vip_state: None")
 
-        return jsonify({
+        response_data = {
             "status": 200,
             "id": user.user_name,
             "username": user.user_name,
             "roles": list(set(roles)),
-        })
+        }
+        if vip_end_date_str:
+            response_data["vipEndDate"] = vip_end_date_str
+
+        return jsonify(response_data)
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:

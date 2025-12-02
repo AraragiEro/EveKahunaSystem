@@ -6,7 +6,7 @@ import { useHelpStore } from '@/stores/help'
 import { useEdition } from '@/composables/useEdition'
 import smallSideBar from './components/sideBar/smallSideBar.vue'
 import HelpDrawer from './components/HelpDrawer.vue'
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import githubIcon from '@/assets/github-mark.svg'
 
 const router = useRouter()
@@ -37,16 +37,9 @@ const handleKeyDown = (event: KeyboardEvent) => {
   }
 }
 
-onMounted(() => {
-  window.addEventListener('keydown', handleKeyDown)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeyDown)
-})
 
 // 定义公开页面列表（不需要认证和主布局）
-const publicPages = ['login', 'forbidden', 'characterAuthClose', 'publicStorage']
+const publicPages = ['login', 'landing', 'forbidden', 'characterAuthClose', 'publicStorage']
 const isPublicPage = computed(() => publicPages.includes(route.name as string))
 
 // 主菜单配置 - 使用 computed 响应式地生成菜单项
@@ -62,20 +55,26 @@ const menuItems = computed(() => {
   if (userRoles.includes('user')) {
     items.push({ id: id_index++, icon: 'Cpu', label: '工业', active: router.currentRoute.value.path.startsWith('/industry'), route: '/industry' })
     // items.push({ id: id_index++, icon: 'ShoppingBag', label: '公司商城', active: router.currentRoute.value.path === '/corpShop', route: '/corpShop' })
-    items.push({ id: id_index++, icon: 'Opportunity', label: '实用工具', active: router.currentRoute.value.path === '/utils', route: '/utils' })
-    items.push({ id: id_index++, icon: 'Setting', label: '设置', active: router.currentRoute.value.path.startsWith('/setting'), route: '/setting' })
-    
-    // 企业版专用菜单项
-    if (isEnterprise) {
+  }
+
+  // 企业版专用菜单项
+  if (isEnterprise) {
+    if (userRoles.includes('vip_omega')) {
       items.push({ 
         id: id_index++, 
-        icon: 'DataAnalysis', 
-        label: '企业分析', 
-        active: router.currentRoute.value.path.startsWith('/enterprise'), 
-        route: '/enterprise' 
+        icon: 'PieChart', 
+        label: '市场分析', 
+        active: router.currentRoute.value.path.startsWith('/market'), 
+        route: '/market' 
       })
     }
   }
+  
+  if (userRoles.includes('user')) {
+    items.push({ id: id_index++, icon: 'Opportunity', label: '实用工具', active: router.currentRoute.value.path === '/utils', route: '/utils' })
+    items.push({ id: id_index++, icon: 'Setting', label: '设置', active: router.currentRoute.value.path.startsWith('/setting'), route: '/setting' })
+  }
+
   if (userRoles.includes('admin')) {
     items.push({ id: id_index++, icon: 'Cpu', label: '管理员', active: router.currentRoute.value.path.startsWith('/admin'), route: '/admin' })
   }
@@ -87,6 +86,112 @@ const handleLogout = () => {
   authStore.logout()
   router.push('/login')
 }
+
+// 订阅状态计算属性
+const hasAlphaSubscription = computed(() => {
+  const userRoles = authStore.user?.roles || []
+  return userRoles.includes('vip_alpha')
+})
+
+const hasOmegaSubscription = computed(() => {
+  const userRoles = authStore.user?.roles || []
+  return userRoles.includes('vip_omega')
+})
+
+// 当前时间，用于定时更新剩余时间显示
+const currentTime = ref(Date.now())
+
+// 获取订阅有效期
+const subscriptionEndDate = computed(() => {
+  return authStore.user?.vipEndDate || null
+})
+
+// 检查是否过期
+const isExpired = (endDateStr: string | null | undefined): boolean => {
+  if (!endDateStr) return true
+  
+  try {
+    const endDate = new Date(endDateStr)
+    const now = new Date(currentTime.value)
+    return endDate.getTime() <= now.getTime()
+  } catch {
+    return true
+  }
+}
+
+// 计算剩余时间文本
+const getRemainingTimeText = (endDateStr: string | null | undefined): string => {
+  if (!endDateStr) return ''
+  
+  try {
+    const endDate = new Date(endDateStr)
+    const now = new Date(currentTime.value)
+    const diff = endDate.getTime() - now.getTime()
+    
+    if (diff <= 0) {
+      return ''
+    }
+    
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+    
+    if (days > 0) {
+      return `剩余${days}天${hours}小时`
+    } else if (hours > 0) {
+      return `剩余${hours}小时${minutes}分钟`
+    } else {
+      return `剩余${minutes}分钟`
+    }
+  } catch {
+    return ''
+  }
+}
+
+// 获取剩余时间标签类型（颜色）
+const getRemainingTimeTagType = (endDateStr: string | null | undefined): string => {
+  if (!endDateStr) return 'info'
+  
+  try {
+    const endDate = new Date(endDateStr)
+    const now = new Date(currentTime.value)
+    const diff = endDate.getTime() - now.getTime()
+    
+    if (diff <= 0) {
+      return 'danger'
+    }
+    
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+    
+    if (days < 1) {
+      return 'danger' // 少于1天显示危险色
+    } else if (days < 7) {
+      return 'warning' // 少于7天显示警告色
+    } else {
+      return 'success' // 7天以上显示成功色
+    }
+  } catch {
+    return 'info'
+  }
+}
+
+// 定时更新当前时间（每分钟更新一次）
+let timeUpdateInterval: number | null = null
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+  // 每分钟更新一次当前时间
+  timeUpdateInterval = window.setInterval(() => {
+    currentTime.value = Date.now()
+  }, 60000) // 60000ms = 1分钟
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+  if (timeUpdateInterval !== null) {
+    clearInterval(timeUpdateInterval)
+  }
+})
 </script>
 
 <template>
@@ -104,13 +209,45 @@ const handleLogout = () => {
         <el-header class="main-header">
           <div class="header-content">
             <div class="header-title">
-              <h2>Kahuna-System V1.0.0</h2>
+              <h2>Kahuna-System V1.2.0</h2>
               <el-tag 
                 :type="isEnterprise ? 'success' : 'info'" 
                 size="small" 
                 class="edition-tag"
               >
                 {{ isEnterprise ? '紫竹梅特供版' : '社区版' }}
+              </el-tag>
+              <el-tag 
+                v-if="hasAlphaSubscription && !hasOmegaSubscription"
+                type="warning" 
+                size="small" 
+                class="edition-tag"
+              >
+                Alpha订阅
+              </el-tag>
+              <el-tag 
+                v-if="hasAlphaSubscription && !hasOmegaSubscription && subscriptionEndDate && !isExpired(subscriptionEndDate)"
+                :type="getRemainingTimeTagType(subscriptionEndDate)"
+                size="small" 
+                class="edition-tag"
+              >
+                {{ getRemainingTimeText(subscriptionEndDate) }}
+              </el-tag>
+              <el-tag 
+                v-if="hasOmegaSubscription"
+                type="danger" 
+                size="small" 
+                class="edition-tag"
+              >
+                Omega订阅
+              </el-tag>
+              <el-tag 
+                v-if="hasOmegaSubscription && subscriptionEndDate && !isExpired(subscriptionEndDate)"
+                :type="getRemainingTimeTagType(subscriptionEndDate)"
+                size="small" 
+                class="edition-tag"
+              >
+                {{ getRemainingTimeText(subscriptionEndDate) }}
               </el-tag>
             </div>
             <div class="header-actions">

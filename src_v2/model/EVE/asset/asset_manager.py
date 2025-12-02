@@ -361,7 +361,7 @@ class AssetManager(metaclass=SingletonMeta):
                             {
                                 "item_id": asset["item_id"],
                                 "type_id": asset["type_id"],
-                                "owner_id": asset["owner_id"],
+                                "owner_id": mission_obj.asset_owner_id,
                             },
                             "LOCATED_IN",
                             {},{},

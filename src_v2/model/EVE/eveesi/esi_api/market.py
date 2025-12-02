@@ -40,7 +40,7 @@ async def markets_structures(access_token, structure_id: int, page: int=1, test=
 
 # List orders in a region
 # https://esi.evetech.net/markets/{region_id}/orders
-@esi_request(limit=20)
+@esi_request(limit=30)
 async def markets_region_orders(region_id: int, type_id: int = None, page: int=1, max_retries=3, log=True):
     params = {"page": page}
     if type_id is not None:

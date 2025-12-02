@@ -9,6 +9,7 @@ def init_api(app):
     from .api_vip import api_vip_bp
     from .EVE.api_industry import api_industry_bp
     from .api_public import api_public_bp
+    from .api_statistics import api_statistics_bp
 
     app.register_blueprint(api_EVE_asset_bp)
     app.register_blueprint(api_auth_bp)
@@ -20,6 +21,7 @@ def init_api(app):
     app.register_blueprint(api_vip_bp)
     app.register_blueprint(api_industry_bp)
     app.register_blueprint(api_public_bp)
+    app.register_blueprint(api_statistics_bp)
 
     # 条件注册企业版 API
     # 仅在版本为企业版且模块存在时注册

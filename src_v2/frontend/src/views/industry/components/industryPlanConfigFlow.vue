@@ -2,7 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { http } from '@/http'
 import IndustryPlanConfigFlowTable from './industryPlanConfigFlowTable.vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { VueDraggable } from 'vue-draggable-plus'
 import { haveRole } from '@/router/guards'
 import { useAuthStore } from '@/stores/auth'
@@ -131,9 +131,41 @@ const savePreset = async () => {
         return
     }
     
+    const trimmedPresetName = presetName.value.trim()
+    
+    // 检查是否存在同名预设
+    try {
+        const checkRes = await http.get('/EVE/industry/getConfigFlowPresets')
+        const checkData = await checkRes.json()
+        if (checkData.status === 200) {
+            const existingPreset = checkData.data.find((p: { preset_name: string }) => p.preset_name === trimmedPresetName)
+            if (existingPreset) {
+                // 存在同名预设，弹出确认对话框
+                try {
+                    await ElMessageBox.confirm(
+                        `预设名 '${trimmedPresetName}' 已存在，是否覆盖？`,
+                        '确认覆盖',
+                        {
+                            confirmButtonText: '覆盖',
+                            cancelButtonText: '取消',
+                            type: 'warning',
+                        }
+                    )
+                } catch {
+                    // 用户取消，不执行保存
+                    return
+                }
+            }
+        }
+    } catch (error) {
+        // 获取预设列表失败，继续执行保存（让后端处理）
+        console.warn('获取预设列表失败，继续保存:', error)
+    }
+    
+    // 执行保存
     try {
         const res = await http.post('/EVE/industry/saveConfigFlowPreset', {
-            preset_name: presetName.value.trim(),
+            preset_name: trimmedPresetName,
             config_list: configFlowList.value
         })
         const data = await res.json()

@@ -829,16 +829,25 @@ class PostgreDatabaseManager():
             await conn.run_sync(base_class.metadata.create_all)
             logger.info(f"表创建完成，共创建 {len(tables_to_create)} 个表")
 
-    async def create_async_session(self, host: str, port: int, database: str, user: str, password: str):
+    async def create_async_session(self, host: str, port: int, database: str, user: str, password: str, subprocess=False):
         """创建异步数据库会话"""
         # 构建 PostgreSQL 异步连接 URL
         database_url = f'postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}'
 
+        # 根据是否为子进程调整连接池大小
+        # 子进程通常只需要少量连接，避免多进程时连接数过多
+        if subprocess:
+            pool_size = 2  # 子进程使用较小的连接池
+            max_overflow = 3  # 子进程允许少量溢出
+        else:
+            pool_size = 20  # 主进程使用正常大小的连接池
+            max_overflow = 80  # 主进程允许更多溢出
+
         # 创建异步引擎
         self.engine = create_async_engine(
             database_url,
-            pool_size=20,
-            max_overflow=80,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
             pool_timeout=300,
             pool_pre_ping=True,
             pool_recycle=1200,
@@ -856,7 +865,7 @@ class PostgreDatabaseManager():
         logger.info(f"PostgreSQL 异步引擎创建成功: {host}:{port}/{database}")
         return self._session_maker
 
-    async def init(self, base_classes: List[Type[DeclarativeMeta]] = None):
+    async def init(self, base_classes: List[Type[DeclarativeMeta]] = None, subprocess=False):
         """
         初始化数据库连接和表结构
 
@@ -883,15 +892,17 @@ class PostgreDatabaseManager():
             password = 'kahunabot'
 
         # 创建会话
-        await self.create_async_session(host, port, database, user, password)
+        await self.create_async_session(host, port, database, user, password, subprocess=subprocess)
 
         # 创建表结构
-        if not base_classes:
-            from .model import all_model
-            base_classes = all_model
-        async with self.engine.begin() as conn:
-            for base_class in base_classes:
-                await self.create_default_table(conn, base_class)
+        # 子进程不创建结构
+        if not subprocess:
+            if not base_classes:
+                from .model import all_model
+                base_classes = all_model
+            async with self.engine.begin() as conn:
+                for base_class in base_classes:
+                    await self.create_default_table(conn, base_class)
 
         logger.info("PostgreSQL 数据库初始化完成")
 
@@ -949,6 +960,11 @@ class RedisDatabaseManager():
         
         logger.info(f"Redis 连接成功: {host}:{port}")
 
+    async def close(self):
+        if self._redis:
+            await self._redis.close()
+            logger.info("Redis 连接已关闭")
+
     @property
     def redis(self):
         if not self._redis:
@@ -989,28 +1005,38 @@ class Neo4jDatabaseManager():
         self._neo4j = None
         self.semaphore = asyncio.Semaphore(50)
     
-    async def init(self):
+    async def init(self, subprocess=False):
         host = os.getenv('NEO4J_HOST') or config.get('NEO4J', 'Host', fallback='localhost')
         port = int(os.getenv('NEO4J_PORT', 0)) or config.getint('NEO4J', 'Port', fallback=7687)
         username = os.getenv('NEO4J_USERNAME') or config.get('NEO4J', 'Username', fallback='neo4j')
         password = os.getenv('NEO4J_PASSWORD') or config.get('NEO4J', 'Password', fallback='neo4j')
 
+        # 根据是否为子进程调整连接池大小
+        # 子进程通常只需要少量连接，避免多进程时连接数过多
+        if subprocess:
+            max_connection_pool_size = 5  # 子进程使用较小的连接池
+            self.semaphore = asyncio.Semaphore(5)  # 子进程使用较小的信号量
+        else:
+            max_connection_pool_size = 100  # 主进程使用正常大小的连接池
+            self.semaphore = asyncio.Semaphore(50)  # 主进程使用正常大小的信号量
+
         self._neo4j = AsyncGraphDatabase.driver(
             f'bolt://{host}:{port}',
             auth=(username, password),
-            max_connection_pool_size=200,  # 增加连接池大小以支持高并发
+            max_connection_pool_size=max_connection_pool_size,
             connection_acquisition_timeout=120  # 增加连接获取超时时间到120秒
         )
         
         # 验证连接
         await self.verify_connectivity()
-        logger.info(f"Neo4j 连接成功: {host}:{port}")
+        logger.info(f"Neo4j 连接成功: {host}:{port} (subprocess={subprocess}, pool_size={max_connection_pool_size})")
 
-        # 初始化数据库模式（创建索引和约束）
-        # await self.clean_all()
-        await self.clean_all_index()
-        from .neo4j_model_manager import neo4j_model_manager
-        await neo4j_model_manager.init_schema()
+        if not subprocess:
+            # 初始化数据库模式（创建索引和约束）
+            # await self.clean_all()
+            await self.clean_all_index()
+            from .neo4j_model_manager import neo4j_model_manager
+            await neo4j_model_manager.init_schema()
 
     async def verify_connectivity(self):
         """验证连接是否可用"""

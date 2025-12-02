@@ -62,9 +62,9 @@ const todoItems = ref<TodoItem[]>([
         title: '市场分析',
         completed: false,
         children: [
-          { id: 'market-price', title: '市场价格查看', completed: false },
-          { id: 'price-monitor', title: '自选清单的价格监控', completed: false },
-          { id: 'profit-calc', title: '自选产品清单的利润计算', completed: false },
+          { id: 'market-price', title: '市场价格查看', completed: true },
+          { id: 'price-monitor', title: '自选清单的价格监控', completed: true },
+          { id: 'profit-calc', title: '自选产品清单的利润计算', completed: true },
           { id: 'product-detail', title: '市场单品的详细数据计算【成本、利润等】', completed: false },
           { id: 'region-profit', title: '特定星域的市场利润计算', completed: false }
         ]
@@ -82,7 +82,7 @@ const todoItems = ref<TodoItem[]>([
       { id: 'performance', title: '性能优化', completed: false },
       { id: 'ux-improve', title: '用户体验改进', completed: false,
         children: [
-          { id: 'ux-improve-1', title: '带管理员账号的初始化', completed: false },
+          { id: 'ux-improve-1', title: '带管理员账号的初始化', completed: true },
           { id: 'ux-improve-2', title: '可直接部署的docker镜像', completed: false },
         ]
       },

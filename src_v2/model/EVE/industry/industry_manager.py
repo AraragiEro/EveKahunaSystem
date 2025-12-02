@@ -2,12 +2,15 @@
 import asyncio
 from copy import deepcopy
 import json
+import traceback
 from asyncio import Queue
 from enum import Flag
 from itertools import product
 from math import ceil, sqrt
 from typing import Dict, List, Tuple
 from datetime import date, datetime
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
 
 # 本地导入 - 核心工具
 from src_v2.core.database.connect_manager import (
@@ -16,12 +19,10 @@ from src_v2.core.database.connect_manager import (
     redis_manager as rdm
 )
 from src_v2.core.database.kahuna_database_utils_v2 import (
-    EveAssetPullMissionDBUtils,
-    EveIndustryAssetContainerPermissionDBUtils,
-    EveIndustryPlanConfigFlowConfigDBUtils,
     EveIndustryPlanConfigFlowDBUtils,
     EveIndustryPlanDBUtils,
-    EveIndustryPlanProductDBUtils
+    EveIndustryPlanProductDBUtils,
+    EveIndustryCalculateHistoryDBUtils
 )
 from src_v2.core.database.neo4j_utils import (
     Neo4jAssetUtils as NAU,
@@ -64,7 +65,9 @@ from .industry_utils import (
     get_structure_assign_keyword_suggestions,
     get_material_type,
     get_item_info,
-    get_type_list
+    get_type_list,
+    update_plan_status,
+    get_plan_tableview_data
 )
 
 
@@ -73,6 +76,15 @@ class IndustryManager(metaclass=SingletonMeta):
     def __init__(self):
         self.bp_node_analyse_queue = Queue()
         self.bp_relation_analyse_queue = Queue()
+        # 计算任务队列和并发控制
+        self.calculate_queue = asyncio.Queue()
+        self.calculate_queue_items = []  # 用于跟踪队列中的任务，方便更新位置
+        self.calculate_queue_lock = asyncio.Lock()  # 保护队列操作
+        self.calculate_semaphore = asyncio.Semaphore(5)  # 最多5个并发任务
+        self._queue_processor_task = None
+        self._start_queue_processor()
+
+        self._process_pool = None
 
     @classmethod
     async def create_plan(cls, user_name: str, plan_name: str, plan_settings: dict):
@@ -152,6 +164,149 @@ class IndustryManager(metaclass=SingletonMeta):
                 plan_product_obj.quantity = product["quantity"]
                 await EveIndustryPlanProductDBUtils.save_obj(plan_product_obj, session)
 
+    def _get_process_pool(self, max_workers=None):
+        """获取进程池"""
+        if self._process_pool is None:
+            max_workers = max_workers or min(multiprocessing.cpu_count(), 4)  # 限制最大进程数
+            self._process_pool = ProcessPoolExecutor(max_workers=max_workers)
+        return self._process_pool
+
+    @classmethod
+    async def calculate_cost_and_market_histyory(cls, op: ConfigFlowOperateCenter, type_id_list, market_id: int = None):
+        """
+        成本与历史销量需要当场获取，涉及计算量较大，使用子进程。
+        """
+        semaphore = asyncio.Semaphore(5)
+        
+        # 初始化进度跟踪
+        total_count = len(type_id_list)
+        progress_key = None
+        total_progress_key = None
+        if market_id is not None:
+            progress_key = f"market_cost_calculation_progress:{op.user_name}:{market_id}"
+            total_progress_key = f"market_cost_calculation_total:{op.user_name}:{market_id}"
+            await rdm.r.set(total_progress_key, total_count)
+            await rdm.r.hset(progress_key, mapping={
+                "status": "running",
+                "completed": 0,
+                "total": total_count,
+                "current_step": "初始化计算任务"
+            })
+        
+        async def calculate_cost_and_market_histyory_async(type_id: int, plan_data):
+            async with semaphore:
+                    # 创建操作中心对象
+                sub_op = await ConfigFlowOperateCenter.create(
+                    plan_data["user_name"],
+                    plan_data["plan_name"],
+                    plan_data["plan_settings"]
+                )
+                await sub_op.init_at_begin()
+                
+                # 执行计算步骤（与原方法保持一致）
+                await IndustryManager.delete_plan_nodes(sub_op.plan_name, sub_op.user_name)
+                await IndustryManager.create_plan_node(plan_data)
+                await IndustryManager.create_plan_tree(plan_data, sub_op)
+                all_relation_list = await NIU.get_relations("PLAN_BP_DEPEND_ON", {"user_name": sub_op.user_name, "plan_name": sub_op.plan_name})
+
+                # 使用多进程计算计划状态
+                IndustryManager()._process_pool = IndustryManager()._get_process_pool(max_workers=3)
+                future = IndustryManager()._process_pool.submit(_run_async_calculation_in_process, type_id, sub_op, all_relation_list)
+                # 使用 wrap_future 将 concurrent.futures.Future 转换为 asyncio.Future，避免阻塞事件循环
+                logger.info(f"calculate_cost_and_market_histyory_async {type_id} start")
+                asyncio_future = asyncio.wrap_future(future)
+                result = await asyncio_future
+                logger.info(f"calculate_cost_and_market_histyory_async {type_id} end")
+            # await update_plan_status(sub_op, all_relation_list)
+            # result = await get_plan_tableview_data(sub_op)
+            return type_id, result
+
+        cost_dict = {}
+        futures = []
+        for type_id in type_id_list:
+            # 构造计划数据（可序列化的字典）
+            plan_name = f"calculate_cost_and_market_histyory_{type_id}"
+            plan_settings = op.plan_settings
+            plan_settings["name"] = plan_name
+            plan_settings["work_type"] = "whole"
+            plan_settings["split_to_jobs"] = True
+            # plan_settings["considerate_asset"] = True
+            plan_settings["considerate_bp_relation"] = False
+            plan_settings["considerate_running_job"] = False
+
+            plan_data = {
+                "plan_name": plan_name,
+                "user_name": op.user_name,
+                "plan_settings": plan_settings,
+                "products": [{
+                    "index_id": 1,
+                    "product_type_id": type_id,
+                    # 加大数量，避免计算结果不准确
+                    "quantity": 1000
+                }]
+            }
+
+            futures.append(asyncio.create_task(calculate_cost_and_market_histyory_async(type_id, plan_data)))
+
+        # 使用 asyncio.as_completed 实时更新进度
+        completed_count = 0
+        result_key = None
+        has_error = False
+        if market_id is not None and progress_key:
+            result_key = f"market_cost_calculation_result:{op.user_name}:{market_id}"
+            for future in asyncio.as_completed(futures):
+                try:
+                    result = await future
+                    completed_count += 1
+                    cost_dict[result[0]] = {
+                        "type_id": result[0],
+                        "eiv_cost_dict": result[1]["eiv_cost_dict"],
+                        "material_output": result[1]["material_output"],
+                    }
+                    # 更新进度
+                    await rdm.r.hset(progress_key, mapping={
+                        "status": "running",
+                        "completed": completed_count,
+                        "total": total_count,
+                        "current_step": f"已完成 {completed_count}/{total_count}"
+                    })
+                except Exception as e:
+                    logger.error(f"计算任务失败: {e}")
+                    has_error = True
+                    completed_count += 1
+                    await rdm.r.hset(progress_key, mapping={
+                        "status": "running",
+                        "completed": completed_count,
+                        "total": total_count,
+                        "current_step": f"任务失败: {str(e)}"
+                    })
+            # 计算完成，将结果存储到 Redis
+            if result_key:
+                if has_error:
+                    # 如果有错误，标记为失败
+                    await rdm.r.hset(progress_key, mapping={
+                        "status": "failed",
+                        "completed": completed_count,
+                        "total": total_count,
+                        "current_step": "计算失败"
+                    })
+                else:
+                    # 存储结果（不设置过期时间，作为缓存）
+                    await rdm.r.set(result_key, json.dumps(cost_dict))
+                    await rdm.r.hset(progress_key, mapping={
+                        "status": "completed",
+                        "completed": completed_count,
+                        "total": total_count,
+                        "current_step": "计算完成"
+                    })
+        else:
+            # 如果没有 market_id，使用原来的方式
+            results = await asyncio.gather(*futures)
+            for result in results:
+                cost_dict[result[0]] = result[1]
+
+        return cost_dict
+
     @classmethod
     async def calculate_plan(cls, op: ConfigFlowOperateCenter):
         await rdm.r.set(op.total_progress_key, 0)
@@ -159,11 +314,10 @@ class IndustryManager(metaclass=SingletonMeta):
 
         user_id = op.user_name
         plan_name = op.plan_name
-        plan_obj = await EveIndustryPlanDBUtils.select_by_user_name_and_plan_name(user_id, plan_name)
         plan_data = {
             "plan_name": plan_name,
             "user_name": user_id,
-            "plan_settings": plan_obj.settings,
+            "plan_settings": op.plan_settings,
             "products": []
         }
         async for product in await EveIndustryPlanProductDBUtils.select_all_by_user_name_and_plan_name(user_id, plan_name):
@@ -190,11 +344,16 @@ class IndustryManager(metaclass=SingletonMeta):
         await rdm.r.set(op.total_progress_key, 60)
 
         await rdm.r.hset(op.current_progress_key, mapping={"name": "更新树状态", "progress": 0})
-        await cls.update_plan_status(plan_name, user_id, op)
+        all_relation_list = await NIU.get_relations("PLAN_BP_DEPEND_ON", {"user_name": op.user_name, "plan_name": op.plan_name})
+        await update_plan_status(op, all_relation_list)
         await rdm.r.set(op.total_progress_key, 80)
 
         await rdm.r.hset(op.current_progress_key, mapping={"name": "数据汇总", "progress": 0})
-        result_data = await IndustryManager.get_plan_tableview_data(op)
+        node_dict = {
+            node['type_id']: node for node in await NIU.get_user_plan_node_with_distance(op.user_name, op.plan_name)
+        }
+        await MarketManager().update_jita_price()
+        result_data = await get_plan_tableview_data(op, node_dict)
         await rdm.r.set(op.total_progress_key, 100)
         return result_data
 
@@ -239,7 +398,9 @@ class IndustryManager(metaclass=SingletonMeta):
         op.product_num_dict = {product["product_type_id"]: product["quantity"] for product in products}
 
         last_progress = 0
-        await tqdm_manager.add_mission(f"create_plan_{plan_name}", len(products))
+        # await tqdm_manager.add_mission(f"create_plan_{plan_name}", len(products))
+        logger.info(f"create_plan_{plan_name} start, len: {len(products)}")
+        count = 0
         for product in products:
             # 将树连接到plan节点
             await NIU.link_node(
@@ -256,14 +417,17 @@ class IndustryManager(metaclass=SingletonMeta):
                 {**plan_user_dict, "type_id": product["product_type_id"], "order_id": await counter.next_node()}
             )
             await cls._create_plan_bp_tree(plan_user_dict, product, counter)
-            mission_count = await tqdm_manager.update_mission(f"create_plan_{plan_name}", 1)
-            now_progress = mission_count / len(products) * 100
+            count += 1
+            # mission_count = await tqdm_manager.update_mission(f"create_plan_{plan_name}", 1)
+            logger.info(f"create_plan_{plan_name} update, product: {product['product_type_id']}, count: {count}")
+            now_progress = count / len(products) * 100
             if now_progress > last_progress + 1:
                 await rdm.r.hset(op.current_progress_key, mapping={"name": "创建计划树", "progress": now_progress})
                 last_progress = now_progress
 
             # index_root节点更新需求数量，更新状态为finished.
-        await tqdm_manager.complete_mission(f"create_plan_{plan_name}")
+        # await tqdm_manager.complete_mission(f"create_plan_{plan_name}")
+        logger.info(f"create_plan_{plan_name} complete")
 
     @classmethod
     async def delete_plan(cls, plan_name: str, user_name: str):
@@ -294,282 +458,11 @@ class IndustryManager(metaclass=SingletonMeta):
             {"plan_name": plan_name, "user_name": user_name},
             "PLAN_BP_DEPEND_ON")
 
-    @classmethod
-    async def _get_material_type(cls, type_id: int):
-        """获取材料类型（内部方法，调用工具模块）"""
-        return await get_material_type(type_id)
 
     @classmethod
-    async def get_plan_tableview_data(cls, op: ConfigFlowOperateCenter):
-        """
-        获取计划表格视图数据
-        """
-        user_name = op.user_name
-        plan_name = op.plan_name
-        plan_obj = await EveIndustryPlanDBUtils.select_by_user_name_and_plan_name(user_name, plan_name)
-        plan_settings = plan_obj.settings
-
-        # 定义原材料大类
-        material_type = ["矿石", "冰矿产物", "燃料块", "元素", "气云", "行星工业", "杂货"]
-
-        await rdm.r.hset(op.current_progress_key, mapping={"name": "获取路径数据", "progress": 50, "is_indeterminate": 1})
-        logger.info("收集路径深度")
-        node_dict = {
-            node['type_id']: node for node in await NIU.get_user_plan_node_with_distance(user_name, plan_name)
-        }
-
-        # 获取材料报价
-        await rdm.r.hset(op.current_progress_key, mapping={"name": "获取材料报价", "progress": 50, "is_indeterminate": 1})
-        await MarketManager().update_jita_price()
-
-        job_deal_set = set()
-        logger.info("收集关系数据")
-        
-        relations = await NIU.get_user_plan_relation(user_name, plan_name)
-        await tqdm_manager.add_mission(f"收集关系数据 {plan_name}", len(relations))
-        await rdm.r.hset(op.current_progress_key, mapping={"name": "收集关系数据", "progress": 0, "is_indeterminate": 1})
-        last_progress = 0
-        eiv_cost_dict = {}
-        for relation in relations:
-            relation_need_calculate = relation.get("need_calculate", None)
-
-            # 汇总材料节点计算后真实需求数量【缺失】
-            material_id = relation['material']
-            product_id = relation['product']
-            await tqdm_manager.update_mission(f"收集关系数据 {plan_name}", 1)
-            node_dict[material_id].update({
-                "quantity": node_dict[material_id].get('quantity', 0) + relation['quantity'],
-                "real_quantity": node_dict[material_id].get('real_quantity', 0) + relation['real_quantity'],
-            })
-
-            # 汇总产品节点的eiv成本
-            if product_id in node_dict:
-                top_product_type_id = op.index_product_dict[relation["index_id"]]
-                if top_product_type_id not in eiv_cost_dict:
-                    eiv_cost_dict[top_product_type_id] = {
-                        "eiv_cost": 0,
-                        "type_id": top_product_type_id,
-                        "type_name": await SdeUtils.get_name_by_id(top_product_type_id),
-                        "index_id": relation["index_id"],
-                        "product_num": op.product_num_dict[top_product_type_id],
-                        "children": [],
-                    }
-                # 所有边的eiv_cost汇总到最上层节点
-                eiv_cost_dict[top_product_type_id].update({
-                    "eiv_cost": eiv_cost_dict[top_product_type_id].get('eiv_cost', 0) + relation['real_eiv_cost_total'],
-                })
-                if op.get_node_type(relation['material']) != "product":
-                    material_type_node = await cls._get_material_type(relation['material'])
-                    jita_buy_price = await rdm.r.hget(f"market_price:jita:{relation['material']}", "max_buy")
-                    eiv_cost_dict[top_product_type_id]['children'].append({
-                        "type_id": relation['material'],
-                        "type_name": await SdeUtils.get_name_by_id(relation['material']),
-                        "index_id": relation["index_id"],
-                        "quantity": relation['quantity'],
-                        "jita_buy_price": jita_buy_price if jita_buy_price else 0,
-                        "material_type_node": material_type_node,
-                    })
-            
-            # 汇总产品节点计算后真实任务数据【job】
-            # 处理product任务 每个 (product_id, index_id) 只处理一次
-            if (product_id, relation["index_id"]) not in job_deal_set and product_id in node_dict:
-                job_deal_set.add((product_id, relation["index_id"]))
-                if relation_need_calculate:
-                    real_job_list,job_list = op.work_list_cache[(product_id, relation["index_id"])]
-                    node_dict[product_id].update({
-                        "jobs": node_dict[product_id].get('jobs', 0) + sum(work['runs'] for work in job_list),
-                        "real_jobs": node_dict[product_id].get('real_jobs', 0) + sum(work['runs'] for work in real_job_list),
-                        "real_job_list": node_dict[product_id].get('real_job_list', []) + real_job_list,
-                    })
-        await tqdm_manager.complete_mission(f"收集关系数据 {plan_name}")
-
-        # 获取库存和冗余
-        logger.info("获取库存和冗余")
-        for node in node_dict.values():
-            # 计算库存
-            type_id = node['type_id']
-            if plan_settings.get('considerate_asset', False):
-                product_assets_quantity = await op.get_type_assets_quantity(type_id)
-                node["store_quantity"] = product_assets_quantity
-                node['real_quantity'] -= product_assets_quantity
-
-            # 计算运行中任务产物
-            if plan_settings.get('considerate_running_job', False):
-                running_jobs = await op.get_running_job_count(type_id)
-                unfinish_output = running_jobs * await BPM.get_bp_product_quantity_typeid(type_id)
-                node['real_quantity'] -= unfinish_output
-                node['running_jobs'] = f"{unfinish_output:,}({running_jobs}x{await BPM.get_bp_product_quantity_typeid(type_id)})" if unfinish_output > 0 else 0
-
-            node["redundant"] = - node['real_quantity'] if node['real_quantity'] < 0 else 0
-
-        # 根据距离根节点的距离分类
-        logger.info("根据距离根节点的距离分类")
-        distance_list = list(set([node['max_distance'] for node in node_dict.values()]))
-        distance_list.sort()
-        flow_output = [
-            {
-                "layer_id": index,
-                "children": []
-            } for index in distance_list
-        ]
-        material_output = {
-            t: {
-                "layer_id": t,
-                "children": []
-            } for t in material_type
-        }
-
-        logger.info("整理节点")
-        work_flow = []
-        await rdm.r.hset(op.current_progress_key, mapping={"name": "整理节点", "progress": 50, "is_indeterminate": 1})
-        await tqdm_manager.add_mission(f"分类节点 {plan_name}", len(node_dict))
-        for node in node_dict.values():
-            # 整理库存状态
-            node['tpye_name_zh'] = await SdeUtils.get_cn_name_by_id(node['type_id'])
-            if op.get_node_type(node['type_id']) != "product":
-                material_type_node = await cls._get_material_type(node['type_id'])
-                buy_price = await rdm.r.hget(f"market_price:jita:{node['type_id']}", "max_buy")
-                sell_price = await rdm.r.hget(f"market_price:jita:{node['type_id']}", "min_sell")
-                node['buy_price'] = buy_price if buy_price else 0
-                node['sell_price'] = sell_price if sell_price else 0
-                material_output[material_type_node]['children'].append(node)
-            else:
-                flow_output[node['max_distance'] - 1]["children"].append(node)
-            mission_count = await tqdm_manager.update_mission(f"分类节点 {plan_name}", 1)
-            now_progress = mission_count / len(node_dict) * 100
-            if now_progress / 3 + 66 > last_progress + 1:
-                last_progress = now_progress
-            
-            # 整理工作流输出
-            work_flow.extend([{
-                    "type_id": work["type_id"],
-                    "active_id": await BPM.get_activity_id_by_product_typeid(work["type_id"]),
-                    "type_name_zh": await SdeUtils.get_cn_name_by_id(work["type_id"]),
-                    "type_name": await SdeUtils.get_name_by_id(work["type_id"]),
-                    "avaliable": work["avaliable"],
-                    "runs": work["runs"],
-                    "bp_object": work["bp_object"],
-                    "type_order_id": node["order_id"],
-                    "mater_eff": work["mater_eff"],
-                    "time_eff": work["time_eff"],
-                } for work in node.get("real_job_list", []) if work
-            ])
-
-            # 整理蓝图库存
-            await rdm.r.hset(op.current_progress_key, mapping={"name": "整理蓝图库存", "progress": 50, "is_indeterminate": 1})
-            node['bp_quantity'], node['bp_jobs'] = await op.get_bp_status(node['type_id'], plan_settings.get('considerate_bp_relation', False))
-        await tqdm_manager.complete_mission(f"分类节点 {plan_name}")
-        
-        # 整理物流信息
-        # 建筑需求
-        structure_material_need_dict = {}
-        for work in [work for work in work_flow if work['avaliable']]:
-            assign_structure_info = await op.get_type_assign_structure_info(work['type_id'])
-            if assign_structure_info:
-                if assign_structure_info['structure_id'] not in structure_material_need_dict:
-                    structure_material_need_dict[assign_structure_info['structure_id']] = deepcopy(assign_structure_info)
-                    structure_material_need_dict[assign_structure_info['structure_id']]["material_need"] = {}
-
-                structure_node = structure_material_need_dict[assign_structure_info['structure_id']]
-                work_material_need = await op.get_work_material_need(work)
-                for material_type_id, material_quantity in work_material_need.items():
-                    structure_node["material_need"][material_type_id] = \
-                        structure_node["material_need"].get(material_type_id, 0) + material_quantity
-        # 建筑供给
-        structure_material_provide_dict = await op.get_structure_material_provide_dict()
-
-        # 处理本地库存
-        for structure_id, structure_info in structure_material_need_dict.items():
-            for material_type_id, material_quantity in structure_info["material_need"].items():
-                if structure_info["structure_id"] in structure_material_provide_dict:
-                    provide_quantity = structure_material_provide_dict[structure_info["structure_id"]]["material_provide"].get(material_type_id, 0)
-                    if provide_quantity >= material_quantity:
-                        provide_quantity -= material_quantity
-                        material_quantity = 0
-                    else:
-                        material_quantity -= provide_quantity
-                        provide_quantity = 0
-                    structure_material_provide_dict[structure_info["structure_id"]]["material_provide"][material_type_id] = provide_quantity
-                    structure_info["material_need"][material_type_id] = material_quantity
-
-        # 处理异地建筑供给
-        # 计算物流线路
-        # 遍历缺少物资的建筑与物资
-        logistic_dict = {}
-        for lack_structure_id, lack_structure_info in structure_material_need_dict.items():
-            for lack_type_id, lack_quantity in lack_structure_info["material_need"].items():
-                # 遍历供给的建筑与物资，寻找匹配
-                for provide_structure_id, provide_structure_info in structure_material_provide_dict.items():
-                    if lack_structure_id == provide_structure_id:
-                        continue
-                    if lack_quantity <= 0:
-                        break
-                    if lack_type_id in provide_structure_info["material_provide"]:
-                        provide_quantity = provide_structure_info["material_provide"][lack_type_id]
-                        if provide_quantity >= lack_quantity:
-                            provide_quantity -= lack_quantity
-                            lack_quantity = 0
-                        else:
-                            lack_quantity -= provide_quantity
-                            provide_quantity = 0
-                        # 匹配成功，更新供给和需求，记录物流线路
-                        provide_structure_info["material_provide"][lack_type_id] = provide_quantity
-                        lack_structure_info["material_need"][lack_type_id] = lack_quantity
-                        if (lack_structure_id, provide_structure_id, lack_type_id) not in logistic_dict:
-                            logistic_dict[(lack_structure_id, provide_structure_id, lack_type_id)] = {
-                                "provide_quantity": provide_quantity,
-                                "provide_structure_info": provide_structure_info,
-                                "lack_structure_info": lack_structure_info,
-                            }
-                        else:
-                            logistic_dict[(lack_structure_id, provide_structure_id, lack_type_id)]["provide_quantity"] += provide_quantity
-        # 整理为可执行的计划的数据
-        save_logistic_data = []
-        for d, logistic_info in logistic_dict.items():
-            lack_structure_id, provide_structure_id, lack_type_id = d
-            provide_structure_info = logistic_info["provide_structure_info"]
-            lack_structure_info = logistic_info["lack_structure_info"]
-            light_year = 9.461e15
-            provide_system_info = await SdeUtils.get_system_info_by_id(provide_structure_info["system_id"])
-            lack_system_info = await SdeUtils.get_system_info_by_id(lack_structure_info["system_id"])
-            save_logistic_data.append({
-                "lack_structure_id": lack_structure_id,
-                "lack_structure_name": lack_structure_info["structure_name"],
-                "provide_structure_id": provide_structure_id,
-                "provide_structure_name": provide_structure_info["structure_name"],
-                "provide_system_id": provide_structure_info["system_id"],
-                "provide_system_name": provide_structure_info["system_name"],
-                "provide_system_coordinate": [provide_system_info["x"] / light_year, provide_system_info["y"] / light_year, provide_system_info["z"] / light_year],
-                "lack_system_id": lack_structure_info["system_id"],
-                "lack_system_name": lack_structure_info["system_name"],
-                "lack_system_coordinate": [lack_system_info["x"] / light_year, lack_system_info["y"] / light_year, lack_system_info["z"] / light_year],
-                "provide_system_distance": sqrt(
-                    (provide_system_info["x"] - lack_system_info["x"])**2 +
-                    (provide_system_info["y"] - lack_system_info["y"])**2 +
-                    (provide_system_info["z"] - lack_system_info["z"])**2
-                ) / light_year,
-                "lack_type_id": lack_type_id,
-                "lack_type_name": await SdeUtils.get_cn_name_by_id(lack_type_id),
-                "provide_quantity": logistic_info["provide_quantity"],
-                "provide_volume": await SdeUtils.get_volume_by_type_id(lack_type_id) * logistic_info["provide_quantity"],
-            })
-
-
-        # 获取劳动力数据
-        await rdm.r.hset(op.current_progress_key, mapping={"name": "获取劳动力数据", "progress": 50, "is_indeterminate": 1})
-        running_job_tableview_data = await op.get_running_job_tableview_data(plan_settings.get("considerate_running_job", False))
-        
-
-        return {
-            "flow_output": flow_output,
-            "material_output": [material_output[t] for t in material_type],
-            "eiv_cost_dict": eiv_cost_dict,
-            "work_flow": work_flow,
-            "purchase_output": None,
-            "running_job_tableview_data": running_job_tableview_data,
-            "logistic_dict": save_logistic_data,
-            "plan_settings": plan_settings
-        }
+    async def get_plan_tableview_data(cls, op: ConfigFlowOperateCenter, node_dict: dict):
+        """获取计划表格视图数据（代理方法，保持向后兼容）"""
+        return await get_plan_tableview_data(op, node_dict)
 
     @staticmethod
     async def get_market_tree(node) -> List[Dict]:
@@ -605,8 +498,9 @@ class IndustryManager(metaclass=SingletonMeta):
         # 使用MATCH找到根节点及其所有子节点
         nodes_dict, relationships_list = await NIU.get_blueprint_tree(type_id)
         type_name = await SdeUtils.get_cn_name_by_id(type_id)
-        await tqdm_manager.add_mission(f"create_plan_bp_tree_{type_id}_{type_name}_nodes", len(nodes_dict))
-        await tqdm_manager.add_mission(f"create_plan_bp_tree_{type_id}_{type_name}_relationships", len(relationships_list))
+        # await tqdm_manager.add_mission(f"create_plan_bp_tree_{type_id}_{type_name}_nodes", len(nodes_dict))
+        # await tqdm_manager.add_mission(f"create_plan_bp_tree_{type_id}_{type_name}_relationships", len(relationships_list))
+        logger.info(f"create_plan_bp_tree_{type_id}_{type_name} start, nodes_dict: {len(nodes_dict)}, relationships_list: {len(relationships_list)}")
 
         # 2. 创建PlanBlueprint节点树
         # 首先创建所有PlanBlueprint节点
@@ -614,7 +508,7 @@ class IndustryManager(metaclass=SingletonMeta):
         async def merge_node_with_semaphore(plan_bp_index, plan_bp_properties):
             async with neo4j_manager.semaphore:
                 await NIU.merge_node("PlanBlueprint", plan_bp_index, plan_bp_properties)
-                await tqdm_manager.update_mission(f"create_plan_bp_tree_{type_id}_{type_name}_nodes", 1)
+                # await tqdm_manager.update_mission(f"create_plan_bp_tree_{type_id}_{type_name}_nodes", 1)
         for node_type_id, node_props in nodes_dict.items():
             # 构建PlanBlueprint节点的索引和属性
             plan_bp_index = {
@@ -652,7 +546,7 @@ class IndustryManager(metaclass=SingletonMeta):
                     target_index,  # 目标节点索引
                     target_index  # 目标节点属性（与索引相同）
                 )
-                await tqdm_manager.update_mission(f"create_plan_bp_tree_{type_id}_{type_name}_relationships", 1)
+                # await tqdm_manager.update_mission(f"create_plan_bp_tree_{type_id}_{type_name}_relationships", 1)
 
         for parent_type_id, child_type_id, rel_props in relationships_list:
             # 构建源节点（父节点）的索引
@@ -690,366 +584,9 @@ class IndustryManager(metaclass=SingletonMeta):
         
         await asyncio.gather(*tasks)
 
-        await tqdm_manager.complete_mission(f"create_plan_bp_tree_{type_id}_{type_name}_nodes")
-        await tqdm_manager.complete_mission(f"create_plan_bp_tree_{type_id}_{type_name}_relationships")
-
-    @classmethod
-    async def _relation_calculater(cls, plan_settings: dict, relation: dict, product_node_in_relation: List[dict], same_route_relations: List[dict]):
-        op = plan_settings["operate_center"]
-
-        self_relation = relation['relation']
-        product_type_id = self_relation['product']
-        material_type_id = self_relation['material']
-        self_index_id = self_relation['index_id']
-        self_order_id = self_relation['order_id']
-        order_index = [relation['relation']['order_id'] for relation in same_route_relations].index(self_order_id)
-        
-        op.calculate_cache[(product_type_id, material_type_id, self_index_id)] = op.calculate_cache.get((product_type_id, material_type_id, self_index_id), 0) + 1
-
-        # for relation in product_node_in_relation:
-        #     if "quantity" not in relation['relation']:
-        #         break
-
-        # 判断是否需要计算 ==============================================================================================
-        if not await op.get_relation_need_calculate(product_type_id):
-            await NIU.update_relation_properties(
-                "PLAN_BP_DEPEND_ON",
-                {
-                    "user_name": self_relation['user_name'],
-                    "plan_name": self_relation["plan_name"],
-                    "index_id": self_relation['index_id'],
-                    "product": self_relation['product'],
-                    "material": self_relation['material']
-                },
-                {
-                    "quantity": 0,
-                    "real_quantity": 0,
-                    "index_quantity_work": 0,
-                    "index_real_quantity_work": 0,
-                    "product_remain": 0,
-                    "real_product_remain": 0,
-                    "real_work_remain": 0,
-                    "status": "complete",
-                    "real_eiv_cost_total": 0,
-                    "need_calculate": False
-                }
-            )
-            await tqdm_manager.update_mission("relation_moniter_process", 1)
-            return
-        
-        # 收集父节点需求数量 ==============================================================================================
-        all_index_quantity = sum([relation['relation']['quantity'] for relation in product_node_in_relation])
-        all_index_real_quantity = sum([relation['relation']['real_quantity'] for relation in product_node_in_relation])
-        self_index_quantity = sum([relation['relation']['quantity'] for relation in product_node_in_relation if relation['relation']['index_id'] == self_index_id])
-        self_index_real_quantity = sum([relation['relation']['real_quantity'] for relation in product_node_in_relation if relation['relation']['index_id'] == self_index_id])
-        
-        # 保存未处理的需求数量用于后期计算冗余
-        if product_type_id not in op.node_need_quantity:
-            op.node_need_quantity[product_type_id] = all_index_quantity
-
-        # 对real_quantity进行处理，去掉库存和生产数量
-        # quantity 代表总需求， real_quantity代表从上层传导下来的实际需求， 用quantity减去real是缺失
- 
-        # 库存 数量处理 每个(product_type_id, index)只计算一次 ==============================================================================================
-        
-        if plan_settings.get('considerate_asset', False):
-            all_index_real_quantity -= await op.get_type_assets_quantity(product_type_id)
-            self_index_real_quantity = await op.deal_asset_quantity(self_index_real_quantity, product_type_id, self_index_id)
-        #     product_asset_quantity = await op.get_type_assets_quantity(product_type_id)
-        #     self_index_real_quantity = self_index_real_quantity - product_asset_quantity
-
-        # 运行中任务生产 数量处理 每个(product_type_id, index)只计算一次 ==============================================================================================
-        
-        if plan_settings.get('considerate_running_job', False):
-            all_index_real_quantity -= await op.get_running_job_count(product_type_id) * await BPM.get_bp_product_quantity_typeid(product_type_id)
-            self_index_real_quantity = await op.deal_running_job_quantity(self_index_real_quantity, product_type_id, self_index_id)
-        #     running_jobs_runs = await op.get_running_job_count(product_type_id)
-        #     running_jobs_unfinish_output = running_jobs_runs * self_relation['product_num']
-        #     self_index_real_quantity = self_index_real_quantity - running_jobs_unfinish_output
-
-        if order_index == 0:
-            last_order_index_remain = 0
-            last_order_index_real_remain = 0
-        else:
-            last_order_index_remain = same_route_relations[order_index-1]['relation']['product_remain']
-            last_order_index_real_remain = same_route_relations[order_index-1]['relation']['real_product_remain']
-
-        # 计算最小流程
-        min_all_index_quantity_work = ceil(all_index_quantity / self_relation['product_num'])
-        min_all_index_real_quantity_work = ceil(all_index_real_quantity / self_relation['product_num'])
-        min_self_index_quantity_work = ceil((self_index_quantity - last_order_index_remain) / self_relation['product_num'])
-        min_self_index_real_quantity_work = ceil((self_index_real_quantity - last_order_index_real_remain) / self_relation['product_num'])
-        if product_type_id not in op.set_uped_jobs:
-            op.set_uped_jobs[product_type_id] = min_all_index_real_quantity_work
-        # 剩余未分配流程
-        if order_index == 0:
-            real_all_index_remain_work = min_all_index_real_quantity_work
-        else:
-            real_all_index_remain_work = same_route_relations[order_index-1]['relation']['real_work_remain']
-
-        # 获取效率 ==============================================================================================
-        mater_eff, time_eff = await op.get_efficiency(product_type_id)
-        fake_bp_mater_eff, fake_bp_time_eff = await op.get_conf_eff(product_type_id)
-
-        # 根据配置 切分工作流 or 不切分 每个(product_type_id, index)只计算一次 ==============================================================================================
-        real_work_list = []
-        if (product_type_id, self_index_id) not in op.work_list_cache:
-            op.work_list_cache[(product_type_id, self_index_id)] = ([], [])
-            max_job_run = await op.get_max_job_run(product_type_id)
-            if plan_settings.get('split_to_jobs', False):
-                real_work_waiting_to_split = min_self_index_real_quantity_work
-                while real_work_waiting_to_split > 0:
-                    # 决定本轮需要安排的流程数
-                    #   如果考虑蓝图，向op申请一张蓝图对象
-                    #   如果不考虑蓝图，申请一张假原图对象
-
-                    #   如果是whole, 取min(蓝图支持的流程， min_all_index_real_quantity_work, max_job_run)
-                    #   如果是in_order, 取min(蓝图支持的流程， real_work_waiting_to_split, max_job_run)
-                    #       如果bpc不切分，则上两个min不考虑max_job_run
-                    bp = await op.get_bp_object(product_type_id, real_work_waiting_to_split, plan_settings.get('considerate_bp_relation', False))
-                    this_round_max_job_run = max_job_run
-                    if bp['fake'] or bp["runs"] < 0:
-                        bp_support_runs = max_job_run
-                    else:
-                        bp_support_runs = bp["runs"]
-
-                    if plan_settings.get("full_use_bp_cp", False) and bp["runs"] > 0:
-                        this_round_max_job_run = bp_support_runs
-
-                    if plan_settings.get("work_type", "whole") == "whole":
-                        this_round_work = min(bp_support_runs, op.set_uped_jobs[product_type_id], this_round_max_job_run)
-                    elif plan_settings.get("work_type", "whole") == "in_order":
-                        this_round_work = min(bp_support_runs, real_work_waiting_to_split, this_round_max_job_run)
-
-                    real_work_list.append({
-                        "type_id": product_type_id,
-                        "runs": this_round_work,
-                        "bp_object": bp,
-                        "mater_eff": mater_eff * (fake_bp_mater_eff if bp['fake'] else (1 - 0.01 * bp['material_efficiency'])),
-                        "time_eff": time_eff * (fake_bp_time_eff if bp['fake'] else (1 - 0.01 * bp['time_efficiency'])),
-                    })
-                    real_work_waiting_to_split -= this_round_work
-                    op.set_uped_jobs[product_type_id] -= this_round_work
-                
-                # ==========================================================
-                # 计算完整任务数量（整除）和剩余工作量（取余）
-                # full_job_num: 完整任务的数量（每个任务运行 max_job_run 次）
-                # less_work: 剩余的工作量（小于 max_job_run）
-                # 注意：ceil() 返回 float，// 运算符如果操作数有 float 则结果也是 float
-                # 但 range() 需要 int，所以需要转换为 int
-                if max_job_run > 0:
-                    full_job_num = int(min_self_index_quantity_work // max_job_run)
-                    less_work = int(min_self_index_quantity_work % max_job_run)
-                else:
-                    # 防止除零错误
-                    full_job_num = 0
-                    less_work = int(min_self_index_quantity_work)
-                job_list = [{
-                    "type_id": product_type_id,
-                    "runs": max_job_run,  # 每个完整任务运行 max_job_run 次
-                    "mater_eff": mater_eff * fake_bp_mater_eff,
-                    "time_eff": time_eff * fake_bp_time_eff,
-                    "bp_object": await op.get_bp_object(product_type_id, max_job_run, False)
-                } for _ in range(full_job_num)]
-                if less_work > 0:
-                    job_list.append({
-                        "type_id": product_type_id,
-                        "runs": less_work,
-                        "mater_eff": mater_eff * fake_bp_mater_eff,
-                        "time_eff": time_eff * fake_bp_time_eff,
-                        "bp_object": await op.get_bp_object(product_type_id, less_work, False)
-                    })
-            else:
-                # ==========================================================
-                # 不切分工作流
-                # ==========================================================
-                real_work_list = [{
-                    "type_id": product_type_id,
-                    "runs": min_self_index_real_quantity_work,
-                    "mater_eff": mater_eff * fake_bp_mater_eff,
-                    "time_eff": time_eff * fake_bp_time_eff,
-                    "bp_object": await op.get_bp_object(product_type_id, min_self_index_real_quantity_work, False)
-                }]
-                job_list = [{
-                    "type_id": product_type_id,
-                    "runs": min_self_index_quantity_work,
-                    "mater_eff": mater_eff * fake_bp_mater_eff,
-                    "time_eff": time_eff * fake_bp_time_eff,
-                    "bp_object": await op.get_bp_object(product_type_id, min_self_index_quantity_work, False)
-                }]
-            await op.calculate_work_material_avaliable(real_work_list)
-            op.work_list_cache[(product_type_id, self_index_id)] = [real_work_list, job_list]
-        else:
-            while op.work_list_cache[(product_type_id, self_index_id)] == ([], []):
-                await asyncio.sleep(0.1)
-            real_work_list, job_list = op.work_list_cache[(product_type_id, self_index_id)]
-
-        # 计算多余数量 ==============================================================================================
-        real_product_quantity = self_relation['product_num'] * sum([work['runs'] for work in real_work_list])
-        product_quantity = self_relation['product_num'] * sum([work['runs'] for work in job_list])
-        self_product_remain = product_quantity - self_index_quantity + last_order_index_remain
-        self_real_product_remain = real_product_quantity - self_index_real_quantity + last_order_index_real_remain
-
-        # 根据系数计算工作流需要的材料数量 ==============================================================================================
-
-        real_quantity_material_need_list = []
-        for work in real_work_list:
-            real_quantity_material_need_list.append(
-                ceil(
-                    work['runs'] * self_relation['material_num'] * (1 if self_relation['material_num'] == 1 else work['mater_eff'])
-                )
-            )
-            logger.debug(f"real_quantity_material_need_list: {real_quantity_material_need_list}")
-        activety_time = await BPM.get_production_time(product_type_id)
-        real_quantity_time_need_list = [
-            ceil(
-                work['runs'] * activety_time * work["time_eff"]
-            ) for work in real_work_list
-        ]
-        quantity_material_need_list = [
-            ceil(
-                # 有点绕
-                work['runs'] * self_relation['material_num'] * (1 if self_relation['material_num'] == 1 else work['mater_eff'])
-            ) for work in job_list
-        ]
-
-        # 系数成本计算 ==============================================================================================
-        structure_info = await op.get_type_assign_structure_info(product_type_id)
-        if not structure_info:
-            # raise KahunaException(f"物品 {product_type_id}: {await SdeUtils.get_name_by_id(product_type_id)} 未分配建筑")
-            system_cost = {"manufacturing": 0.14 / 100, "reaction": 0.14 / 100}
-        else:
-            system_cost = await op.get_system_cost(structure_info['system_id'])
-        
-        material_adjust_price = await op.get_type_adjust_price(material_type_id)
-        
-        actype = "manufacturing" if self_relation['activity_id'] == 1 else "reaction"
-        if "manufacturing" not in system_cost or "reaction" not in system_cost:
-            logger.error(f"system_cost {system_cost} not have {actype}")
-        eiv_cost = float(float(system_cost[actype]) + 0.04) * material_adjust_price * self_relation['material_num']
-        real_eiv_cost_list = [eiv_cost * work['runs'] for work in job_list]
-        quantity_material_need = sum(quantity_material_need_list)
-        real_quantity_material_need = sum(real_quantity_material_need_list)
-        real_quantity_time_need = sum(real_quantity_time_need_list)
-        real_eiv_cost_total = sum(real_eiv_cost_list)
-
-        # 更新状态
-        res = await NIU.update_relation_properties(
-            "PLAN_BP_DEPEND_ON",
-            {
-                "user_name": self_relation['user_name'],
-                "plan_name": self_relation["plan_name"],
-                "index_id": self_relation['index_id'],
-                "product": self_relation['product'],
-                "material": self_relation['material']
-            },
-            {
-                "quantity": quantity_material_need,
-                "real_quantity": real_quantity_material_need,
-                "real_eiv_cost_total": real_eiv_cost_total,
-                "index_quantity_work": min_self_index_quantity_work,
-                "index_real_quantity_work": min_self_index_real_quantity_work,
-                "product_remain": self_product_remain,
-                "real_product_remain": self_real_product_remain,
-                "real_work_remain": real_all_index_remain_work,
-                "status": "complete",
-                "need_calculate": True
-            }
-        )
-
-        logger.debug(f"relation index {self_relation['index_id']} {self_relation['product']}->{self_relation['material']} calculate complete")
-        await tqdm_manager.update_mission("relation_moniter_process", 1)
-
-    @classmethod
-    async def _get_uncomplete_relation_list(cls, user_name: str, plan_name: str):
-        all_relation_list = await NIU.get_relations("PLAN_BP_DEPEND_ON", {"user_name": user_name, "plan_name": plan_name})
-        res = []
-        for relation in all_relation_list:
-            if relation['relation']['status'] != "complete":
-                res.append(relation)
-        return res
-
-    @classmethod
-    async def _is_relation_calculate_avaliable(cls, relation: dict) -> Tuple[bool, List[dict], List[dict], dict]:
-        self_relation = relation['relation']
-        if self_relation['status'] == "complete":
-            return False, [], [], relation
-        self_index_id = self_relation['index_id']
-        self_order_id = self_relation['order_id']
-
-        same_route_relations = await NIU.get_relations(
-            "PLAN_BP_DEPEND_ON",
-            {
-                "user_name": self_relation['user_name'],
-                "plan_name": self_relation["plan_name"],
-                "product": self_relation['product'],
-                "material": self_relation['material']
-                }
-        )
-        same_route_relations.sort(key=lambda x: x['relation']['order_id'])
-        for i, relation in enumerate(same_route_relations):
-            if i == 0:
-                if relation['relation']['order_id'] == self_order_id:
-                    break
-                elif relation['relation']['status'] != "complete":
-                    return False, [], [], relation
-            else:
-                if relation['relation']['order_id'] == self_order_id:
-                    if same_route_relations[i-1]['relation']['status'] == "complete":
-                        break
-                    else:
-                        return False, [], [], relation
-                
-        product_node_in_relation = await NIU.get_relations(
-            "PLAN_BP_DEPEND_ON",
-            {"user_name": self_relation['user_name'], "plan_name": self_relation["plan_name"]},
-            target_label="PlanBlueprint",
-            target_index={"type_id": self_relation['product']}
-        )
-        for r in product_node_in_relation:
-            if r['relation']['status'] != "complete":
-                return False, [], [], relation
-        return True, product_node_in_relation, same_route_relations, relation
-
-    @classmethod
-    async def _relation_moniter_process(cls, user_name: str, plan_name: str, op: ConfigFlowOperateCenter):
-        plan_node = await NIU.get_node_properties("Plan", {"user_name": user_name, "plan_name": plan_name})
-        plan_settings = json.loads(plan_node['plan_settings'])
-        plan_settings["operate_center"] = op
-        all_relation_list = await NIU.get_relations("PLAN_BP_DEPEND_ON", {"user_name": user_name, "plan_name": plan_name})
-
-        async def relation_calculater_with_semaphore(relation: dict, product_node_in_relation: List[dict], same_route_relations: List[dict]):
-            async with neo4j_manager.semaphore:
-                await cls._relation_calculater(plan_settings, relation, product_node_in_relation, same_route_relations)
-
-        await tqdm_manager.add_mission("relation_moniter_process", len(all_relation_list))
-        
-        # finished_relation_set = set()
-        last_progress = 0
-        while uncomplete_relation_list := await cls._get_uncomplete_relation_list(user_name, plan_name):
-            check_tasks = [
-                asyncio.create_task(cls._is_relation_calculate_avaliable(relation)) for relation in uncomplete_relation_list
-            ]
-            check_results = await asyncio.gather(*check_tasks)
-
-            calculate_tasks = [
-                asyncio.create_task(relation_calculater_with_semaphore(relation, product_node_in_relation, same_route_relations))
-                for res, product_node_in_relation, same_route_relations, relation in check_results if res == True
-            ]
-            await asyncio.gather(*calculate_tasks)
-
-            mission_count = await tqdm_manager.get_mission_count("relation_moniter_process")
-            now_progress = mission_count / len(all_relation_list) * 100
-            if now_progress > last_progress + 1:
-                await rdm.r.hset(op.current_progress_key, mapping={"name": "更新树状态", "progress": now_progress, "is_indeterminate": 0})
-                last_progress = now_progress
-
-        await tqdm_manager.complete_mission("relation_moniter_process")
-        logger.info(f"plan {plan_name} status update complete")
-
-    @classmethod
-    async def update_plan_status(cls, plan_name: str, user_name: str, op: ConfigFlowOperateCenter):
-        await cls._relation_moniter_process(user_name, plan_name, op)
+        # await tqdm_manager.complete_mission(f"create_plan_bp_tree_{type_id}_{type_name}_nodes")
+        # await tqdm_manager.complete_mission(f"create_plan_bp_tree_{type_id}_{type_name}_relationships")
+        logger.info(f"create_plan_bp_tree_{type_id}_{type_name} complete")
 
     # 权限管理方法（代理方法，保持向后兼容）
     @classmethod
@@ -1127,10 +664,405 @@ class IndustryManager(metaclass=SingletonMeta):
     async def load_config_flow_preset(cls, user_id: str, preset_id: int, plan_name: str):
         return await load_config_flow_preset(user_id, preset_id, plan_name)
 
+    @classmethod
+    async def get_plan_settings(cls, user_id: str, plan_name: str):
+        plan_obj = await EveIndustryPlanDBUtils.select_by_user_name_and_plan_name(user_id, plan_name)
+        if not plan_obj:
+            raise KahunaException(f"计划 {plan_name} 不存在")
+        return plan_obj.settings
+
     # 物品信息方法（代理方法，保持向后兼容）
     @classmethod
     async def get_item_info(cls, type_id: int):
         return await get_item_info(type_id)
 
+    # 计算任务队列管理方法
+    def _start_queue_processor(self):
+        """启动队列处理协程"""
+        if self._queue_processor_task is None or self._queue_processor_task.done():
+            self._queue_processor_task = asyncio.create_task(self._process_calculate_queue())
+            logger.info("计算任务队列处理协程已启动")
+
+    async def _process_calculate_queue(self):
+        """处理计算任务队列的协程"""
+        while True:
+            try:
+                # 从队列中获取任务
+                task_info = await self.calculate_queue.get()
+                user_id, plan_name = task_info
+                
+                # 从跟踪列表中移除
+                async with self.calculate_queue_lock:
+                    if (user_id, plan_name) in self.calculate_queue_items:
+                        self.calculate_queue_items.remove((user_id, plan_name))
+                    # 更新剩余任务的位置
+                    await self._update_queue_positions()
+                
+                # 使用 semaphore 控制并发
+                async with self.calculate_semaphore:
+                    # 执行计算任务
+                    await self._calculate_plan_async(user_id, plan_name)
+                
+                # 标记任务完成
+                self.calculate_queue.task_done()
+                
+            except asyncio.CancelledError:
+                logger.info("计算任务队列处理协程被取消")
+                raise
+            except Exception as e:
+                logger.error(f"处理计算任务队列时出错: {traceback.format_exc()}")
+                # 即使出错也要标记任务完成
+                self.calculate_queue.task_done()
+
+    async def _calculate_plan_async(self, user_id: str, plan_name: str):
+        """异步计算计划的后台任务"""
+        status_key = f"plan_calculate_status:{user_id}:{plan_name}"
+        total_progress_key = f"plan_calculate_total_progress:{user_id}:{plan_name}"
+        current_progress_key = f"plan_calculate_current_progress:{user_id}:{plan_name}"
+        result_key = f"plan_calculate_result:{user_id}:{plan_name}"
+        
+        # 记录计算开始时间
+        calculate_start_time = datetime.utcnow()
+        history_record = None
+        product_count = 0
+        
+        try:
+            # 设置状态为运行中
+            await rdm.r.set(status_key, "running")
+            await rdm.r.expire(status_key, 3600)  # 1小时过期
+            
+            # 从数据库获取计划的产品条目数量（不同产品类型的数量）
+            try:
+                product_count = 0
+                async for product in await EveIndustryPlanProductDBUtils.select_all_by_user_name_and_plan_name(user_id, plan_name):
+                    product_count += 1  # 统计产品条目数量，而不是数量总和
+            except Exception as e:
+                logger.warning(f"获取计划产品条目数量失败: {e}, 将使用默认值0")
+                product_count = 0
+            
+            # 执行计算
+            plan_settings = await IndustryManager.get_plan_settings(user_id, plan_name)
+            op = await ConfigFlowOperateCenter.create(user_id, plan_name, plan_settings)
+            op.total_progress_key = total_progress_key
+            op.current_progress_key = current_progress_key
+            await rdm.r.set(op.total_progress_key, 0)
+            await rdm.r.hset(op.current_progress_key, mapping={"name": "初始化蓝图、资产与报价信息", "progress": 0, "is_indeterminate": 0})
+            await op.init_at_begin()
+            
+            # 创建计算历史记录
+            history_record = EveIndustryCalculateHistoryDBUtils.get_obj()
+            history_record.user_name = user_id
+            history_record.plan_name = plan_name
+            history_record.product_count = product_count
+            history_record.calculate_start_time = calculate_start_time
+            history_record.calculate_result = None  # 初始化为None，计算完成后更新
+            await EveIndustryCalculateHistoryDBUtils.save_obj(history_record)
+            
+            result_data = await IndustryManager.calculate_plan(op)
+            
+            # 计算完成，设置状态为已完成
+            await rdm.r.set(result_key, json.dumps(result_data))
+            # await rdm.r.expire(result_key, 3600)
+            await rdm.r.set(status_key, "completed")
+            # await rdm.r.expire(status_key, 3600)
+            
+            # 更新历史记录：计算成功
+            calculate_end_time = datetime.utcnow()
+            if history_record:
+                history_record.calculate_time = calculate_end_time
+                history_record.calculate_result = result_data
+                await EveIndustryCalculateHistoryDBUtils.save_obj(history_record)
+            
+            logger.info(f"计划 {plan_name} 计算完成")
+        except KahunaException as e:
+            # 计算失败，设置状态为失败
+            traceback.print_exc()
+            error_msg = str(e)
+            await rdm.r.set(status_key, f"failed:{error_msg}")
+            await rdm.r.expire(status_key, 3600)
+            
+            # 更新历史记录：计算失败
+            calculate_end_time = datetime.utcnow()
+            if history_record:
+                history_record.calculate_time = calculate_end_time
+                # 将错误信息保存到 calculate_result
+                history_record.calculate_result = {"error": error_msg, "exception_type": "KahunaException"}
+                await EveIndustryCalculateHistoryDBUtils.save_obj(history_record)
+            
+            logger.error(f"计划 {plan_name} 计算失败: {error_msg}")
+        except Exception as e:
+            # 计算失败，设置状态为失败
+            traceback.print_exc()
+            error_msg = f"计算过程发生错误: {str(e)}"
+            await rdm.r.set(status_key, f"failed:{error_msg}")
+            await rdm.r.expire(status_key, 3600)
+            
+            # 更新历史记录：计算失败
+            calculate_end_time = datetime.utcnow()
+            if history_record:
+                history_record.calculate_time = calculate_end_time
+                # 将错误信息保存到 calculate_result
+                history_record.calculate_result = {"error": error_msg, "exception_type": "Exception", "traceback": traceback.format_exc()}
+                await EveIndustryCalculateHistoryDBUtils.save_obj(history_record)
+            
+            logger.error(f"计划 {plan_name} 计算失败: {traceback.format_exc()}")
+
+    async def _update_queue_positions(self):
+        """更新队列中所有等待任务的位置"""
+        # 使用跟踪列表更新位置
+        for index, (user_id, plan_name) in enumerate(self.calculate_queue_items):
+            status_key = f"plan_calculate_status:{user_id}:{plan_name}"
+            current_status = await rdm.r.get(status_key)
+            
+            # 只更新等待状态的任务
+            if current_status and current_status.startswith("waiting:"):
+                # 更新队列位置（队列中前方的任务数）
+                await rdm.r.set(status_key, f"waiting:{index}")
+                await rdm.r.expire(status_key, 3600)
+
+    @classmethod
+    async def start_plan_calculation(cls, user_id: str, plan_name: str):
+        """启动计划计算任务"""
+        instance = cls()
+        # 确保队列处理协程已启动
+        instance._start_queue_processor()
+        status_key = f"plan_calculate_status:{user_id}:{plan_name}"
+        
+        # 检查是否已有正在进行的计算
+        current_status = await rdm.r.get(status_key)
+        if current_status:
+            if current_status == "pending" or current_status == "running":
+                raise KahunaException("计算任务已在运行中")
+            elif current_status.startswith("failed:"):
+                # 如果之前失败，允许重新启动
+                pass
+            elif current_status == "completed":
+                # 如果已完成，允许重新计算
+                pass
+        
+        # 检查当前并发数（semaphore 的可用数量）
+        available_slots = instance.calculate_semaphore._value
+        
+        if available_slots > 0:
+            # 有可用槽位，直接启动任务（使用 semaphore）
+            await rdm.r.set(status_key, "pending")
+            await rdm.r.expire(status_key, 3600)
+            # 创建任务，使用 semaphore 控制并发
+            async def run_with_semaphore():
+                async with instance.calculate_semaphore:
+                    await instance._calculate_plan_async(user_id, plan_name)
+                    # 任务完成后更新队列位置
+                    await instance._update_queue_positions()
+            asyncio.create_task(run_with_semaphore())
+        else:
+            # 没有可用槽位，加入队列
+            async with instance.calculate_queue_lock:
+                queue_position = len(instance.calculate_queue_items)
+                instance.calculate_queue_items.append((user_id, plan_name))
+                await rdm.r.set(status_key, f"waiting:{queue_position}")
+                await rdm.r.expire(status_key, 3600)
+                await instance.calculate_queue.put((user_id, plan_name))
+
+    @classmethod
+    async def get_calculation_status(cls, user_id: str, plan_name: str):
+        """获取计算任务状态"""
+        status_key = f"plan_calculate_status:{user_id}:{plan_name}"
+        total_progress_key = f"plan_calculate_total_progress:{user_id}:{plan_name}"
+        current_progress_key = f"plan_calculate_current_progress:{user_id}:{plan_name}"
+        
+        status = await rdm.r.get(status_key)
+        total_progress = await rdm.r.get(total_progress_key)
+        current_progress_hash = await rdm.r.hgetall(current_progress_key)
+        
+        if not status:
+            return {
+                "status": "idle",
+                "total_progress": None,
+                "current_step": None,
+                "is_indeterminate": 1
+            }
+        
+        # 解析状态
+        if status.startswith("failed:"):
+            error_msg = status[7:]  # 去掉 "failed:" 前缀
+            return {
+                "status": "failed",
+                "error": error_msg,
+                "total_progress": None,
+                "current_step": None,
+                "is_indeterminate": 1
+            }
+        elif status.startswith("waiting:"):
+            # 解析等待状态和队列位置
+            queue_position = int(status.split(":")[1]) if ":" in status else 0
+            return {
+                "status": "waiting",
+                "queue_position": queue_position,
+                "total_progress": None,
+                "current_step": None,
+                "is_indeterminate": 1
+            }
+        else:
+            # 解析总进度
+            total_progress_value = int(total_progress) if total_progress else None
+            
+            # 解析当前步骤进度（从 hash 中获取）
+            current_step_data = None
+            if current_progress_hash:
+                try:
+                    name = current_progress_hash.get("name", "")
+                    progress_str = current_progress_hash.get("progress", "")
+                    progress_value = float(progress_str) if progress_str else None
+                    if name or progress_value is not None:
+                        current_step_data = {
+                            "name": name,
+                            "progress": int(progress_value) if progress_value is not None else None,
+                            "is_indeterminate": current_progress_hash.get("is_indeterminate", "0") == "1"
+                        }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"解析当前步骤进度失败: {e}, hash数据: {current_progress_hash}")
+                    current_step_data = None
+            
+            return {
+                "status": status,
+                "total_progress": total_progress_value,
+                "current_step": current_step_data,
+                "is_indeterminate": current_progress_hash.get("is_indeterminate", "0") == "1"
+            }
+
+    @classmethod
+    async def get_calculation_result(cls, user_id: str, plan_name: str):
+        """获取计算结果"""
+        status_key = f"plan_calculate_status:{user_id}:{plan_name}"
+        result_key = f"plan_calculate_result:{user_id}:{plan_name}"
+        
+        # 检查状态是否为已完成
+        status = await rdm.r.get(status_key)
+        if not status or status != "completed":
+            raise KahunaException("计算尚未完成")
+        
+        # 从Redis获取计算结果
+        result_data_str = await rdm.r.get(result_key)
+        if result_data_str:
+            try:
+                result_data = json.loads(result_data_str)
+            except (json.JSONDecodeError, TypeError):
+                # 如果Redis中没有结果，回退到从数据库获取
+                raise KahunaException("计算结果不存在，请重新计算")
+        else:
+            # 如果Redis中没有结果，从数据库获取
+            raise KahunaException("计算结果不存在，请重新计算")
+        
+        return result_data
+
 # MarketTree 类（代理类，保持向后兼容）
 # 注意：MarketTree 类在 industry_utils 中定义，这里通过导入使用
+
+
+# ============================================================================
+# 多进程支持：在子进程中运行异步计算函数
+# ============================================================================
+
+def _run_async_calculation_in_process(type_id: int, op: ConfigFlowOperateCenter, all_relation_list: List[dict]):
+    """
+    在子进程中运行异步计算函数的同步包装函数
+    
+    注意：
+    1. 这个函数必须是模块级函数（不能是类方法），以便可以被pickle序列化
+    2. 参数必须是可序列化的（pickle）
+    3. 子进程中会创建新的事件循环
+    4. 子进程中需要重新初始化数据库连接等资源
+    
+    Args:
+        plan_data: 可序列化的计划数据字典，包含：
+            - plan_name: 计划名称
+            - user_name: 用户名
+            - plan_settings: 计划设置字典
+            - products: 产品列表
+    
+    Returns:
+        计算结果
+    """
+    # import asyncio
+    # import sys
+    
+    # # 在子进程中创建新的事件循环
+    # # 注意：子进程不能使用主进程的事件循环
+    # if sys.platform == 'win32':
+    #     # Windows 需要设置事件循环策略
+    #     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    
+    # # 创建新的事件循环
+    # loop = asyncio.new_event_loop()
+    # asyncio.set_event_loop(loop)
+    
+    # try:
+    #     # 运行异步计算
+    #     result = loop.run_until_complete(
+    #         _async_calculation_worker(plan_data)
+    #     )
+    #     return result
+    # finally:
+    #     # 清理事件循环
+    #     loop.close()
+    return asyncio.run(_async_calculation_worker(type_id, op, all_relation_list))
+
+
+async def _async_calculation_worker(type_id: int, op: ConfigFlowOperateCenter, all_relation_list: List[dict]):
+    """
+    在子进程中执行的异步计算逻辑
+    
+    注意：这个函数会在子进程中运行，需要：
+    1. 重新初始化数据库连接
+    2. 重新创建必要的对象
+    
+    Args:
+        plan_data: 计划数据字典
+    
+    Returns:
+        计算结果
+    """
+    # 重新初始化数据库连接（子进程需要自己的连接）
+    from src_v2.core.log import logger
+    import logging
+    
+    # 关闭子进程的所有日志输出
+    # 1. 设置 logger 级别为 CRITICAL（最高级别，所有低于此级别的日志都不会输出）
+    logger.setLevel(logging.CRITICAL)
+    # 2. 移除所有处理器，彻底禁用日志输出
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    # 3. 禁用根 logger，防止其他模块重新初始化 logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.CRITICAL)
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    from src_v2.core import init_database, close_database
+    from src_v2.model.EVE.sde.utils import lock_manager
+    from src_v2.model.EVE.industry.blueprint import lock as blueprint_lock
+    lock_manager.reset_lock()
+    blueprint_lock.reset_lock()
+    
+    # 初始化数据库（子进程模式，不创建表结构）
+    await init_database(subprocess=True)
+    await SdeUtils.init_database(subprocess=True)
+    
+    try:
+        # 执行计算步骤（与原方法保持一致）
+        all_relation_list = await NIU.get_relations("PLAN_BP_DEPEND_ON", {"user_name": op.user_name, "plan_name": op.plan_name})
+        await update_plan_status(op, all_relation_list, subprocess=True)
+        node_dict = {
+            node['type_id']: node for node in await NIU.get_user_plan_node_with_distance(op.user_name, op.plan_name)
+        }
+        await MarketManager().update_jita_price()
+        result = await get_plan_tableview_data(op, node_dict, subprocess=True)
+        return result
+    finally:
+        # 确保无论是否发生异常，都关闭数据库连接
+        # 这对于多进程环境非常重要，避免连接泄漏
+        try:
+            await close_database()
+        except Exception:
+            # 子进程中已禁用日志，静默处理异常
+            pass

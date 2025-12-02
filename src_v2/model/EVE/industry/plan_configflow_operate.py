@@ -18,6 +18,7 @@ from src_v2.core.database.kahuna_database_utils_v2 import EveIndustryPlanDBUtils
 from src_v2.model.EVE.eveesi import eveesi
 from src_v2.model.EVE.sde import SdeUtils
 from src_v2.model.EVE.industry.blueprint import BPManager as BPM
+from src_v2.model.EVE.market.market_manager import MarketManager
 
 from src_v2.core.database.connect_manager import redis_manager as rds
 
@@ -27,6 +28,7 @@ asset_prepare_lock = asyncio.Lock()
 running_asset_prepare_lock = asyncio.Lock()
 refresh_system_cost_lock = asyncio.Lock()
 refresh_market_price_lock = asyncio.Lock()
+structure_info_refresh_lock = asyncio.Lock()
 
 from src_v2.core.log import logger
 
@@ -69,12 +71,13 @@ MID_COST_EFF = 0.04
 SMALL_COST_EFF = 0.03
 
 class ConfigFlowOperateCenter():
-    def __init__(self, user_name: str, plan_name: str):
+    def __init__(self, user_name: str, plan_name: str, plan_settings: dict):
         # 同步初始化基本属性
         self.total_progress_key = ""
         self.current_progress_key = ""
         self.user_name = user_name
         self.plan_name = plan_name
+        self.plan_settings = plan_settings
         self.structure_rig_confs = []
         self.structure_assign_confs = []
         self.material_tag_confs = []
@@ -115,6 +118,8 @@ class ConfigFlowOperateCenter():
 
         self.type_eff_cache = {}
 
+        self.type_assign_structure_info_cache_status = False
+        self.structure_info_cache = {}
         self.type_assign_structure_info_cache = {}
 
         self._market_price_status = False
@@ -123,17 +128,21 @@ class ConfigFlowOperateCenter():
         self.index_product_dict = {}
         self.product_num_dict = {}
 
+        self.all_node_in_relation_dict = {}
+        self.all_relation_between_nodes_dict = {}
+        self.all_ralation_dict = {}
+
     @classmethod
-    async def create(cls, user_name: str, plan_name: str):
+    async def create(cls, user_name: str, plan_name: str, plan_settings: dict):
         """异步工厂方法，用于创建并初始化对象"""
-        instance = cls(user_name, plan_name)
-        await instance._async_init()
+        instance = cls(user_name, plan_name, plan_settings)
+        await instance._async_init(user_name, plan_name)
         return instance
     
-    async def _async_init(self):
+    async def _async_init(self, user_name: str, plan_name: str):
         """异步初始化逻辑"""
         config_flow = await EveIndustryPlanConfigFlowDBUtils.select_configflow_by_user_name_and_plan_name(
-            self.user_name, self.plan_name
+            user_name, plan_name
         )
         if not config_flow:
             self.config_flow = []
@@ -308,8 +317,6 @@ class ConfigFlowOperateCenter():
             day = conf["max_time_day"]
             max_time = day * 24 * 3600 + int(h) * 3600 + int(m) * 60 + int(s)
             active_time = await BPM.get_production_time(type_id)
-
-            # TODO 系数计算
 
             return max_time // (active_time * time_eff * fake_time_eff)
 
@@ -509,7 +516,15 @@ class ConfigFlowOperateCenter():
 
         return bp_quantity, bp_jobs
 
-    async def get_type_assign_structure_info(self, type_id: int):
+    async def refresh_structure_info(self):
+        async with structure_info_refresh_lock:
+            if self.type_assign_structure_info_cache_status:
+                return
+            structure_infos = await NAU.get_structure_nodes()
+            self._structure_info = {info['structure_name']: info for info in structure_infos}
+            self.type_assign_structure_info_cache_status = True
+
+    async def get_type_assign_structure_info(self, type_id: int) -> dict | None:
         """
         Args:
             type_id: int
@@ -527,6 +542,8 @@ class ConfigFlowOperateCenter():
             "system_name": str,
         }
         """
+        if not self.type_assign_structure_info_cache_status:
+            await self.refresh_structure_info()
         if type_id in self.type_assign_structure_info_cache:
             return self.type_assign_structure_info_cache[type_id]
 
@@ -534,13 +551,7 @@ class ConfigFlowOperateCenter():
         if res:
             # 获取建筑
             structure_name = conf['structure_name']
-            if structure_name not in self._structure_info:
-                structure_infos = await NAU.get_structure_nodes()
-                for info in structure_infos:
-                    if info['structure_name'] == structure_name:
-                        self._structure_info[structure_name] = info
-                        break
-            structure_info = self._structure_info[structure_name]
+            structure_info = self._structure_info.get(structure_name, None)
             self.type_assign_structure_info_cache[type_id] = structure_info
             return structure_info
         return None
@@ -879,3 +890,14 @@ class ConfigFlowOperateCenter():
         type_adjust_price = float(await rds.r.hget(f"market_price_cache:{type_id}", "adjusted_price"))
         self._type_adjust_price[type_id] = type_adjust_price
         return type_adjust_price
+
+    async def init_at_begin(self):
+        await self.refresh_market_price()
+        await self.refresh_structure_info()
+        await MarketManager().update_jita_price()
+        if self.plan_settings.get('considerate_bp_relation', False):
+            await self.prepare_bp_asset()
+        if self.plan_settings.get('considerate_running_job', False):
+            await self.prepare_running_asset()
+        if self.plan_settings.get('considerate_asset', False):
+            await self.prepare_asset()

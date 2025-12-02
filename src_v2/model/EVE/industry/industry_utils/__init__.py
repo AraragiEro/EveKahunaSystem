@@ -33,6 +33,10 @@ from .item_utils import (
     get_item_info,
     get_type_list
 )
+from .plan_utils import (
+    update_plan_status,
+    get_plan_tableview_data
+)
 
 __all__ = [
     'AsyncCounter',
@@ -58,5 +62,7 @@ __all__ = [
     'get_material_type',
     'get_item_info',
     'get_type_list',
+    'update_plan_status',
+    'get_plan_tableview_data',
 ]
 

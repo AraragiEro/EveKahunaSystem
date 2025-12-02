@@ -51,6 +51,11 @@ const handleSearchContainer = async () => {
 
 const handleAddIndustrypermision = async (row: any) => {
     handleSearchItemCountdialogLoading.value = true
+    if (!row.container.tag) {
+        ElMessage.error("请输入标签")
+        handleSearchItemCountdialogLoading.value = false
+        return
+    }
     console.log("handleSearchItemCountdialogLoading", handleSearchItemCountdialogLoading.value)
     const res = await http.post('/EVE/industry/addIndustrypermision', {
         container: row.container,

@@ -1,6 +1,6 @@
 from typing import AnyStr, AsyncGenerator
-from sqlalchemy import delete, select, text, func, distinct, or_
-from sqlalchemy.dialects.sqlite import insert as insert
+from sqlalchemy import delete, select, text, func, distinct, or_, insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import aliased
 from contextlib import asynccontextmanager
 import asyncio
@@ -155,22 +155,41 @@ class _CommonUtils:
         异步批量插入或更新记录
 
         :param rows_list: 要插入的数据列表，每项是一个字典
-        :param index_elements: 唯一索引字段列表
+        :param index_elements: 唯一索引字段列表（字符串列表或 Column 对象列表）
         :return: 结果代理对象
         """
         if not cls.cls_model:
             raise Exception("cls_model 未设置，请勿直接使用基类")
         async with dbm.get_session() as session:
-            stmt = insert(cls.cls_model).values(rows_list)
+            # 使用 PostgreSQL 的 insert（支持 on_conflict_do_update）
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            
+            stmt = pg_insert(cls.cls_model).values(rows_list)
 
-            update_dict = {c.name: c for c in stmt.excluded if c.name not in index_elements}
+            # 将字符串列表转换为 Column 对象列表（如果需要）
+            if index_elements and isinstance(index_elements[0], str):
+                index_cols = [getattr(cls.cls_model, col_name) for col_name in index_elements]
+                index_col_names = set(index_elements)  # 字符串列表
+            else:
+                index_cols = index_elements
+                index_col_names = {col.name if hasattr(col, 'name') else str(col) for col in index_cols}
+
+            # 构建更新字典，排除索引字段和主键字段
+            # 使用 excluded 表别名来引用被插入的值
+            update_dict = {}
+            for col in cls.cls_model.__table__.columns:
+                # 排除索引字段和主键字段
+                if col.name not in index_col_names and not col.primary_key:
+                    # 使用 excluded 表别名访问列
+                    update_dict[col.name] = getattr(stmt.excluded, col.name)
 
             stmt = stmt.on_conflict_do_update(
-                index_elements=index_elements,
+                index_elements=index_cols,
                 set_=update_dict
             )
 
             result = await session.execute(stmt)
+            await session.commit()
             return result
 
     @classmethod
@@ -178,11 +197,22 @@ class _CommonUtils:
         if not cls.cls_model:
             raise Exception("cls_model 未设置，请勿直接使用基类")
         async with dbm.get_session() as session:
-            stmt = insert(cls.cls_model).values(rows_list)
+            # 使用 PostgreSQL 的 insert（支持 on_conflict_do_nothing）
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            
+            stmt = pg_insert(cls.cls_model).values(rows_list)
+            
+            # 将字符串列表转换为 Column 对象列表（如果需要）
+            if index_elements and isinstance(index_elements[0], str):
+                index_cols = [getattr(cls.cls_model, col_name) for col_name in index_elements]
+            else:
+                index_cols = index_elements
+            
             stmt = stmt.on_conflict_do_nothing(
-                index_elements=index_elements
+                index_elements=index_cols
             )
             await session.execute(stmt)
+            await session.commit()
 
     @classmethod
     async def select_all(cls):
@@ -874,3 +904,170 @@ class EveAssetViewDBUtils(_CommonUtils):
     async def select_by_user_name(cls, user_name: str):
         stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
+
+class EveIndustryCalculateHistoryDBUtils(_CommonUtils):
+    cls_model = model.EveIndustryCalculateHistory
+
+    @classmethod
+    async def get_hourly_statistics(cls, days: int = 7):
+        """获取过去N天每小时的计算统计（启动数、成功数、失败数）
+        
+        Args:
+            days: 查询过去多少天的数据，默认7天
+            
+        Returns:
+            list: 包含每小时统计数据的列表，格式为 [{'hour': '2024-01-01 10:00:00', 'total': 10, 'success': 8, 'failed': 2}, ...]
+        """
+        async with dbm.get_session() as session:
+            # 计算起始时间
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=days)
+            
+            # 查询过去N天的所有记录
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.calculate_start_time >= start_time
+            ).order_by(cls.cls_model.calculate_start_time)
+            result = await session.execute(stmt)
+            records = result.scalars().all()
+            
+            # 按小时分组统计
+            hourly_stats = {}
+            for record in records:
+                if not record.calculate_start_time:
+                    continue
+                    
+                # 按小时分组（格式：YYYY-MM-DD HH:00:00）
+                hour_key = record.calculate_start_time.replace(minute=0, second=0, microsecond=0)
+                hour_str = hour_key.strftime('%Y-%m-%d %H:00:00')
+                
+                if hour_str not in hourly_stats:
+                    hourly_stats[hour_str] = {'total': 0, 'success': 0, 'failed': 0}
+                
+                hourly_stats[hour_str]['total'] += 1
+                
+                # 判断成功/失败：通过 calculate_result 字段判断
+                # 如果 calculate_result 包含错误信息或为 None，则视为失败
+                is_success = True
+                if record.calculate_result is None:
+                    is_success = False
+                elif isinstance(record.calculate_result, dict):
+                    # 检查是否有错误相关的键
+                    error_keys = ['error', 'exception', 'failed', 'failure']
+                    if any(key in str(record.calculate_result).lower() for key in error_keys):
+                        is_success = False
+                elif isinstance(record.calculate_result, str):
+                    if 'error' in record.calculate_result.lower() or 'exception' in record.calculate_result.lower():
+                        is_success = False
+                
+                # 如果 calculate_time 为空，说明计算未完成，视为失败
+                if record.calculate_time is None:
+                    is_success = False
+                
+                if is_success:
+                    hourly_stats[hour_str]['success'] += 1
+                else:
+                    hourly_stats[hour_str]['failed'] += 1
+            
+            # 转换为列表并排序
+            result_list = [
+                {
+                    'hour': hour,
+                    'total': stats['total'],
+                    'success': stats['success'],
+                    'failed': stats['failed']
+                }
+                for hour, stats in sorted(hourly_stats.items())
+            ]
+            
+            return result_list
+
+    @classmethod
+    async def get_duration_statistics_by_product_count(cls):
+        """获取基于任务数量的完成时间区间统计（用于K线图）
+        
+        Returns:
+            list: 包含按任务数量分组的统计数据，格式为 [
+                {
+                    'product_count': 10,
+                    'min_duration': 5.2,
+                    'max_duration': 15.8,
+                    'avg_duration': 10.5,
+                    'count': 20
+                },
+                ...
+            ]
+        """
+        async with dbm.get_session() as session:
+            # 查询所有有完整时间信息的记录（需要开始时间和结束时间）
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.calculate_start_time.isnot(None),
+                cls.cls_model.calculate_time.isnot(None),
+                cls.cls_model.product_count.isnot(None)
+            )
+            result = await session.execute(stmt)
+            records = result.scalars().all()
+            
+            # 按任务数量精确分组（每个具体的product_count值作为一个组）
+            groups = {}
+            for record in records:
+                # 确保product_count不为None
+                if record.product_count is None:
+                    continue
+                
+                product_count = int(record.product_count)  # 确保是整数
+                
+                # 计算持续时间（秒）
+                if record.calculate_time is None or record.calculate_start_time is None:
+                    continue
+                    
+                duration = (record.calculate_time - record.calculate_start_time).total_seconds()
+                
+                # 只处理有效的持续时间（大于0）
+                if duration < 0:
+                    continue
+                
+                # 使用具体的product_count值作为分组键
+                if product_count not in groups:
+                    groups[product_count] = []
+                
+                groups[product_count].append(duration)
+            
+            # 计算每个组的统计信息
+            result_list = []
+            for product_count in sorted(groups.keys()):
+                durations = groups[product_count]
+                if durations and len(durations) > 0:
+                    result_list.append({
+                        'product_count': product_count,
+                        'min_duration': float(min(durations)),
+                        'max_duration': float(max(durations)),
+                        'avg_duration': float(sum(durations) / len(durations)),
+                        'count': len(durations)
+                    })
+            
+            return result_list
+
+
+class EveMarketRegionHistoryStatisticDBUtils(_CommonUtils):
+    """
+    EVE 区域市场历史统计表操作工具类
+
+    使用 Postgre 主库中的 `EveMarketRegionHistoryStatistic` 模型，
+    提供基于 (type_id, region_id, date) 唯一键的批量插入/更新能力。
+    """
+    cls_model = model.EveMarketRegionHistoryStatistic
+
+    @classmethod
+    async def insert_many_or_update(cls, rows_list: list[dict]):
+        """
+        基于 (type_id, region_id, date) 作为唯一键进行批量插入或更新。
+
+        :param rows_list: 每一项为一条历史统计记录的字典
+        """
+        if not rows_list:
+            return
+        # 复用基类的通用实现，指定唯一索引字段
+        return await cls.insert_many_or_update_async(
+            rows_list,
+            index_elements=["type_id", "region_id", "date"],
+        )

@@ -1,10 +1,8 @@
 /// <reference types="vite/client" />
+/// <reference types="vite/client" />
 
-// 扩展 Vue Router 类型
-declare module 'vue-router' {
-  interface RouteMeta {
-    requiresAuth?: boolean
-    roles?: string[]
-    enterpriseOnly?: boolean
+declare module '*.vue' {
+    import type { DefineComponent } from 'vue'
+    const component: DefineComponent<{}, {}, any>
+    export default component
   }
-}

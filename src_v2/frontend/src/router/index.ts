@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { setupAuthGuards } from './guards'
+import { getEnterpriseRoutes } from './enterprise'
 import HomeView from '../views/HomeView.vue'
 
 // 条件加载企业版路由
@@ -16,8 +17,14 @@ const baseRoutes = [
       meta: { requiresAuth: false }
     },
     {
+      path: '/landing',
+      name: 'landing',
+      component: () => import('../views/LandingPage.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
       path: '/',
-      redirect: '/home'
+      redirect: '/landing'
     },
     {
       path: '/home',
@@ -124,6 +131,11 @@ const baseRoutes = [
           name: 'vipManagement',
           component: () => import('../views/admin/vipManagement.vue'),
         },
+        {
+          path: 'websiteDataStatistics',
+          name: 'websiteDataStatistics',
+          component: () => import('../views/admin/websiteDataStatistics.vue'),
+        },
       ],
     },
     {
@@ -147,65 +159,7 @@ const baseRoutes = [
 ]
 
 // 条件添加企业版路由
-const routes: RouteRecordRaw[] = [...baseRoutes]
-
-if (APP_EDITION === 'enterprise') {
-  // 使用动态导入，但不在顶层使用 await
-  // 路由会在需要时懒加载
-  try {
-    // 这里使用同步导入检查，如果模块不存在会抛出错误
-    // 但实际路由定义中使用懒加载
-    const enterpriseRoute: RouteRecordRaw = {
-      path: '/enterprise',
-      name: 'enterprise',
-      component: () => {
-        // 使用动态导入，如果模块不存在会返回错误组件
-        return import('../views/enterprise/enterpriseDashboard.vue').catch(() => {
-          // 如果企业版页面不存在，返回一个占位组件
-          return import('../views/ForbiddenView.vue')
-        })
-      },
-      meta: { 
-        requiresAuth: true, 
-        roles: ['admin', 'user'],
-        enterpriseOnly: true
-      },
-      children: [
-        {
-          path: 'analytics',
-          name: 'enterpriseAnalytics',
-          // @ts-ignore - 企业版文件可能不存在
-          component: () => import('../views/enterprise/enterpriseAnalytics.vue').catch(() => {
-            return import('../views/ForbiddenView.vue')
-          }),
-          meta: { 
-            requiresAuth: true, 
-            roles: ['admin'],
-            enterpriseOnly: true
-          }
-        },
-        {
-          path: 'reports',
-          name: 'enterpriseReports',
-          // @ts-ignore - 企业版文件可能不存在
-          component: () => import('../views/enterprise/enterpriseReports.vue').catch(() => {
-            return import('../views/ForbiddenView.vue')
-          }),
-          meta: { 
-            requiresAuth: true, 
-            roles: ['admin', 'user'],
-            enterpriseOnly: true
-          }
-        }
-      ]
-    }
-    routes.push(enterpriseRoute)
-    console.log('[路由] 企业版路由已添加')
-  } catch (error) {
-    // 企业版路由模块不存在时静默忽略，不报错
-    console.warn('[路由] 企业版路由添加失败:', error)
-  }
-}
+const routes: RouteRecordRaw[] = [...baseRoutes, ...getEnterpriseRoutes(APP_EDITION)]
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),

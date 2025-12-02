@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 import networkx as nx
 from thefuzz import fuzz, process
 from typing import Optional, List
@@ -6,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from aiocache import cached
 from aiocache.serializers import PickleSerializer
+import traceback
 
 from .sde_builder import (
     SDEDatabaseManager,
@@ -19,18 +21,29 @@ from .sde_builder import (
     MarketGroups,
 )
 from src_v2.core.log import logger
+from src_v2.core.database.connect_manager import neo4j_manager
 
 # 数据库管理器单例
 _db_manager: Optional[SDEDatabaseManager] = None
-_init_lock = asyncio.Lock()
+class LockManager():
+    def __init__(self):
+        self.init_lock = asyncio.Lock()
+        self.invtype_name_list_lock = asyncio.Lock()
+        self.invgroup_name_list_lock = asyncio.Lock()
+        self.meta_name_list_lock = asyncio.Lock()
+        self.blueprint_name_list_lock = asyncio.Lock()
+        self.market_group_name_list_lock = asyncio.Lock()
+        self.category_name_list_lock = asyncio.Lock()
 
-# 数据列表缓存锁
-_invtype_name_list_lock = asyncio.Lock()
-_invgroup_name_list_lock = asyncio.Lock()
-_meta_name_list_lock = asyncio.Lock()
-_blueprint_name_list_lock = asyncio.Lock()
-_market_group_name_list_lock = asyncio.Lock()
-_category_name_list_lock = asyncio.Lock()
+    def reset_lock(self):
+        self.init_lock = asyncio.Lock()
+        self.invtype_name_list_lock = asyncio.Lock()
+        self.invgroup_name_list_lock = asyncio.Lock()
+        self.meta_name_list_lock = asyncio.Lock()
+        self.blueprint_name_list_lock = asyncio.Lock()
+        self.market_group_name_list_lock = asyncio.Lock()
+        self.category_name_list_lock = asyncio.Lock()
+lock_manager = LockManager()
 
 # 数据列表缓存（将在后续步骤中改为异步加载）
 _en_invtype_name_list: Optional[List[str]] = None
@@ -47,14 +60,18 @@ _en_category_name_list: Optional[List[str]] = None
 _zh_category_name_list: Optional[List[str]] = None
 
 
-async def get_db_manager() -> SDEDatabaseManager:
-    """获取数据库管理器单例"""
+async def get_db_manager(subprocess=False) -> SDEDatabaseManager:
+    """获取数据库管理器单例
+    
+    Args:
+        subprocess: 是否为子进程模式，子进程模式下使用更小的连接池
+    """
     global _db_manager
     if _db_manager is None:
-        async with _init_lock:
+        async with lock_manager.init_lock:
             if _db_manager is None:  # 双重检查
                 _db_manager = SDEDatabaseManager()
-                await _db_manager.init()
+                await _db_manager.init(subprocess=subprocess)
     return _db_manager
 
 
@@ -63,9 +80,13 @@ class SdeUtils:
     item_map_dict = dict()
 
     @classmethod
-    async def init_database(cls):
-        """初始化 SDE 数据库连接"""
-        await get_db_manager()
+    async def init_database(cls, subprocess=False):
+        """初始化 SDE 数据库连接
+        
+        Args:
+            subprocess: 是否为子进程模式，子进程模式下使用更小的连接池
+        """
+        await get_db_manager(subprocess=subprocess)
         logger.info("SDE 数据库连接已初始化")
 
     @classmethod
@@ -86,7 +107,7 @@ class SdeUtils:
         if result_list is not None:
             return result_list
         
-        async with _invtype_name_list_lock:
+        async with lock_manager.invtype_name_list_lock:
             # 双重检查
             result_list = _zh_invtype_name_list if zh else _en_invtype_name_list
             if result_list is not None:
@@ -113,7 +134,7 @@ class SdeUtils:
         if result_list is not None:
             return result_list
         
-        async with _invgroup_name_list_lock:
+        async with lock_manager.invgroup_name_list_lock:
             # 双重检查
             result_list = _zh_invgroup_name_list if zh else _en_invgroup_name_list
             if result_list is not None:
@@ -140,7 +161,7 @@ class SdeUtils:
         if result_list is not None:
             return result_list
         
-        async with _meta_name_list_lock:
+        async with lock_manager.meta_name_list_lock:
             # 双重检查
             result_list = _zh_meta_name_list if zh else _en_meta_name_list
             if result_list is not None:
@@ -167,7 +188,7 @@ class SdeUtils:
         if result_list is not None:
             return result_list
         
-        async with _blueprint_name_list_lock:
+        async with lock_manager.blueprint_name_list_lock:
             # 双重检查
             result_list = _zh_blueprint_name_list if zh else _en_blueprint_name_list
             if result_list is not None:
@@ -206,7 +227,7 @@ class SdeUtils:
         if result_list is not None:
             return result_list
         
-        async with _market_group_name_list_lock:
+        async with lock_manager.market_group_name_list_lock:
             # 双重检查
             result_list = _zh_market_group_name_list if zh else _en_market_group_name_list
             if result_list is not None:
@@ -233,7 +254,7 @@ class SdeUtils:
         if result_list is not None:
             return result_list
         
-        async with _category_name_list_lock:
+        async with lock_manager.category_name_list_lock:
             # 双重检查
             result_list = _zh_category_name_list if zh else _en_category_name_list
             if result_list is not None:
@@ -256,12 +277,12 @@ class SdeUtils:
     async def get_t2_ship(zh: bool = False) -> List[str]:
         """获取所有 T2 舰船名称列表"""
         async with (await get_db_manager()).get_readonly_session() as session:
-            name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
+            # name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
             category_name_field = InvCategories.categoryName_zh if zh else InvCategories.categoryName_en
             meta_name_field = MetaGroups.nameID_zh if zh else MetaGroups.nameID_en
             
             stmt = (
-                select(name_field)
+                select(InvTypes.typeID)
                 .select_from(InvTypes)
                 .join(InvGroups, InvTypes.groupID == InvGroups.groupID)
                 .join(InvCategories, InvGroups.categoryID == InvCategories.categoryID)
@@ -277,6 +298,8 @@ class SdeUtils:
     @cached(ttl=3600, serializer=PickleSerializer())
     async def get_battleship(zh: bool = False) -> List[str]:
         """获取所有战列舰名称列表"""
+        # 先获取所有数据，避免在会话内嵌套调用其他数据库方法
+        ship_data = []
         async with (await get_db_manager()).get_readonly_session() as session:
             name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
             category_name_field = InvCategories.categoryName_zh if zh else InvCategories.categoryName_en
@@ -290,21 +313,25 @@ class SdeUtils:
             )
             result = await session.execute(stmt)
             
-            battleship_list = []
             for row in result:
-                type_id = row.typeID
-                type_name = row[1]  # name_field
-                market_list = await SdeUtils.get_market_group_list(type_id, zh=zh)
-                target_name = "战列舰" if zh else "Battleships"
-                if target_name in market_list:
-                    battleship_list.append(type_name)
-            
-            return battleship_list
+                ship_data.append((row.typeID, row[1]))  # (type_id, type_name)
+        
+        # 在会话外调用 get_market_group_list，避免嵌套会话
+        battleship_list = []
+        target_name = "战列舰" if zh else "Battleships"
+        for type_id, type_name in ship_data:
+            market_list = await SdeUtils.get_market_group_list(type_id, zh=zh)
+            if target_name in market_list:
+                battleship_list.append(type_name)
+        
+        return battleship_list
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())
     async def get_capital_ship(zh: bool = False) -> List[str]:
         """获取所有旗舰名称列表"""
+        # 先获取所有数据，避免在会话内嵌套调用其他数据库方法
+        ship_data = []
         async with (await get_db_manager()).get_readonly_session() as session:
             name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
             category_name_field = InvCategories.categoryName_zh if zh else InvCategories.categoryName_en
@@ -318,22 +345,24 @@ class SdeUtils:
             )
             result = await session.execute(stmt)
             
-            capital_ship_list = []
             for row in result:
-                type_id = row.typeID
-                type_name = row[1]  # name_field
-                market_list = await SdeUtils.get_market_group_list(type_id, zh=zh)
-                target_name = "旗舰" if zh else "Capital Ships"
-                if target_name in market_list:
-                    capital_ship_list.append(type_name)
-            
-            # 移除特定物品
-            exclude_items = ["Venerable", "Vanguard"] if not zh else ["可敬级", "先锋级"]
-            for item in exclude_items:
-                if item in capital_ship_list:
-                    capital_ship_list.remove(item)
-            
-            return capital_ship_list
+                ship_data.append((row.typeID, row[1]))  # (type_id, type_name)
+        
+        # 在会话外调用 get_market_group_list，避免嵌套会话
+        capital_ship_list = []
+        target_name = "旗舰" if zh else "Capital Ships"
+        for type_id, type_name in ship_data:
+            market_list = await SdeUtils.get_market_group_list(type_id, zh=zh)
+            if target_name in market_list:
+                capital_ship_list.append(type_name)
+        
+        # 移除特定物品
+        exclude_items = ["Venerable", "Vanguard"] if not zh else ["可敬级", "先锋级"]
+        for item in exclude_items:
+            if item in capital_ship_list:
+                capital_ship_list.remove(item)
+        
+        return capital_ship_list
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())
@@ -351,6 +380,7 @@ class SdeUtils:
                 result = await session.execute(stmt)
                 return result.scalar()
         except Exception as e:
+            traceback.print_exc()
             logger.warning(f"获取 type_id={invtpye_id} 的组名称时出错: {e}")
             return None
 
@@ -536,6 +566,10 @@ class SdeUtils:
     async def get_market_group_list(cls, type_id: int, zh: bool = False) -> List[str]:
         """根据 typeID 获取市场组列表（从根到叶子）"""
         try:
+            # 在打开数据库会话之前先获取市场组树，避免嵌套会话
+            # 如果缓存已存在，不会创建新的数据库会话
+            market_tree = await cls.get_market_group_tree()
+            
             async with (await get_db_manager()).get_readonly_session() as session:
                 # 获取物品信息和市场组ID
                 type_name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
@@ -548,9 +582,6 @@ class SdeUtils:
                 
                 market_group_id = row.marketGroupID
                 type_name = row[1]  # type_name_field
-                
-                # 获取市场组树
-                market_tree = await cls.get_market_group_tree()
                 
                 # 获取当前市场组名称
                 market_group_name_field = MarketGroups.nameID_zh if zh else MarketGroups.nameID_en
@@ -846,4 +877,122 @@ class SdeUtils:
         except Exception as e:
             logger.warning(f"获取 type_id={type_id} 的体积时出错: {e}")
             return 0.0
+
+    @staticmethod
+    async def search_type_ids_by_criteria(search_type: str, keyword: str, max_results: int = 200) -> List[dict]:
+        """
+        根据搜索类型和关键字搜索type_id列表
+        
+        Args:
+            search_type: 搜索类型 (group, meta, category, marketGroup)
+            keyword: 搜索关键字
+            max_results: 最大返回结果数
+        
+        Returns:
+            List[dict]: 包含 {type_id, type_name_zh} 的列表
+        """
+        results = []
+        try:
+            async with (await get_db_manager()).get_readonly_session() as session:
+                is_zh = SdeUtils.maybe_chinese(keyword)
+                
+                if search_type == 'group':
+                    # 通过group名称查询
+                    group_name_field = InvGroups.groupName_zh if is_zh else InvGroups.groupName_en
+                    stmt = (
+                        select(InvTypes.typeID, InvTypes.typeName_zh)
+                        .select_from(InvTypes)
+                        .join(InvGroups, InvTypes.groupID == InvGroups.groupID)
+                        .where(group_name_field == keyword)
+                        .where(InvTypes.marketGroupID.isnot(None))
+                        .where(InvTypes.typeName_zh.isnot(None))
+                        .limit(max_results)
+                    )
+                    result = await session.execute(stmt)
+                    for row in result:
+                        results.append({
+                            'type_id': row.typeID,
+                            'type_name_zh': row.typeName_zh
+                        })
+                
+                elif search_type == 'meta':
+                    # 通过meta名称查询
+                    meta_name_field = MetaGroups.nameID_zh if is_zh else MetaGroups.nameID_en
+                    stmt = (
+                        select(InvTypes.typeID, InvTypes.typeName_zh)
+                        .select_from(InvTypes)
+                        .join(MetaGroups, InvTypes.metaGroupID == MetaGroups.metaGroupID)
+                        .where(meta_name_field == keyword)
+                        .where(InvTypes.marketGroupID.isnot(None))
+                        .where(InvTypes.typeName_zh.isnot(None))
+                        .limit(max_results)
+                    )
+                    result = await session.execute(stmt)
+                    for row in result:
+                        results.append({
+                            'type_id': row.typeID,
+                            'type_name_zh': row.typeName_zh
+                        })
+                
+                elif search_type == 'category':
+                    # 通过category名称查询
+                    category_name_field = InvCategories.categoryName_zh if is_zh else InvCategories.categoryName_en
+                    stmt = (
+                        select(InvTypes.typeID, InvTypes.typeName_zh)
+                        .select_from(InvTypes)
+                        .join(InvGroups, InvTypes.groupID == InvGroups.groupID)
+                        .join(InvCategories, InvGroups.categoryID == InvCategories.categoryID)
+                        .where(category_name_field == keyword)
+                        .where(InvTypes.marketGroupID.isnot(None))
+                        .where(InvTypes.typeName_zh.isnot(None))
+                        .limit(max_results)
+                    )
+                    result = await session.execute(stmt)
+                    for row in result:
+                        results.append({
+                            'type_id': row.typeID,
+                            'type_name_zh': row.typeName_zh
+                        })
+                
+                elif search_type == 'marketGroup':
+                    # 通过marketGroup名称查询，使用neo4j
+                    # 注意：marketGroup可能有父子关系，neo4j可以更好地处理层级关系
+                    async with neo4j_manager.get_session() as neo4j_session:
+                        # 查询匹配的MarketGroup节点，然后找到所有连接的Type节点
+                        # 关系方向：Type -[:EVE_MARKET_GROUP]-> MarketGroup
+                        if is_zh:
+                            query = """
+                            MATCH (mg:MarketGroup {name_id_zh: $keyword})
+                            MATCH (t:Type)-[:EVE_MARKET_GROUP*0..20]->(mg)
+                            WHERE t.type_name_zh IS NOT NULL
+                            RETURN t.type_id AS type_id, t.type_name_zh AS type_name_zh
+                            LIMIT $limit
+                            """
+                        else:
+                            query = """
+                            MATCH (mg:MarketGroup {name_id: $keyword})
+                            MATCH (t:Type)-[:EVE_MARKET_GROUP*0..20]->(mg)
+                            WHERE t.type_name_zh IS NOT NULL
+                            RETURN t.type_id AS type_id, t.type_name_zh AS type_name_zh
+                            LIMIT $limit
+                            """
+                        neo4j_result = await neo4j_session.run(query, {
+                            "keyword": keyword,
+                            "limit": max_results + 1  # 多查询一个用于判断是否超过限制
+                        })
+                        async for record in neo4j_result:
+                            if len(results) >= max_results:
+                                break
+                            type_id = record.get("type_id")
+                            type_name_zh = record.get("type_name_zh")
+                            if type_id and type_name_zh:
+                                results.append({
+                                    'type_id': type_id,
+                                    'type_name_zh': type_name_zh
+                                })
+        
+        except Exception as e:
+            logger.warning(f"搜索type_id失败: search_type={search_type}, keyword={keyword}, error={e}")
+        
+        return results
 

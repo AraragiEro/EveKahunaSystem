@@ -67,6 +67,8 @@ def role_required(req_roles: list[str], res_code = 403, message: str = '权限�
             if vip_state:
                 logger.info(f"vip_state: {vip_state.vip_level}")
                 all_roles.add(vip_state.vip_level)
+                if vip_state.vip_level == 'vip_omega':
+                    all_roles.add('vip_alpha')
             else:
                 logger.info(f"vip_state: None")
 

@@ -8,7 +8,7 @@ export function setupAuthGuards(router: Router): void {
     const { isEnterprise } = useEdition()
     
     // 定义公开页面列表（不需要认证即可访问）
-    const publicPages = ['/login', '/forbidden', '/setting/characterSetting/auth/close']
+    const publicPages = ['/', '/login', '/landing', '/forbidden', '/setting/characterSetting/auth/close']
     // 支持动态路径匹配：/storage/:sid
     const isPublicPage = publicPages.includes(to.path) || to.path.startsWith('/storage/')
     

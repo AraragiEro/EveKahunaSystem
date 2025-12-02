@@ -247,6 +247,16 @@ class EveIndustryPlanConfigFlowPresupposition(PostgreModel):
     config_list = Column(ARRAY(Integer))
 all_model.append(EveIndustryPlanConfigFlowPresupposition)
 
+class EveIndustryCalculateHistory(PostgreModel):
+    __tablename__ = 'eve_industry_calculate_history'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(Text, index=True)
+    plan_name = Column(Text, index=True)
+    product_count = Column(Integer)
+    calculate_start_time = Column(DateTime, index=True)
+    calculate_time = Column(DateTime, index=True)
+    calculate_result = Column(JSONB)
+all_model.append(EveIndustryCalculateHistory)
 
 # class EveIndustryPlanSetting(PostgreModel):
 #     __tablename__ = 'eve_industry_plan_setting'
@@ -255,3 +265,32 @@ all_model.append(EveIndustryPlanConfigFlowPresupposition)
 #     plan_name = Column(Text, ForeignKey("eve_industry_plan.plan_name"), index=True)
 #     settings = Column(JSONB)
 # all_model.append(EveIndustryPlanSetting)
+
+# 企业版自选市场
+class EnterpriseMarket(PostgreModel):
+    __tablename__ = 'enterprise_market'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(Text, ForeignKey("user.user_name"), index=True)
+    tag = Column(Text)
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
+    product_type_ids = Column(ARRAY(Integer))
+    container_id_list = Column(ARRAY(BigInteger))
+all_model.append(EnterpriseMarket)
+
+class EveMarketRegionHistoryStatistic(PostgreModel):
+    __tablename__ = 'eve_market_region_history_statistic'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type_id = Column(BigInteger, nullable=False, index=True)
+    region_id = Column(BigInteger, nullable=False, index=True)
+    date = Column(DateTime, nullable=False, index=True)
+    average = Column(Float, nullable=False)
+    highest = Column(Float, nullable=False)
+    lowest = Column(Float, nullable=False)
+    order_count = Column(BigInteger, nullable=False)
+    volume = Column(BigInteger, nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint('type_id', 'region_id', 'date', name='eve_market_region_history_statistic_unique'),
+    )
+all_model.append(EveMarketRegionHistoryStatistic)

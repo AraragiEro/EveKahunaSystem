@@ -258,21 +258,25 @@ async def save_config_flow_preset(user_id: str, preset_name: str, config_list):
     Returns:
         None
     """
-    # 检查预设名是否已存在（同一用户）
-    existing_preset = await EveIndustrryPlanConfigFlowPresetDBUtils.select_by_user_name_and_preset_name(user_id, preset_name)
-    if existing_preset:
-        raise KahunaException(f"预设名 '{preset_name}' 已存在")
-    
     # 提取 config_id 数组
     config_id_list = [d["config_id"] for d in config_list]
     
+    # 检查预设名是否已存在（同一用户）
+    existing_preset = await EveIndustrryPlanConfigFlowPresetDBUtils.select_by_user_name_and_preset_name(user_id, preset_name)
+    
     # 创建预设对象
     preset_obj = EveIndustrryPlanConfigFlowPresetDBUtils.get_obj()
-    preset_obj.id = None  # 确保ID为None，让数据库自动生成
+    if existing_preset:
+        # 如果存在，使用merge方法更新
+        preset_obj.id = existing_preset.id
+    else:
+        # 如果不存在，创建新记录
+        preset_obj.id = None  # 确保ID为None，让数据库自动生成
+    
     preset_obj.user_name = user_id
     preset_obj.preset_name = preset_name
     preset_obj.config_list = config_id_list
-    await EveIndustrryPlanConfigFlowPresetDBUtils.save_obj(preset_obj)
+    await EveIndustrryPlanConfigFlowPresetDBUtils.merge(preset_obj)
 
 
 async def get_config_flow_presets(user_id: str):

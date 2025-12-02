@@ -14,6 +14,15 @@ import docSetting1 from '@/assets/doc-setting-1.png'
 import docQA1 from '@/assets/doc-QA-1.png'
 import docQA2 from '@/assets/doc-QA-2.png'
 import docQA3 from '@/assets/doc-QA-3.png'
+import docExampleIshtar1 from '@/assets/doc-example-ishtar-1.png'
+import docExampleIshtar2 from '@/assets/doc-example-ishtar-2.png'
+import docExampleIshtar3 from '@/assets/doc-example-ishtar-3.png'
+import docExampleIshtar4 from '@/assets/doc-example-ishtar-4.png'
+import docExampleIshtar5 from '@/assets/doc-example-ishtar-5.png'
+import docExampleIshtar6 from '@/assets/doc-example-ishtar-6.png'
+import docExampleIshtar7 from '@/assets/doc-example-ishtar-7.png'
+import docExampleIshtar8 from '@/assets/doc-example-ishtar-8.png'
+import docExampleIshtar9 from '@/assets/doc-example-ishtar-9.png'
 
 // 创建图片路径映射
 const imageMap: Record<string, string> = {
@@ -26,7 +35,16 @@ const imageMap: Record<string, string> = {
   '/assets/doc-setting-1.png': docSetting1,
   '/assets/doc-QA-1.png': docQA1,
   '/assets/doc-QA-2.png': docQA2,
-  '/assets/doc-QA-3.png': docQA3
+  '/assets/doc-QA-3.png': docQA3,
+  '/assets/doc-example-ishtar-1.png': docExampleIshtar1,
+  '/assets/doc-example-ishtar-2.png': docExampleIshtar2,
+  '/assets/doc-example-ishtar-3.png': docExampleIshtar3,
+  '/assets/doc-example-ishtar-4.png': docExampleIshtar4,
+  '/assets/doc-example-ishtar-5.png': docExampleIshtar5,
+  '/assets/doc-example-ishtar-6.png': docExampleIshtar6,
+  '/assets/doc-example-ishtar-7.png': docExampleIshtar7,
+  '/assets/doc-example-ishtar-8.png': docExampleIshtar8,
+  '/assets/doc-example-ishtar-9.png': docExampleIshtar9
 }
 
 // 配置 marked
@@ -81,6 +99,8 @@ const summaryQAHtml = marked(summaryQA, { renderer }) as string
 
 import gettingStartIndustry from '@/docs/getting-start-industry.md?raw'
 const gettingStartIndustryHtml = marked(gettingStartIndustry, { renderer }) as string
+import gettingStartExampleIshtar from '@/docs/getting-start-example-ishtar.md?raw'
+const gettingStartExampleIshtarHtml = marked(gettingStartExampleIshtar, { renderer }) as string
 import gettingStartStorage from '@/docs/getting-start-storage.md?raw'
 const gettingStartStorageHtml = marked(gettingStartStorage, { renderer }) as string
 import gettingStartSetting from '@/docs/getting-start-setting.md?raw'
@@ -112,6 +132,7 @@ const helpSections = ref<HelpSection[]>([
     title: '快速开始',
     children: [
       { id: 'getting-started-industry', title: '工业', content: gettingStartIndustryHtml },
+      { id: 'getting-started-example-ishtar', title: '伊什塔搓船示例', content: gettingStartExampleIshtarHtml },
       { id: 'getting-started-storage', title: '库存管理【Alpha订阅】', content: gettingStartStorageHtml },
       { id: 'getting-started-setting', title: '设置', content: gettingStartSettingHtml }
     ]

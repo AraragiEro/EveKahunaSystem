@@ -16,6 +16,7 @@ from src_v2.core.user.user_manager import UserManager
 from src_v2.core.log import logger
 
 from src_v2.model.EVE.industry.industry_manager import IndustryManager
+from src_v2.model.EVE.market.market_manager import MarketManager
 from src_v2.core.database.neo4j_utils import Neo4jIndustryUtils as NIU
 from src_v2.core.utils import KahunaException
 from src_v2.model.EVE.industry.plan_configflow_operate import ConfigFlowOperateCenter
@@ -104,48 +105,6 @@ async def save_plan_products():
         logger.error(f"保存产品失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "保存产品失败"}), 500
 
-async def _calculate_plan_async(user_id: str, plan_name: str):
-    """异步计算计划的后台任务"""
-    status_key = f"plan_calculate_status:{user_id}:{plan_name}"
-    total_progress_key = f"plan_calculate_total_progress:{user_id}:{plan_name}"
-    current_progress_key = f"plan_calculate_current_progress:{user_id}:{plan_name}"
-    result_key = f"plan_calculate_result:{user_id}:{plan_name}"
-    
-    try:
-        # 设置状态为运行中
-        await redis_manager.redis.set(status_key, "running")
-        await redis_manager.redis.expire(status_key, 3600)  # 1小时过期
-        
-        # 执行计算
-        op = await ConfigFlowOperateCenter.create(user_id, plan_name)
-        op.total_progress_key = total_progress_key
-        op.current_progress_key = current_progress_key
-        result_data = await IndustryManager.calculate_plan(op)
-        
-        
-        # 计算完成，设置状态为已完成
-        await redis_manager.redis.set(result_key, json.dumps(result_data))
-        await redis_manager.redis.expire(result_key, 3600)
-        await redis_manager.redis.set(status_key, "completed")
-        await redis_manager.redis.expire(status_key, 3600)
-        
-        
-        logger.info(f"计划 {plan_name} 计算完成")
-    except KahunaException as e:
-        # 计算失败，设置状态为失败
-        traceback.print_exc()
-        error_msg = str(e)
-        await redis_manager.redis.set(status_key, f"failed:{error_msg}")
-        await redis_manager.redis.expire(status_key, 3600)
-        logger.error(f"计划 {plan_name} 计算失败: {error_msg}")
-    except Exception as e:
-        # 计算失败，设置状态为失败
-        traceback.print_exc()
-        error_msg = f"计算过程发生错误: {str(e)}"
-        await redis_manager.redis.set(status_key, f"failed:{error_msg}")
-        await redis_manager.redis.expire(status_key, 3600)
-        logger.error(f"计划 {plan_name} 计算失败: {traceback.format_exc()}")
-
 @api_industry_bp.route("/getPlanCalculateResultTableView", methods=["POST"])
 @auth_required
 async def get_plan_calculate_result_table_view():
@@ -154,108 +113,32 @@ async def get_plan_calculate_result_table_view():
     plan_name = data.get("plan_name")
     operate_type = data.get("operate_type", "calculate")  # 默认为 "calculate" 以保持向后兼容
     
-    status_key = f"plan_calculate_status:{user_id}:{plan_name}"
-    total_progress_key = f"plan_calculate_total_progress:{user_id}:{plan_name}"
-    current_progress_key = f"plan_calculate_current_progress:{user_id}:{plan_name}"
-    result_key = f"plan_calculate_result:{user_id}:{plan_name}"
-    
     try:
         if operate_type == "start":
             # 启动计算任务
-            # 检查是否已有正在进行的计算
-            current_status = await redis_manager.redis.get(status_key)
-            if current_status:
-                if current_status == "pending" or current_status == "running":
-                    return jsonify({"status": 400, "message": "计算任务已在运行中"}), 400
-                elif current_status.startswith("failed:"):
-                    # 如果之前失败，允许重新启动
-                    pass
-                elif current_status == "completed":
-                    # 如果已完成，允许重新计算
-                    pass
-            
-            # 设置状态为待处理
-            await redis_manager.redis.set(status_key, "pending")
-            await redis_manager.redis.expire(status_key, 3600)
-            
-            # 启动异步计算任务
-            asyncio.create_task(_calculate_plan_async(user_id, plan_name))
-            
+            await IndustryManager.start_plan_calculation(user_id, plan_name)
             return jsonify({"status": 200, "message": "计算任务已启动"})
             
         elif operate_type == "status":
             # 查询计算状态
-            status = await redis_manager.redis.get(status_key)
-            total_progress = await redis_manager.redis.get(total_progress_key)
-            # current_progress 是使用 hset 存储的 hash，使用 hgetall 获取所有字段
-            current_progress_hash = await redis_manager.redis.hgetall(current_progress_key)  # type: ignore
-            
-            if not status:
-                return jsonify({"status": 200, "data": {"status": "idle", "total_progress": None, "current_step": None, "is_indeterminate": 1}})
-            
-            # 解析状态
-            if status.startswith("failed:"):
-                error_msg = status[7:]  # 去掉 "failed:" 前缀
-                return jsonify({"status": 200, "data": {"status": "failed", "error": error_msg, "total_progress": None, "current_step": None, "is_indeterminate": 1}})
-            else:
-                # 解析总进度
-                total_progress_value = int(total_progress) if total_progress else None
-                
-                # 解析当前步骤进度（从 hash 中获取）
-                current_step_data = None
-                if current_progress_hash:
-                    try:
-                        name = current_progress_hash.get("name", "")
-                        progress_str = current_progress_hash.get("progress", "")
-                        progress_value = float(progress_str) if progress_str else None
-                        if name or progress_value is not None:
-                            current_step_data = {
-                                "name": name,
-                                "progress": int(progress_value) if progress_value is not None else None,
-                                "is_indeterminate": current_progress_hash.get("is_indeterminate", "0") == "1"
-                            }
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"解析当前步骤进度失败: {e}, hash数据: {current_progress_hash}")
-                        current_step_data = None
-                
-                return jsonify({
-                    "status": 200, 
-                    "data": {
-                        "status": status, 
-                        "total_progress": total_progress_value,
-                        "current_step": current_step_data,
-                        "is_indeterminate": current_progress_hash.get("is_indeterminate", "0") == "1"
-                    }
-                })
+            status_data = await IndustryManager.get_calculation_status(user_id, plan_name)
+            return jsonify({"status": 200, "data": status_data})
                 
         elif operate_type == "result":
             # 获取计算结果
-            # 检查状态是否为已完成
-            status = await redis_manager.redis.get(status_key)
-            if not status or status != "completed":
-                return jsonify({"status": 400, "message": "计算尚未完成"}), 400
-            
-            # 从Redis获取计算结果
-            result_data_str = await redis_manager.redis.get(result_key)
-            if result_data_str:
-                try:
-                    result_data = json.loads(result_data_str)
-                except (json.JSONDecodeError, TypeError):
-                    # 如果Redis中没有结果，回退到从数据库获取
-                    op = await ConfigFlowOperateCenter.create(user_id, plan_name)
-                    result_data = await IndustryManager.get_plan_tableview_data(op)
-            else:
-                # 如果Redis中没有结果，从数据库获取
-                op = await ConfigFlowOperateCenter.create(user_id, plan_name)
-                result_data = await IndustryManager.get_plan_tableview_data(op)
-            
+            result_data = await IndustryManager.get_calculation_result(user_id, plan_name)
             return jsonify({"status": 200, "data": result_data})
             
         else:
             # 向后兼容：直接计算并返回结果（原有行为）
-            op = await ConfigFlowOperateCenter.create(user_id, plan_name)
+            plan_settings = await IndustryManager.get_plan_settings(user_id, plan_name)
+            op = await ConfigFlowOperateCenter.create(user_id, plan_name, plan_settings)
             await IndustryManager.calculate_plan(op)
-            data = await IndustryManager.get_plan_tableview_data(op)
+            node_dict = {
+                node['type_id']: node for node in await NIU.get_user_plan_node_with_distance(op.user_name, op.plan_name)
+            }
+            await MarketManager().update_jita_price()
+            data = await IndustryManager.get_plan_tableview_data(op, node_dict)
             return jsonify({"status": 200, "data": data})
             
     except KahunaException as e:

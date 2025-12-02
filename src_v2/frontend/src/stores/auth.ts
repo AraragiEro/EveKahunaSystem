@@ -8,6 +8,7 @@ export interface User {
   username: string
   email: string
   roles: string[]
+  vipEndDate?: string
 }
 
 export interface LoginCredentials {
@@ -171,12 +172,13 @@ export const useAuthStore = defineStore('auth', () => {
 
       // 检查 status 是否为 200
       if (data.status === 200) {
-        // token 有效，保存用户信息（后端返回的数据结构包含 id, username, roles）
+        // token 有效，保存用户信息（后端返回的数据结构包含 id, username, roles, vipEndDate）
         user.value = {
           id: data.id,
           username: data.username,
           email: '', // 后端没有返回 email，保持空字符串
-          roles: data.roles
+          roles: data.roles,
+          vipEndDate: data.vipEndDate
         }
         // 刷新缓存
         lastAuthCheckAtMs.value = Date.now()

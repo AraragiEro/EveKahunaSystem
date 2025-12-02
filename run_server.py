@@ -11,6 +11,10 @@ from src_v2.backend.app import get_app, serve_vue
 from src_v2.core import init_database
 from src_v2.model.EVE.eveesi import init_esi_manager
 from src_v2.core.permission.permission_manager import permission_manager
+from src_v2.core.user.user_manager import UserManager
+from src_v2.core.config.config import config
+from werkzeug.security import generate_password_hash
+from src_v2.core.log import logger
 
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
@@ -132,16 +136,55 @@ async def main():
     await init_esi_manager()
     await permission_manager.init_base_roles()
 
+    # 检查并创建默认管理员账号
+    try:
+        create_admin = config.getboolean('ADMIN', 'create_admin', fallback=False)
+        if create_admin:
+            admin_user = config.get('ADMIN', 'admin_user', fallback='kahuna')
+            admin_passwd = config.get('ADMIN', 'admin_passwd', fallback='kahuna')
+            
+            logger.info(f"检查管理员账号创建配置: CREATE_ADMIN={create_admin}, ADMIN_USER={admin_user}")
+            
+            # 检查用户是否已存在
+            user_manager = UserManager()
+            existing_user = await user_manager.get_user(admin_user)
+            
+            if existing_user:
+                logger.info(f"管理员账号 '{admin_user}' 已存在，跳过创建")
+            else:
+                # 创建管理员账号
+                logger.info(f"开始创建管理员账号: {admin_user}")
+                passwd_hash = generate_password_hash(admin_passwd)
+                await user_manager.create_user(admin_user, passwd_hash)
+                logger.info(f"管理员账号 '{admin_user}' 创建成功")
+                
+                # 赋予 admin 角色
+                try:
+                    await permission_manager.add_role_to_user(admin_user, 'admin')
+                    logger.info(f"已为管理员账号 '{admin_user}' 赋予 admin 角色")
+                except ValueError as e:
+                    # 如果角色已存在或其他错误，记录日志但不中断启动
+                    logger.warning(f"为管理员账号 '{admin_user}' 赋予 admin 角色时出错: {e}")
+        else:
+            logger.info("CREATE_ADMIN 配置为 false，跳过管理员账号创建")
+    except Exception as e:
+        logger.error(f"创建管理员账号时发生错误: {e}", exc_info=True)
+        # 不中断启动流程，只记录错误
+
     from src_v2.core.database.connect_manager import redis_manager
     # await redis_manager.r.flushall()
 
-    # TODO 市场信息节点初始化，参数控制。
-    # from src_v2.model.EVE.industry.industry_utils import MarketTree
-    # await MarketTree.init_market_tree()
-    # await MarketTree.link_type_to_market_group()
-    # TODO 蓝图信息节点初始化，参数控制。
-    # from src_v2.model.EVE.industry.blueprint import BPManager
-    # await BPManager.init_bp_data_to_neo4j()
+    # 仅在版本为企业版且模块存在时注册
+    from src_v2.core.edition import is_enterprise
+    if is_enterprise():
+        try:
+            from src_v2.enterprise.model.market_history_refresh_timer import MarketHistoryRefreshTimer
+            MarketHistoryRefreshTimer().start()
+            logger.info("市场历史数据刷新定时器已启动")
+        except ImportError as e:
+            logger.warning(f"企业版 model 模块不存在，跳过注册: {e}")
+        except Exception as e:
+            logger.error(f"注册企业版 model 时发生错误: {e}")
 
     # 初始化 Quart App
     app = get_app()

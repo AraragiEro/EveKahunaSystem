@@ -437,6 +437,73 @@ const handleResize = () => {
 // ResizeObserver 实例
 let containerObserver: ResizeObserver | null = null
 
+// 响应式布局相关
+const isLargeScreen = ref(window.innerWidth >= 1920)
+const splitPosition = ref(50) // 分割线位置，百分比
+const isDragging = ref(false)
+const splitContainerRef = ref<HTMLElement>()
+
+// 监听窗口大小变化
+const handleWindowResize = () => {
+    isLargeScreen.value = window.innerWidth >= 1920
+    if (chartInstance) {
+        chartInstance.resize()
+    }
+}
+
+// 拖拽分割线相关
+let resizeTimer: number | null = null
+
+const startDrag = (e: MouseEvent) => {
+    if (!isLargeScreen.value) return
+    isDragging.value = true
+    document.addEventListener('mousemove', onDrag)
+    document.addEventListener('mouseup', stopDrag)
+    e.preventDefault()
+}
+
+const onDrag = (e: MouseEvent) => {
+    if (!isDragging.value || !splitContainerRef.value) return
+    
+    const container = splitContainerRef.value
+    const rect = container.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const percentage = (x / rect.width) * 100
+    
+    // 限制分割线位置在 20% 到 80% 之间
+    const clampedPercentage = Math.max(20, Math.min(80, percentage))
+    splitPosition.value = clampedPercentage
+    
+    // 使用防抖来优化图表调整性能
+    if (resizeTimer) {
+        cancelAnimationFrame(resizeTimer)
+    }
+    resizeTimer = requestAnimationFrame(() => {
+        if (chartInstance) {
+            chartInstance.resize()
+        }
+    })
+}
+
+const stopDrag = () => {
+    isDragging.value = false
+    document.removeEventListener('mousemove', onDrag)
+    document.removeEventListener('mouseup', stopDrag)
+    
+    // 清理防抖定时器
+    if (resizeTimer) {
+        cancelAnimationFrame(resizeTimer)
+        resizeTimer = null
+    }
+    
+    // 拖拽结束后重新调整图表大小
+    if (chartInstance) {
+        setTimeout(() => {
+            chartInstance?.resize()
+        }, 100)
+    }
+}
+
 // 监听数据变化
 watch(() => props.logisticsData, () => {
     updateChart()
@@ -447,6 +514,15 @@ watch(graphData, () => {
         updateChart()
     }
 }, { deep: true, immediate: false })
+
+// 监听响应式布局变化，重新调整图表大小
+watch(isLargeScreen, () => {
+    if (chartInstance) {
+        setTimeout(() => {
+            chartInstance?.resize()
+        }, 100)
+    }
+})
 
 // 组件挂载
 onMounted(async () => {
@@ -466,6 +542,8 @@ onMounted(async () => {
     
     // 响应式调整图表大小
     window.addEventListener('resize', handleResize)
+    // 监听窗口大小变化以更新响应式布局
+    window.addEventListener('resize', handleWindowResize)
 })
 
 // 组件卸载
@@ -483,6 +561,9 @@ onUnmounted(() => {
     }
     // 移除事件监听
     window.removeEventListener('resize', handleResize)
+    window.removeEventListener('resize', handleWindowResize)
+    // 清理拖拽事件
+    stopDrag()
 })
 
 </script>
@@ -497,8 +578,124 @@ onUnmounted(() => {
                 </div>
             </template>
             <div class="content-container">
-                <el-row :gutter="20">
-                    <!-- 图表区域 - 独占一行 -->
+                <!-- 大屏幕：图表和表格在同一行，中间有可拖动分割线 -->
+                <div 
+                    v-if="isLargeScreen" 
+                    ref="splitContainerRef"
+                    class="split-container"
+                >
+                    <div 
+                        class="split-pane chart-pane"
+                        :style="{ width: `${splitPosition}%` }"
+                    >
+                        <el-card shadow="never" class="chart-card">
+                            <template #header>
+                                <span>星系图</span>
+                            </template>
+                            <div ref="graphContainerRef" class="chart-container"></div>
+                        </el-card>
+                    </div>
+                    <div 
+                        class="split-divider"
+                        :class="{ dragging: isDragging }"
+                        @mousedown="startDrag"
+                    >
+                        <div class="split-handle"></div>
+                    </div>
+                    <div 
+                        class="split-pane table-pane"
+                        :style="{ width: `${100 - splitPosition}%` }"
+                    >
+                        <el-card shadow="never" class="table-card">
+                            <template #header>
+                                <span>运力表</span>
+                            </template>
+                            <el-table
+                                :data="tableData"
+                                :key="`logistics-table-${selectedPlan || 'default'}`"
+                                border
+                                max-height="80vh"
+                                show-overflow-tooltip
+                            >
+                                <el-table-column label="物品名称" prop="lack_type_name" width="150">
+                                    <template #default="{ row }">
+                                        <div 
+                                            class="copyable-cell" 
+                                            @click="copyCellContent(row.lack_type_name, '物品名称')"
+                                            :title="`点击复制: ${row.lack_type_name || ''}`"
+                                        >
+                                            {{ row.lack_type_name }}
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="总数量" prop="provide_quantity" width="150">
+                                    <template #default="{ row }">
+                                        <div 
+                                            class="copyable-cell" 
+                                            @click="copyCellContent(row.provide_quantity, '总数量')"
+                                            :title="`点击复制: ${row.provide_quantity || ''}`"
+                                        >
+                                            {{ formatAccounting(row.provide_quantity) }}
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="总体积 (m³)" prop="provide_volume" width="150">
+                                    <template #header>
+                                        <span>总体积 (m³)</span>
+                                        <div style="font-size: 12px; color: #909399; font-weight: normal; margin-top: 4px;">
+                                            总计: {{ formatAccounting(totalVolume) }}
+                                        </div>
+                                    </template>
+                                    <template #default="{ row }">
+                                        <div 
+                                            class="copyable-cell" 
+                                            @click="copyCellContent(row.provide_volume, '总体积')"
+                                            :title="`点击复制: ${row.provide_volume || ''}`"
+                                        >
+                                            {{ formatAccounting(row.provide_volume) }}
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="出发地" prop="provide_structure_name" width="250">
+                                    <template #default="{ row }">
+                                        <div 
+                                            class="copyable-cell" 
+                                            @click="copyCellContent(row.provide_structure_name, '出发地')"
+                                            :title="`点击复制: ${row.provide_structure_name || ''}`"
+                                        >
+                                            {{ row.provide_structure_name }}
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="目的地" prop="lack_structure_name" width="250">
+                                    <template #default="{ row }">
+                                        <div 
+                                            class="copyable-cell" 
+                                            @click="copyCellContent(row.lack_structure_name, '目的地')"
+                                            :title="`点击复制: ${row.lack_structure_name || ''}`"
+                                        >
+                                            {{ row.lack_structure_name }}
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="距离(Ly)" prop="provide_system_distance" width="100">
+                                    <template #default="{ row }">
+                                        <div 
+                                            class="copyable-cell" 
+                                            @click="copyCellContent(row.provide_system_distance, '距离')"
+                                            :title="`点击复制: ${row.provide_system_distance || ''}`"
+                                        >
+                                            {{ formatAccounting(row.provide_system_distance) }}
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </el-card>
+                    </div>
+                </div>
+                
+                <!-- 小屏幕：图表和表格各自独占一行 -->
+                <el-row v-else :gutter="20">
                     <el-col :span="24">
                         <el-card shadow="never" class="chart-card">
                             <template #header>
@@ -507,7 +704,6 @@ onUnmounted(() => {
                             <div ref="graphContainerRef" class="chart-container"></div>
                         </el-card>
                     </el-col>
-                    <!-- 表格区域 - 独占一行 -->
                     <el-col :span="24">
                         <el-card shadow="never" class="table-card">
                             <template #header>
@@ -621,19 +817,149 @@ onUnmounted(() => {
     padding: 0;
 }
 
+/* 分割容器样式 - 大屏幕时使用 */
+.split-container {
+    display: flex;
+    width: 100%;
+    height: 62vh;
+    min-height: 600px;
+    position: relative;
+}
+
+.split-pane {
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-pane {
+    flex-shrink: 0;
+}
+
+.table-pane {
+    flex-shrink: 0;
+}
+
+/* 分割线样式 */
+.split-divider {
+    width: 4px;
+    background-color: #e4e7ed;
+    cursor: col-resize;
+    position: relative;
+    flex-shrink: 0;
+    user-select: none;
+    transition: background-color 0.2s;
+}
+
+.split-divider:hover {
+    background-color: #409eff;
+}
+
+.split-divider.dragging {
+    background-color: #409eff;
+}
+
+.split-handle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px;
+    height: 40px;
+    background-color: #c0c4cc;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.split-handle::before,
+.split-handle::after {
+    content: '';
+    position: absolute;
+    width: 2px;
+    height: 12px;
+    background-color: #909399;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.split-handle::before {
+    left: calc(50% - 4px);
+}
+
+.split-handle::after {
+    left: calc(50% + 4px);
+}
+
+.split-divider:hover .split-handle,
+.split-divider.dragging .split-handle {
+    background-color: #409eff;
+}
+
+.split-divider:hover .split-handle::before,
+.split-divider:hover .split-handle::after,
+.split-divider.dragging .split-handle::before,
+.split-divider.dragging .split-handle::after {
+    background-color: #fff;
+}
+
 .chart-card {
-    margin-bottom: 20px;
+    margin-bottom: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-card :deep(.el-card__body) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 20px;
 }
 
 .table-card {
     height: 100%;
+    display: flex;
+    flex-direction: column;
+    margin-left: 0;
+}
+
+.table-card :deep(.el-card__body) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 20px;
+}
+
+/* 小屏幕时的样式 */
+@media (max-width: 1919px) {
+    .chart-card {
+        margin-bottom: 20px;
+    }
+    
+    .chart-card :deep(.el-card__body) {
+        padding: 20px;
+    }
+    
+    .table-card {
+        margin-left: 0;
+    }
+    
+    .chart-container {
+        height: 80vh;
+        min-height: 400px;
+    }
 }
 
 .chart-container {
     width: 100%;
-    max-height: 80vh;
+    height: 100%;
     min-height: 400px;
-    height: 80vh;
+    flex: 1;
 }
 
 .copyable-cell {

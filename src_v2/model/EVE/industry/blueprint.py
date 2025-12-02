@@ -3,6 +3,7 @@ from typing import Callable, Optional, List
 from cachetools import LRUCache
 import asyncio
 from sqlalchemy import select
+from aiocache import cached
 
 from ..sde import SdeUtils
 from ..sde.sde_builder import IndustryActivityMaterials, IndustryActivityProducts, IndustryBlueprints, InvTypes, IndustryActivities
@@ -16,6 +17,14 @@ from src_v2.core.log import logger
 # 限制并发任务数量的信号量，防止连接池耗尽
 # 设置为 50，确保不超过连接池大小（200）的合理比例
 
+class Lock:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+    
+    def reset_lock(self):
+        self.lock = asyncio.Lock()
+lock = Lock()
+
 def async_lru_cache(maxsize: int = 128):
     """
     异步LRU缓存装饰器
@@ -23,7 +32,6 @@ def async_lru_cache(maxsize: int = 128):
     """
     def decorator(func: Callable) -> Callable:
         cache = LRUCache(maxsize=maxsize)
-        lock = asyncio.Lock()
         
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -35,7 +43,7 @@ def async_lru_cache(maxsize: int = 128):
                 return cache[key]
             
             # 如果缓存未命中，加锁执行函数并缓存结果
-            async with lock:
+            async with lock.lock:
                 # 双重检查，可能在等待锁时其他协程已经缓存了结果
                 if key in cache:
                     return cache[key]
@@ -69,7 +77,7 @@ class BPManager:
     }
 
     @classmethod
-    @async_lru_cache(maxsize=1000)
+    @cached(ttl=3600)
     async def get_bp_materials(cls, type_id: int) -> dict:
         async with (await get_db_manager()).get_session() as session:
             stmt = (
@@ -85,7 +93,7 @@ class BPManager:
             return {row[0]: row[1] for row in result}
 
     @classmethod
-    @async_lru_cache(maxsize=1000)
+    @cached(ttl=3600)
     async def get_bp_product_quantity_typeid(cls, type_id: int) -> int:
         try:
             #45732是一个测试用数据，会导致误判，需要特殊处理
@@ -124,7 +132,7 @@ class BPManager:
     #              .where(IndustryActivityProducts.productTypeID == type_id)).scalar()
 
     @classmethod
-    @async_lru_cache(maxsize=100)
+    @cached(ttl=3600)
     async def get_bp_id_by_prod_typeid(cls, type_id: int) -> Optional[int]:
         async with (await get_db_manager()).get_session() as session:
             # 优先选择制造活动（activityID == 1），其次选择反应活动（activityID == 11）
@@ -141,7 +149,7 @@ class BPManager:
             return result.scalar_one_or_none()
 
     @classmethod
-    @async_lru_cache(maxsize=100)
+    @cached(ttl=3600)
     async def get_bp_id_by_pbpname(cls, bp_name) -> Optional[int]:
         bp_maybe_type_id = await SdeUtils.get_id_by_name(bp_name)
         if not bp_maybe_type_id:
@@ -158,7 +166,7 @@ class BPManager:
         return None
 
     @classmethod
-    @async_lru_cache(maxsize=1000)
+    @cached(ttl=3600)
     async def check_product_id_existence(cls, product_type_id: int) -> bool:
         async with (await get_db_manager()).get_session() as session:
             stmt = (
@@ -170,7 +178,7 @@ class BPManager:
             return result.first() is not None
 
     @classmethod
-    @async_lru_cache(maxsize=1000)
+    @cached(ttl=3600)
     async def get_production_time(cls, product_id: int) -> int:
         """
         获取指定产品的制造活动时间（秒）
@@ -189,7 +197,7 @@ class BPManager:
         return 0
 
     @classmethod
-    @async_lru_cache(maxsize=1000)
+    @cached(ttl=3600)
     async def get_activity_time_by_typeid(cls, product_id: int) -> int:
         """
         获取指定产品的制造活动时间（秒）
@@ -208,7 +216,7 @@ class BPManager:
         return 0
 
     @classmethod
-    @async_lru_cache(maxsize=1000)
+    @cached(ttl=3600)
     async def get_chunk_runs(cls, product_id: int) -> int:
         """
         计算单个蓝图每日可完成的制造流程数
@@ -223,7 +231,7 @@ class BPManager:
         return max(1, 86400 // production_time)  # 86400秒 = 1天
 
     @classmethod
-    @async_lru_cache(maxsize=500)
+    @cached(ttl=3600)
     async def get_activity_id_by_product_typeid(cls, product_typeid: int) -> Optional[int]:
         async with (await get_db_manager()).get_session() as session:
             # 优先选择制造活动（activityID == 1），其次选择反应活动（activityID == 11）
@@ -239,7 +247,7 @@ class BPManager:
             return result.scalar_one_or_none()
 
     @classmethod
-    @async_lru_cache(maxsize=1000)
+    @cached(ttl=3600)
     async def get_blueprint_details(cls, product_id: int) -> Optional[dict]:
         """
         根据产品ID返回蓝图的详细信息字典。
@@ -334,7 +342,7 @@ class BPManager:
             return result.scalar_one_or_none()
 
     @classmethod
-    @async_lru_cache(maxsize=1000)
+    @cached(ttl=3600)
     async def get_productionmax_by_bpid(cls, blueprint_id: int):
         product_id = cls.get_typeid_by_bpid(blueprint_id)
         meta = await SdeUtils.get_metaname_by_typeid(product_id)
@@ -455,7 +463,7 @@ class BPManager:
             await tqdm_manager.update_mission("init_bp_data_to_neo4j", 1)
 
     @classmethod
-    @async_lru_cache(maxsize=1000)
+    @cached(ttl=3600)
     async def get_bp_name_by_typeid(cls, type_id: int, zh=False):
         """
         根据产品type_id获取对应蓝图的名称
