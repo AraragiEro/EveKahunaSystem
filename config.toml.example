@@ -86,7 +86,8 @@ Parse_Whitelist = [
     "categories",
     "marketGroups",
     "mapSolarSystems",
-    "mapRegions"
+    "mapRegions",
+    "typeMaterials",
 ]
 # 是否启用自动更新检查
 Auto_Update = false

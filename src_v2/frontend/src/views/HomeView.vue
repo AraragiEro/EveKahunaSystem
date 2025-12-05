@@ -65,8 +65,9 @@ const todoItems = ref<TodoItem[]>([
           { id: 'market-price', title: '市场价格查看', completed: true },
           { id: 'price-monitor', title: '自选清单的价格监控', completed: true },
           { id: 'profit-calc', title: '自选产品清单的利润计算', completed: true },
-          { id: 'product-detail', title: '市场单品的详细数据计算【成本、利润等】', completed: false },
-          { id: 'region-profit', title: '特定星域的市场利润计算', completed: false }
+          { id: 'product-detail', title: '市场单品的详细数据计算【成本、利润等】', completed: true },
+          { id: 'region-profit', title: '特定星域的市场利润计算', completed: true },
+          { id: 'market-analysis', title: '超大列表时拉取粗算成本的能力', completed: false },
         ]
       }
     ]
@@ -79,7 +80,7 @@ const todoItems = ref<TodoItem[]>([
       { id: 'permission', title: '服务权限分级', completed: true },
       { id: 'invite-code', title: '邀请码生成', completed: true },
       { id: 'help-doc', title: '内建使用说明', completed: true },
-      { id: 'performance', title: '性能优化', completed: false },
+      { id: 'performance', title: '计划计算的性能优化', completed: true },
       { id: 'ux-improve', title: '用户体验改进', completed: false,
         children: [
           { id: 'ux-improve-1', title: '带管理员账号的初始化', completed: true },
@@ -90,6 +91,7 @@ const todoItems = ref<TodoItem[]>([
         children: [
           { id: 'getting-start', title: '如何开始', completed: true },
           { id: 'industry-plan', title: '工业计划', completed: true },
+          { id: 'industry-plan', title: 'Ishtar计划案例', completed: true },
           { id: 'storage', title: '库存管理', completed: true },
           { id: 'setting', title: '设置', completed: true },
         ]

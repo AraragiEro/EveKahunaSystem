@@ -292,6 +292,92 @@ class Neo4jAssetUtils:
                 node_dict = dict(node)
                 nodes.append(node_dict)
             return nodes
+
+    @staticmethod
+    async def get_forbidden_structure_nodes_by_owner(owner_id: int) -> List[Dict]:
+        """查找该owner的asset连接的所有forbidden_structure_node（structure_name为"Forbidden unknown"）
+        
+        Args:
+            owner_id: 所有者ID
+            
+        Returns:
+            Structure节点列表（字典格式），每个节点包含structure_id和连接的asset信息
+        """
+        async with neo4j_manager.get_session() as session:
+            query = """
+            MATCH (a:Asset {owner_id: $owner_id})-[:LOCATED_IN]->(s:Structure)
+            WHERE s.structure_name = "Forbidden unknown"
+            RETURN DISTINCT s, a
+            """
+            result = await session.run(query, {"owner_id": owner_id})
+            structure_map = {}
+            async for record in result:
+                structure_node = record["s"]
+                asset_node = record["a"]
+                structure_id = structure_node.get("structure_id")
+                if structure_id not in structure_map:
+                    structure_dict = dict(structure_node)
+                    structure_dict['labels'] = list(structure_node.labels)
+                    structure_dict['connected_assets'] = []
+                    structure_map[structure_id] = structure_dict
+                asset_dict = dict(asset_node)
+                asset_dict['labels'] = list(asset_node.labels)
+                structure_map[structure_id]['connected_assets'].append(asset_dict)
+            return list(structure_map.values())
+
+    @staticmethod
+    async def update_forbidden_structure_node(structure_id: int, structure_dict: Dict, solar_system_dict: Dict):
+        """更新forbidden_structure_node：删除连接到unknown system的边，更新节点信息，创建到正确星系的连接
+        
+        Args:
+            structure_id: Structure节点ID
+            structure_dict: Structure节点属性字典
+            solar_system_dict: SolarSystem节点属性字典
+            
+        Returns:
+            bool: 是否成功更新
+        """
+        async with neo4j_manager.get_transaction() as tx:
+            query = """
+            // 查找Structure节点
+            MATCH (s:Structure {structure_id: $structure_id})
+            // 删除连接到unknown system的边（如果存在）
+            OPTIONAL MATCH (s)-[r:LOCATED_IN]->(sys:SolarSystem)
+            WHERE sys.system_id = 'unknown' OR sys.system_name = 'unknown'
+            DELETE r
+            WITH s
+            // 更新Structure节点属性
+            SET s.structure_name = $structure_name,
+                s.structure_type = $structure_type,
+                s.system_id = $system_id,
+                s.system_name = $system_name,
+                s.region_id = $region_id,
+                s.region_name = $region_name
+            // 创建/更新SolarSystem节点
+            MERGE (sys:SolarSystem {system_id: $system_id})
+            SET sys.system_name = $system_name,
+                sys.region_id = $region_id,
+                sys.region_name = $region_name
+            WITH s, sys
+            // 删除所有旧的LOCATED_IN边（如果有的话）
+            OPTIONAL MATCH (s)-[old_r:LOCATED_IN]->(old_sys:SolarSystem)
+            DELETE old_r
+            WITH s, sys
+            // 创建新的LOCATED_IN边
+            MERGE (s)-[:LOCATED_IN]->(sys)
+            RETURN s
+            """
+            result = await tx.run(query, {
+                'structure_id': structure_id,
+                'structure_name': structure_dict.get("structure_name"),
+                'structure_type': structure_dict.get("structure_type"),
+                'system_id': solar_system_dict.get("system_id"),
+                'system_name': solar_system_dict.get("system_name"),
+                'region_id': solar_system_dict.get("region_id"),
+                'region_name': solar_system_dict.get("region_name")
+            })
+            record = await result.single()
+            return record is not None
             
     @staticmethod
     async def delete_assets_by_owner_id(owner_id: int):

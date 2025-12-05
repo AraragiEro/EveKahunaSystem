@@ -628,22 +628,11 @@ onUnmounted(() => {
           <!-- 立刻拉取 -->
           <!-- 如果上次拉取时间超过5分钟，或者从未拉取过，则可点击 -->
           <el-tooltip :content="canPullNow(row) ? '可以立刻拉取' : (isPulling(row) ? '正在拉取中...' : formatRemainingTime(getRemainingSeconds(row.last_pull_time)))" placement="top">
-            <el-button 
-              v-if="canPullNow(row)" 
+            <el-button
               size="small" 
               type="primary" 
               plain 
               @click="handlePullMission(row)"
-            >
-              <el-icon style="margin-right:4px"><Refresh /></el-icon>
-              立刻拉取
-            </el-button>
-            <el-button 
-              v-else 
-              size="small" 
-              type="primary" 
-              plain 
-              disabled
             >
               <el-icon style="margin-right:4px"><Refresh /></el-icon>
               立刻拉取

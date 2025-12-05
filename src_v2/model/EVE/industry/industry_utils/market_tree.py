@@ -41,7 +41,7 @@ async def get_market_tree(node) -> List[Dict]:
                     node_dict = dict(node_obj)
                     node_dict["hasChildren"] = True
                     node_dict['row_id'] = node_dict['market_group_id']
-                    node_dict["name"] = node_dict["name_id_zh"]
+                    node_dict["name"] = node_dict.get("name_id_zh", node_dict.get("name", ""))
                     nodes.append(node_dict)
             return nodes
         else:
@@ -58,7 +58,7 @@ async def get_market_tree(node) -> List[Dict]:
                         bp_id = await BPM.get_bp_id_by_prod_typeid(node_dict_b["type_id"])
                         node_dict_b["hasChildren"] = False
                         node_dict_b["row_id"] = node_dict_b["type_id"]
-                        node_dict_b["name"] = node_dict_b["type_name_zh"]
+                        node_dict_b["name"] = node_dict_b.get("type_name_zh", node_dict_b.get("type_name", ""))
                         if bp_id:
                             node_dict_b["can_add_plan"] = True
                         else:
@@ -66,7 +66,7 @@ async def get_market_tree(node) -> List[Dict]:
                     else:
                         node_dict_b["hasChildren"] = True
                         node_dict_b['row_id'] = node_dict_b['market_group_id']
-                        node_dict_b["name"] = node_dict_b["name_id_zh"]
+                        node_dict_b["name"] = node_dict_b.get("name_id_zh", node_dict_b.get("name", ""))
                     nodes.append(node_dict_b)
             return nodes
 

@@ -21,6 +21,7 @@ from .inv_categories_model import InvCategories, process_inv_categories_row
 from .market_groups_model import MarketGroups, process_market_groups_row
 from .map_solar_systems_model import MapSolarSystems, process_map_solar_systems_row
 from .map_regions_model import MapRegions, process_map_regions_row
+from .type_materials_model import TypeMaterials, process_type_materials_row
 
 __all__ = [
     'SDEBuilder',
@@ -51,5 +52,7 @@ __all__ = [
     'process_map_solar_systems_row',
     'MapRegions',
     'process_map_regions_row',
+    'TypeMaterials',
+    'process_type_materials_row',
 ]
 

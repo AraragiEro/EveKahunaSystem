@@ -20,6 +20,7 @@ from .map_solar_systems_model import MapSolarSystems
 from .map_regions_model import MapRegions
 from .inv_categories_model import InvCategories
 from .inv_groups_model import InvGroups
+from .type_materials_model import TypeMaterials
 
 
 class SDEModelGenerator:
@@ -81,6 +82,10 @@ class SDEModelGenerator:
         # 特殊处理：invGroups 表
         if table_name == 'groups' or table_name == 'invGroups':
             return await self.create_inv_groups_table(conn)
+
+        # 特殊处理：typeMaterials 表（使用 SQLAlchemy 模型）
+        if table_name == "typeMaterials":
+            return await self.create_type_materials_table(conn)
         
         # 通用处理：其他表
         # 分析文件结构
@@ -383,6 +388,32 @@ class SDEModelGenerator:
         except Exception as e:
             logger.error(f"创建 InvGroups 表失败: {e}")
             import traceback
+            logger.error(traceback.format_exc())
+            return False
+    
+    async def create_type_materials_table(self, conn) -> bool:
+        """
+        创建 TypeMaterials 表（使用 SQLAlchemy 模型）
+        
+        Args:
+            conn: 数据库连接
+        
+        Returns:
+            是否成功
+        """
+        try:
+            from src_v2.core.database.connect_manager import PostgreDatabaseManager
+
+            db_manager = PostgreDatabaseManager()
+            # TypeMaterials 继承自 SDEModel，会被 registry 识别
+            await db_manager.create_default_table(conn, SDEModel)
+
+            logger.info("已创建/检查 TypeMaterials 表")
+            return True
+        except Exception as e:
+            logger.error(f"创建 TypeMaterials 表失败: {e}")
+            import traceback
+
             logger.error(traceback.format_exc())
             return False
     

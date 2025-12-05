@@ -13,6 +13,7 @@ from src_v2.core.utils import KahunaException, SingletonMeta, tqdm_manager
 from src_v2.model.EVE.eveesi import eveesi
 from src_v2.core.database.kahuna_database_utils_v2 import (
     EveMarketRegionHistoryStatisticDBUtils,
+    EveMarketRegionOrdersDBUtils,
 )
 from src_v2.core.database import model
 
@@ -33,6 +34,105 @@ class MarketManager(metaclass=SingletonMeta):
     def __init__(self):
         self.update_jita_price_lock = asyncio.Lock()
         self.update_frt_price_lock = asyncio.Lock()
+
+    async def _save_orders_to_database(self, region_id: int, orders: list[dict]):
+        """
+        将指定 region 的订单原始数据写入 PostgreSQL。
+        写入前会删除该 region 的所有历史订单。
+
+        :param region_id: 区域 ID
+        :param orders: 订单列表，元素示例：
+            {
+                "duration": 90,
+                "is_buy_order": false,
+                "issued": "2025-10-08T09:58:38Z",
+                "location_id": 60003760,
+                "min_volume": 1,
+                "order_id": 7157579777,
+                "price": 34000000,
+                "range": "region",
+                "system_id": 30000142,
+                "type_id": 89953,
+                "volume_remain": 1,
+                "volume_total": 1
+            }
+        """
+        if not orders:
+            return
+
+        try:
+            # 先删除该 region 的历史订单
+            await EveMarketRegionOrdersDBUtils.delete_by_region_id(region_id)
+
+            now = datetime.utcnow()
+            rows: list[dict] = []
+            for order in orders:
+                try:
+                    issued_raw = order.get("issued")
+                    issued_dt = None
+                    if isinstance(issued_raw, str):
+                        # 处理带 Z 的 ISO 字符串
+                        issued_str = issued_raw.replace("Z", "+00:00")
+                        issued_dt = datetime.fromisoformat(issued_str)
+                        # 如果是 offset-aware，转换为 UTC 后移除时区信息
+                        if issued_dt.tzinfo is not None:
+                            issued_dt = issued_dt.astimezone(timezone.utc).replace(tzinfo=None)
+                    elif isinstance(issued_raw, datetime):
+                        issued_dt = issued_raw
+                        # 如果是 offset-aware，转换为 UTC 后移除时区信息
+                        if issued_dt.tzinfo is not None:
+                            issued_dt = issued_dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+                    row = {
+                        "order_id": order["order_id"],
+                        "type_id": order["type_id"],
+                        "region_id": region_id,
+                        "system_id": order.get("system_id"),
+                        "location_id": order.get("location_id"),
+                        "price": order["price"],
+                        "volume_total": order["volume_total"],
+                        "volume_remain": order["volume_remain"],
+                        "min_volume": order["min_volume"],
+                        "is_buy_order": order["is_buy_order"],
+                        "duration": order["duration"],
+                        "issued": issued_dt,
+                        "range": order.get("range"),
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                except Exception as e:
+                    logger.error(f"转换订单数据失败 region_id={region_id}, order_id={order.get('order_id')}: {e}", exc_info=True)
+                    raise
+
+                rows.append(row)
+            
+            await tqdm_manager.add_mission(f"save_orders_to_database_{region_id}", len(rows))
+            if rows:
+                # 分批插入，避免超过 PostgreSQL 参数限制（32767个参数）
+                # 每个订单有15个字段，所以每批最多 2000 条订单（2000 * 15 = 30000 < 32767）
+                batch_size = 2000
+                total_rows = len(rows)
+                
+                for i in range(0, total_rows, batch_size):
+                    batch = rows[i:i + batch_size]
+                    try:
+                        await EveMarketRegionOrdersDBUtils.insert_many(batch)
+                        logger.debug(f"成功插入订单批次 region_id={region_id}, 批次 {i//batch_size + 1}/{(total_rows + batch_size - 1)//batch_size}, 数量={len(batch)}")
+                        await tqdm_manager.update_mission(f"save_orders_to_database_{region_id}", len(batch))
+                    except Exception as batch_error:
+                        logger.error(
+                            f"插入订单批次失败 region_id={region_id}, 批次 {i//batch_size + 1}, 数量={len(batch)}: {batch_error}",
+                            exc_info=True,
+                        )
+                        # 继续处理下一批次，不中断整个流程
+                        await tqdm_manager.update_mission(f"save_orders_to_database_{region_id}", len(batch))
+            await tqdm_manager.complete_mission(f"save_orders_to_database_{region_id}")
+        except Exception as e:
+            # 写库失败不影响后续 Redis 逻辑
+            logger.error(
+                f"写入区域市场订单数据失败 region_id={region_id}: {e}",
+                exc_info=True,
+            )
 
     async def _batch_insert_redis(self, market_zone: str, batch: list):
         """批量插入Redis的辅助方法"""
@@ -66,8 +166,13 @@ class MarketManager(metaclass=SingletonMeta):
 
         type_price_cache = {}
         frt_order = await eveesi.markets_structures(character.ac_token, FRT_4H_STRUCTURE_ID)
+
+        # 扁平化订单列表，便于写库
+        flat_frt_orders: list[dict] = []
         for order_list in frt_order:
             for order in order_list:
+                flat_frt_orders.append(order)
+
                 if order["type_id"] not in type_price_cache:
                     type_price_cache[order["type_id"]] = {
                         "max_buy": 0,
@@ -75,9 +180,16 @@ class MarketManager(metaclass=SingletonMeta):
                     }
                 else:
                     if order["is_buy_order"]:
-                        type_price_cache[order["type_id"]]["max_buy"] = max(type_price_cache[order["type_id"]]["max_buy"], order["price"])
+                        type_price_cache[order["type_id"]]["max_buy"] = max(
+                            type_price_cache[order["type_id"]]["max_buy"], order["price"]
+                        )
                     else:
-                        type_price_cache[order["type_id"]]["min_sell"] = min(type_price_cache[order["type_id"]]["min_sell"], order["price"])
+                        type_price_cache[order["type_id"]]["min_sell"] = min(
+                            type_price_cache[order["type_id"]]["min_sell"], order["price"]
+                        )
+
+        # 保存原始订单到 Postgre
+        await self._save_orders_to_database(REGION_VALE_ID, flat_frt_orders)
         
         # 分批处理并并发插入Redis
         batch_size = 100  # 每批处理100个type_id
@@ -92,7 +204,7 @@ class MarketManager(metaclass=SingletonMeta):
         # 等待所有批次完成
         await asyncio.gather(*tasks)
         
-        await rdm.r.set(f"market_update_flag:frt", "1", ex=60*60*4)
+        await rdm.r.set(f"market_update_flag:frt", "1", ex=60*60*1)
 
     async def update_jita_price(self):
         async with self.update_jita_price_lock:
@@ -102,11 +214,16 @@ class MarketManager(metaclass=SingletonMeta):
 
         type_price_cache = {}
         jita_order = await eveesi.markets_region_orders(REGION_FORGE_ID)
+
+        # 仅保留 Jita 交易中心的订单，并构造用于写库的列表
+        flat_jita_orders: list[dict] = []
         for order_list in jita_order:
             for order in order_list:
                 if order["location_id"] != JITA_TRADE_HUB_STRUCTURE_ID:
                     continue
-                    
+
+                flat_jita_orders.append(order)
+
                 if order["type_id"] not in type_price_cache:
                     type_price_cache[order["type_id"]] = {
                         "max_buy": 0,
@@ -114,14 +231,22 @@ class MarketManager(metaclass=SingletonMeta):
                     }
                 else:
                     if order["is_buy_order"]:
-                        type_price_cache[order["type_id"]]["max_buy"] = max(type_price_cache[order["type_id"]]["max_buy"], order["price"])
+                        type_price_cache[order["type_id"]]["max_buy"] = max(
+                            type_price_cache[order["type_id"]]["max_buy"], order["price"]
+                        )
                     else:
-                        type_price_cache[order["type_id"]]["min_sell"] = min(type_price_cache[order["type_id"]]["min_sell"], order["price"])
+                        type_price_cache[order["type_id"]]["min_sell"] = min(
+                            type_price_cache[order["type_id"]]["min_sell"], order["price"]
+                        )
+
+        # 保存原始订单到 Postgre
+        await self._save_orders_to_database(REGION_FORGE_ID, flat_jita_orders)
         
         # 分批处理并并发插入Redis
         batch_size = 100  # 每批处理100个type_id
         items = list(type_price_cache.items())
         tasks = []
+        
         
         for i in range(0, len(items), batch_size):
             batch = items[i:i + batch_size]
@@ -131,7 +256,7 @@ class MarketManager(metaclass=SingletonMeta):
         # 等待所有批次完成
         await asyncio.gather(*tasks)
 
-        await rdm.r.set(f"market_update_flag:jita", "1", ex=60*60*4)
+        await rdm.r.set(f"market_update_flag:jita", "1", ex=60*60*1)
 
     async def update_type_id_market_region_history(self, type_id: int, region_id: int):
         """
@@ -406,3 +531,15 @@ class MarketManager(metaclass=SingletonMeta):
                 await rdm.r.set(flag_key, "1", ex=3600)  # 1小时后过期
             except Exception as redis_error:
                 logger.error(f"设置Redis标志失败: {redis_error}", exc_info=True)
+
+    async def get_jita_buy_price(self, type_id: int) -> float:
+        price = await rdm.r.hget(f"market_price:jita:{type_id}", "max_buy")
+        if not price:
+            return 0
+        return float(price)
+
+    async def get_jita_sell_price(self, type_id: int) -> float:
+        price = await rdm.r.hget(f"market_price:jita:{type_id}", "min_sell")
+        if not price:
+            return 0
+        return float(price)

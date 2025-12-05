@@ -3,6 +3,7 @@ import re
 import traceback
 import asyncio
 import json
+import math
 
 from quart import Quart, request, jsonify, g, Blueprint, redirect
 from quart import current_app as app
@@ -21,6 +22,7 @@ from src_v2.core.database.neo4j_utils import Neo4jIndustryUtils as NIU
 from src_v2.core.utils import KahunaException
 from src_v2.model.EVE.industry.plan_configflow_operate import ConfigFlowOperateCenter
 from src_v2.model.EVE.sde.utils import SdeUtils
+from src_v2.model.EVE.industry.industry_utils.compressedAsteroid import CompressedAsteroidUtils
 
 api_industry_bp = Blueprint('api_industry', __name__, url_prefix='/api/EVE/industry')
 
@@ -499,3 +501,156 @@ async def get_labor_force_data():
     except Exception as e:
         logger.error(f"获取劳动力数据失败: {traceback.format_exc()}")
         return jsonify({"message": "获取劳动力数据失败", "status": 500}), 500
+
+@api_industry_bp.route("/getCompressedAsteroidData", methods=["POST"])
+@auth_required
+@role_required(["vip_alpha"], 402, "仅ALPHA订阅者可获取压缩矿数据。")
+async def get_compressed_asteroid_data():
+    data = await request.json
+    mineral_data = data.get('mineral_data', [])
+    waste_penalty = data.get('waste_penalty', 0.1)  # 浪费惩罚系数，默认0.1
+    refinement_rate = data.get('refinement_rate', 0.906)  # 化矿率，默认0.906
+    purchase_mode = data.get('purchase_mode', '扫单')  # 采购模式，默认扫单
+    quantity_mode = data.get('quantity_mode', '缺失')  # 数量模式，默认缺失
+    user_id = g.current_user["user_id"]
+
+    logger.info(f"获取压缩矿数据: {mineral_data}, waste_penalty: {waste_penalty}, refinement_rate: {refinement_rate}, purchase_mode: {purchase_mode}, quantity_mode: {quantity_mode}")
+    try:
+        # 验证输入数据
+        if not isinstance(mineral_data, list):
+            return jsonify({"message": "mineral_data 必须是数组", "status": 400}), 400
+        
+        # 如果 mineral_data 为空数组，返回空数据标识
+        if len(mineral_data) == 0:
+            empty_data = {
+                "purcheses_res": {},
+                "excess_minerals_res": {},
+                "mineral_yields": {},
+                "total_cost": 0,
+                "total_excess_price": 0,
+                "is_empty": True  # 标识为空数据
+            }
+            return jsonify({"data": empty_data, "status": 200}), 200
+        
+        # 将 mineral_data 转换为 mineral_requirements 格式
+        # mineral_data 格式: [{type_id, type_name, quantity, real_quantity}, ...]
+        # mineral_requirements 格式: {mineral_id: required_quantity}
+        mineral_requirements = {}
+        for mineral in mineral_data:
+            mineral_id = mineral.get('type_id')
+            # 根据数量模式选择使用 quantity 或 real_quantity
+            if quantity_mode == '缺失':
+                quantity = mineral.get('real_quantity', 0)
+            else:
+                quantity = mineral.get('quantity', 0)
+
+            if not mineral_id:
+                logger.warning(f"跳过无效的矿物数据: {mineral}")
+                continue
+            
+            if quantity <= 0:
+                logger.warning(f"跳过数量为0或负数的矿物: type_id={mineral_id}")
+                continue
+            
+            mineral_requirements[mineral_id] = float(quantity)
+        
+        # 如果 mineral_requirements 为空，返回空数据标识
+        if not mineral_requirements:
+            empty_data = {
+                "purcheses_res": {},
+                "excess_minerals_res": {},
+                "mineral_yields": {},
+                "total_cost": 0,
+                "total_excess_price": 0,
+                "is_empty": True  # 标识为空数据
+            }
+            return jsonify({"data": empty_data, "status": 200}), 200
+        
+        logger.info(f"矿物需求: {mineral_requirements}")
+        
+        # 创建压缩矿工具实例并初始化数据
+        compressed_asteroid_utils = CompressedAsteroidUtils()
+        await compressed_asteroid_utils._init_type_material_data()
+        
+        # 调用优化求解器
+        result = await compressed_asteroid_utils.optimize(
+            mineral_requirements=mineral_requirements,
+            waste_penalty=waste_penalty,
+            refinement_rate=refinement_rate,
+            purchase_mode=purchase_mode
+        )
+        if result.get('status') != 'Optimal':
+            return jsonify({"message": "优化失败", "status": 500}), 500
+        asteroid_purchases = result.get('solution').get('ore_purchases')
+        excess_minerals = result.get('solution').get('excess_minerals')
+
+        purcheses_res = {}
+        total_cost = 0
+        for ore_id, quantity in asteroid_purchases.items():
+            volume = await SdeUtils.get_volume_by_type_id(ore_id)
+            purcheses_res[ore_id] = {
+                "quantity": quantity,
+                "total_price": result.get('solution').get('ore_price_details').get(ore_id).get('total_price'),
+                "name": await SdeUtils.get_name_by_id(ore_id),
+                "name_zh": await SdeUtils.get_cn_name_by_id(ore_id),
+                "avrprice": result.get('solution').get('ore_price_details').get(ore_id).get('unit_price'),
+                "volume": volume if volume is not None else 0.0,
+            }
+
+        excess_minerals_res = {}
+        total_excess_price = 0
+        for mineral_id, quantity in excess_minerals.items():
+            excess_minerals_res[mineral_id] = {
+                "quantity": quantity,
+                "name": await SdeUtils.get_name_by_id(mineral_id),
+                "name_zh": await SdeUtils.get_cn_name_by_id(mineral_id),
+                "price": await MarketManager().get_jita_buy_price(mineral_id),
+            }
+            total_excess_price += quantity * await MarketManager().get_jita_buy_price(mineral_id)
+
+        # 计算每种矿石的矿物产出
+        mineral_yields = {}
+        refinement_rate = compressed_asteroid_utils._refinement_rate
+        
+        # 遍历购买的矿石
+        for ore_id, quantity in asteroid_purchases.items():
+            if quantity <= 0:
+                continue
+            
+            # 获取该矿石产出的所有矿物
+            ore_mineral_yields = compressed_asteroid_utils._type_material_data_dict.get(ore_id, {})
+            if not ore_mineral_yields:
+                continue
+            
+            mineral_yields[ore_id] = {}
+            is_ice = compressed_asteroid_utils._is_ice_ore(ore_id)
+            for mineral_id, mineral_yield in ore_mineral_yields.items():
+                if mineral_yield <= 0:
+                    continue
+                if is_ice:
+                    # 冰矿：mineral_yield 是基于1份的产出
+                    contribution = quantity * mineral_yield * refinement_rate
+                else:
+                    # 标准/卫星矿石：mineral_yield 是基于100份的产出
+                    contribution = quantity * (mineral_yield / 100) * refinement_rate
+                yield_quantity = math.floor(contribution)
+                quantity_needed = mineral_requirements.get(mineral_id, 0)
+                mineral_yields[ore_id][mineral_id] = [yield_quantity, quantity_needed]
+
+        logger.info(f"优化结果状态: {result.get('status')}")
+        
+        data = {
+            "purcheses_res": purcheses_res,
+            "excess_minerals_res": excess_minerals_res,
+            "mineral_yields": mineral_yields,
+            "total_cost": total_cost,
+            "total_excess_price": total_excess_price,
+        }
+        return jsonify({"data": data, "status": 200}), 200
+        
+    except KahunaException as e:
+        logger.error(f"获取压缩矿数据失败 (KahunaException): {str(e)}")
+        return jsonify({"message": str(e), "status": 500}), 500
+    except Exception as e:
+        logger.error(f"获取压缩矿数据失败: {traceback.format_exc()}")
+        return jsonify({"message": f"获取压缩矿数据失败: {str(e)}", "status": 500}), 500

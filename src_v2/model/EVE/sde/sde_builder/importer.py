@@ -22,6 +22,7 @@ from .inv_categories_model import InvCategories, process_inv_categories_row
 from .market_groups_model import MarketGroups, process_market_groups_row
 from .map_solar_systems_model import MapSolarSystems, process_map_solar_systems_row
 from .map_regions_model import MapRegions, process_map_regions_row
+from .type_materials_model import TypeMaterials, process_type_materials_row
 
 
 class SDEImporter:
@@ -327,6 +328,11 @@ class SDEImporter:
         if table_name == 'mapRegions':
             logger.debug("使用特殊处理导入 mapRegions 表")
             return await self.import_map_regions(conn, file_path)
+
+        # 特殊处理：typeMaterials 表
+        if table_name == 'typeMaterials':
+            logger.debug("使用特殊处理导入 typeMaterials 表")
+            return await self.import_type_materials(conn, file_path)
         
         # 通用处理：其他表
         # 解析文件获取数据
@@ -707,12 +713,6 @@ class SDEImporter:
         logger.info(f"使用特殊处理导入 InvGroups 表: {file_path}")
         
         table_name = 'invGroups'
-        columns = [
-            'groupID', 'categoryID', 'groupName_en', 'groupName_zh', 'iconID',
-            'useBasePrice', 'anchored', 'anchorable', 'fittableNonSingleton', 'published'
-        ]
-        
-        batch = []
         total_count = 0
         line_count = 0
         
@@ -729,18 +729,34 @@ class SDEImporter:
                         
                         # 使用特殊处理函数处理数据
                         processed_row = process_inv_groups_row(raw_row)
-                        
-                        batch.append(processed_row)
                         line_count += 1
-                        
-                        # 达到批量大小时执行插入
-                        if len(batch) >= self.batch_size:
-                            await self.bulk_insert_via_sql(conn, table_name, columns, batch)
-                            total_count += len(batch)
-                            batch = []
-                            
-                            if total_count % 50000 == 0:
-                                logger.info(f"已导入 {total_count} 条记录到 {table_name}")
+
+                        # 使用 UPSERT，避免因主键重复 (groupID) 导致导入失败
+                        insert_sql = text(
+                            """
+                            INSERT INTO "invGroups"
+                                ("groupID", "categoryID", "groupName_en", "groupName_zh",
+                                 "iconID", "useBasePrice", "anchored", "anchorable",
+                                 "fittableNonSingleton", "published")
+                            VALUES
+                                (:groupID, :categoryID, :groupName_en, :groupName_zh,
+                                 :iconID, :useBasePrice, :anchored, :anchorable,
+                                 :fittableNonSingleton, :published)
+                            ON CONFLICT ("groupID") DO UPDATE
+                            SET
+                                "categoryID"          = EXCLUDED."categoryID",
+                                "groupName_en"        = EXCLUDED."groupName_en",
+                                "groupName_zh"        = EXCLUDED."groupName_zh",
+                                "iconID"              = EXCLUDED."iconID",
+                                "useBasePrice"        = EXCLUDED."useBasePrice",
+                                "anchored"            = EXCLUDED."anchored",
+                                "anchorable"          = EXCLUDED."anchorable",
+                                "fittableNonSingleton"= EXCLUDED."fittableNonSingleton",
+                                "published"           = EXCLUDED."published"
+                            """
+                        )
+                        await conn.execute(insert_sql, processed_row)
+                        total_count += 1
                     
                     except json.JSONDecodeError as e:
                         logger.warning(f"第 {line_count + 1} 行 JSON 解析失败: {e}")
@@ -748,11 +764,6 @@ class SDEImporter:
                     except Exception as e:
                         logger.warning(f"第 {line_count + 1} 行处理失败: {e}")
                         continue
-            
-            # 插入剩余数据
-            if batch:
-                await self.bulk_insert_via_sql(conn, table_name, columns, batch)
-                total_count += len(batch)
             
             logger.info(f"InvGroups 表导入完成: {file_path}, 共 {total_count} 条记录")
             return total_count
@@ -777,11 +788,6 @@ class SDEImporter:
         logger.info(f"使用特殊处理导入 InvCategories 表: {file_path}")
         
         table_name = 'invCategories'
-        columns = [
-            'categoryID', 'categoryName_en', 'categoryName_zh', 'published', 'iconID'
-        ]
-        
-        batch = []
         total_count = 0
         line_count = 0
         
@@ -798,18 +804,25 @@ class SDEImporter:
                         
                         # 使用特殊处理函数处理数据
                         processed_row = process_inv_categories_row(raw_row)
-                        
-                        batch.append(processed_row)
                         line_count += 1
-                        
-                        # 达到批量大小时执行插入
-                        if len(batch) >= self.batch_size:
-                            await self.bulk_insert_via_sql(conn, table_name, columns, batch)
-                            total_count += len(batch)
-                            batch = []
-                            
-                            if total_count % 50000 == 0:
-                                logger.info(f"已导入 {total_count} 条记录到 {table_name}")
+
+                        # 使用 UPSERT 保证不会因重复主键失败（自动覆盖旧数据）
+                        insert_sql = text(
+                            """
+                            INSERT INTO "invCategories"
+                                ("categoryID", "categoryName_en", "categoryName_zh", "published", "iconID")
+                            VALUES
+                                (:categoryID, :categoryName_en, :categoryName_zh, :published, :iconID)
+                            ON CONFLICT ("categoryID") DO UPDATE
+                            SET
+                                "categoryName_en" = EXCLUDED."categoryName_en",
+                                "categoryName_zh" = EXCLUDED."categoryName_zh",
+                                "published"       = EXCLUDED."published",
+                                "iconID"          = EXCLUDED."iconID"
+                            """
+                        )
+                        await conn.execute(insert_sql, processed_row)
+                        total_count += 1
                     
                     except json.JSONDecodeError as e:
                         logger.warning(f"第 {line_count + 1} 行 JSON 解析失败: {e}")
@@ -817,11 +830,6 @@ class SDEImporter:
                     except Exception as e:
                         logger.warning(f"第 {line_count + 1} 行处理失败: {e}")
                         continue
-            
-            # 插入剩余数据
-            if batch:
-                await self.bulk_insert_via_sql(conn, table_name, columns, batch)
-                total_count += len(batch)
             
             logger.info(f"InvCategories 表导入完成: {file_path}, 共 {total_count} 条记录")
             return total_count
@@ -1041,6 +1049,75 @@ class SDEImporter:
             logger.error(f"导入 MapRegions 表失败: {file_path}, 错误: {e}")
             raise
     
+    async def import_type_materials(self, conn, file_path: str) -> int:
+        """
+        特殊处理：导入 TypeMaterials 表数据
+        
+        Args:
+            conn: 数据库连接
+            file_path: typeMaterials.jsonl 文件路径
+        
+        Returns:
+            导入的记录数
+        """
+        import json
+
+        logger.info(f"使用特殊处理导入 TypeMaterials 表: {file_path}")
+
+        table_name = "typeMaterials"
+        columns = ["typeID", "materialTypeID", "quantity"]
+
+        batch: list[dict[str, Any]] = []
+        total_count = 0
+        line_count = 0
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        raw_row = json.loads(line)
+
+                        # 使用特殊处理函数拆分为多条记录
+                        records = process_type_materials_row(raw_row)
+                        if not records:
+                            line_count += 1
+                            continue
+
+                        batch.extend(records)
+                        line_count += 1
+
+                        # 批量插入
+                        if len(batch) >= self.batch_size:
+                            await self.bulk_insert_via_sql(conn, table_name, columns, batch)
+                            total_count += len(batch)
+                            batch = []
+
+                            if total_count % 50000 == 0:
+                                logger.info(f"已导入 {total_count} 条记录到 {table_name}")
+
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"第 {line_count + 1} 行 JSON 解析失败: {e}")
+                        continue
+                    except Exception as e:
+                        logger.warning(f"第 {line_count + 1} 行处理失败: {e}")
+                        continue
+
+            # 插入剩余数据
+            if batch:
+                await self.bulk_insert_via_sql(conn, table_name, columns, batch)
+                total_count += len(batch)
+
+            logger.info(f"TypeMaterials 表导入完成: {file_path}, 共 {total_count} 条记录")
+            return total_count
+
+        except Exception as e:
+            logger.error(f"导入 TypeMaterials 表失败: {file_path}, 错误: {e}")
+            raise
+    
     async def full_update(self, extract_dir: str) -> bool:
         """
         执行全量更新
@@ -1139,6 +1216,7 @@ class SDEImporter:
                         # 特殊处理：types.jsonl -> invTypes 表
                         if table_name == 'types':
                             table_name = 'invTypes'
+                        # typeMaterials.jsonl 直接映射到 typeMaterials 表
                         # 注意：blueprints.jsonl 保持原样，在 import_file 中会特殊处理
                         logger.debug(f"准备导入文件: {filename} -> 表名: {table_name}")
                         await self.import_file(conn, file_path, table_name)

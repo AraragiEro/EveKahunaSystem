@@ -1071,3 +1071,80 @@ class EveMarketRegionHistoryStatisticDBUtils(_CommonUtils):
             rows_list,
             index_elements=["type_id", "region_id", "date"],
         )
+
+
+class EveMarketRegionOrdersDBUtils(_CommonUtils):
+    """
+    EVE 区域市场订单表操作工具类
+
+    使用 Postgre 主库中的 `EveMarketRegionOrders` 模型，提供按 region_id
+    批量删除和批量插入订单的能力。
+    """
+
+    cls_model = model.EveMarketRegionOrders
+
+    @classmethod
+    async def delete_by_region_id(cls, region_id: int):
+        """
+        删除指定 region_id 的所有订单记录。
+        """
+        async with dbm.get_session() as session:
+            stmt = delete(cls.cls_model).where(cls.cls_model.region_id == region_id)
+            await session.execute(stmt)
+
+    @classmethod
+    async def get_sell_orders_by_type_ids_grouped_by_price(
+        cls,
+        type_ids: list[int],
+        location_id: int,
+        region_id: int
+    ) -> dict[int, list[list[float, int]]]:
+        """
+        查询指定类型ID列表的卖单，按价格分组汇总数量。
+        
+        :param type_ids: 类型ID列表
+        :param location_id: 位置ID（如Jita交易中心）
+        :param region_id: 区域ID（如Forge区域）
+        :return: 格式为 {type_id: [[price, quantity], ...]} 的字典，按price升序排序
+        """
+        if not type_ids:
+            return {}
+        
+        async with dbm.get_session() as session:
+            stmt = select(
+                cls.cls_model.type_id,
+                cls.cls_model.price,
+                func.sum(cls.cls_model.volume_remain).label('total_quantity')
+            ).where(
+                cls.cls_model.type_id.in_(type_ids),
+                cls.cls_model.location_id == location_id,
+                cls.cls_model.is_buy_order == False,
+                cls.cls_model.region_id == region_id
+            ).group_by(
+                cls.cls_model.type_id,
+                cls.cls_model.price
+            ).order_by(
+                cls.cls_model.type_id,
+                cls.cls_model.price
+            )
+            
+            result = await session.execute(stmt)
+            rows = result.all()
+            
+            # 构建返回格式：{type_id: [[price, quantity], ...]}
+            order_data = {}
+            for row in rows:
+                type_id = row.type_id
+                price = float(row.price)
+                quantity = int(row.total_quantity)
+                
+                if type_id not in order_data:
+                    order_data[type_id] = []
+                
+                order_data[type_id].append([price, quantity])
+            
+            # 每个type_id内的列表按price升序排序（虽然查询已经排序，但确保一下）
+            for type_id in order_data:
+                order_data[type_id].sort(key=lambda x: x[0])
+            
+            return order_data

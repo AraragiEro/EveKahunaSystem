@@ -19,6 +19,7 @@ from .sde_builder import (
     IndustryBlueprints,
     MetaGroups,
     MarketGroups,
+    TypeMaterials,
 )
 from src_v2.core.log import logger
 from src_v2.core.database.connect_manager import neo4j_manager
@@ -996,3 +997,83 @@ class SdeUtils:
         
         return results
 
+    @staticmethod
+    @cached(ttl=3600, serializer=PickleSerializer())
+    async def get_compressed_asteroid_type_ids() -> tuple[List[int], List[int]]:
+        """获取压缩矿类型ID列表，返回两个分类列表
+        
+        Returns:
+            tuple[List[int], List[int]]: (standard_and_moon_ore_ids, ice_ore_ids)
+                - standard_and_moon_ore_ids: 标准矿石和卫星矿石的type_id列表
+                - ice_ore_ids: 冰矿的type_id列表
+        """
+        try:
+            async with neo4j_manager.get_session() as neo4j_session:
+                # 查询标准矿石和卫星矿石
+                standard_and_moon_market_groups = ["标准矿石", "卫星矿石"]
+                query_standard_moon = """
+                MATCH (mg:MarketGroup)
+                WHERE mg.name_id_zh IN $market_group_names
+                MATCH (t:Type)-[:EVE_MARKET_GROUP*0..20]->(mg)
+                WHERE t.type_name IS NOT NULL 
+                  AND t.type_name STARTS WITH 'Compressed'
+                RETURN DISTINCT t.type_id AS type_id
+                """
+                
+                neo4j_result = await neo4j_session.run(query_standard_moon, {
+                    "market_group_names": standard_and_moon_market_groups
+                })
+                
+                standard_and_moon_ore_ids = []
+                async for record in neo4j_result:
+                    type_id = record.get("type_id")
+                    if type_id is not None:
+                        standard_and_moon_ore_ids.append(type_id)
+                
+                # 查询冰矿
+                ice_market_groups = ["冰矿"]
+                query_ice = """
+                MATCH (mg:MarketGroup)
+                WHERE mg.name_id_zh IN $market_group_names
+                MATCH (t:Type)-[:EVE_MARKET_GROUP*0..20]->(mg)
+                WHERE t.type_name IS NOT NULL 
+                  AND t.type_name STARTS WITH 'Compressed'
+                RETURN DISTINCT t.type_id AS type_id
+                """
+                
+                neo4j_result = await neo4j_session.run(query_ice, {
+                    "market_group_names": ice_market_groups
+                })
+                
+                ice_ore_ids = []
+                async for record in neo4j_result:
+                    type_id = record.get("type_id")
+                    if type_id is not None:
+                        ice_ore_ids.append(type_id)
+                
+                return (standard_and_moon_ore_ids, ice_ore_ids)
+        except Exception as e:
+            logger.warning(f"获取压缩矿类型ID列表失败: {e}")
+            traceback.print_exc()
+            return ([], [])
+
+    @staticmethod
+    @cached(ttl=3600, serializer=PickleSerializer())
+    async def get_type_material_data_by_ids(type_ids: List[int]) -> List[dict]:
+        """根据类型ID列表获取类型材料数据"""
+        try:
+            async with (await get_db_manager()).get_readonly_session() as session:
+                stmt = select(TypeMaterials).where(TypeMaterials.typeID.in_(type_ids))
+                result = await session.execute(stmt)
+                return [
+                    {
+                        "typeID": obj.typeID,
+                        "materialTypeID": obj.materialTypeID,
+                        "quantity": obj.quantity
+                    }
+                    for obj in result.scalars()
+                ]
+        except Exception as e:
+            logger.warning(f"获取类型材料数据失败: {e}")
+            traceback.print_exc()
+            return []

@@ -4,13 +4,14 @@ import { http } from '@/http'
 import type { PlanProductTableData, PlanTableData } from './components/interfaceType.vue'
 import { ElMessage } from 'element-plus'
 import { Document, Loading, Check, Close, Refresh } from '@element-plus/icons-vue'
-import LaborView from './components/LaborView.vue'
-import CostView from './components/costView.vue'
-import PurchaseView from './components/PurchaseView.vue'
-import WorkFlowView from './components/WorkFlowView.vue'
-import MaterialView from './components/MaterialView.vue'
-import FlowView from './components/FlowView.vue'
-import LogisticsView from './components/LogisticsView.vue'
+import LaborView from './components/industryViewComponent/LaborView.vue'
+import CostView from './components/industryViewComponent/costView.vue'
+import PurchaseView from './components/industryViewComponent/PurchaseView.vue'
+import WorkFlowView from './components/industryViewComponent/WorkFlowView.vue'
+import MaterialView from './components/industryViewComponent/MaterialView.vue'
+import FlowView from './components/industryViewComponent/FlowView.vue'
+import LogisticsView from './components/industryViewComponent/LogisticsView.vue'
+import CompressedAsteroidView from './components/industryViewComponent/compressedAsteroidView.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
@@ -602,6 +603,13 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
             <el-tab-pane label="物流视图" :disabled="!haveAlphaRole">
                 <LogisticsView 
                     :logistics-data="PlanCalculateLogisticsTableView"
+                    :selected-plan="selectedPlan"
+                />
+            </el-tab-pane>
+
+            <el-tab-pane label="化矿求解视图" :disabled="!haveAlphaRole">
+                <CompressedAsteroidView 
+                    :material-data="PlanCalculateMaterialTableView"
                     :selected-plan="selectedPlan"
                 />
             </el-tab-pane>

@@ -20,6 +20,7 @@ async def get_item_info(type_id: int) -> dict:
         "type_name_zh": await SdeUtils.get_cn_name_by_id(type_id),
         "meta": await SdeUtils.get_metaname_by_typeid(type_id),
         "group": await SdeUtils.get_groupname_by_id(type_id),
+        "category": await SdeUtils.get_category_by_id(type_id),
         "market_group_list": "-".join(await SdeUtils.get_market_group_list(type_id))
     }
 

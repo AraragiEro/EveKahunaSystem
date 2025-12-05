@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { Cpu, TrendCharts, Money, ShoppingCart, DataAnalysis, Setting, ZoomIn, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { Cpu, TrendCharts, Money, ShoppingCart, DataAnalysis, Setting, ZoomIn, ArrowLeft, ArrowRight, Tools } from '@element-plus/icons-vue'
 import { ref } from 'vue'
 import mainViewImage from '@/assets/landing-page-mainView.png'
 import githubIconWhite from '@/assets/github-mark-white.svg'
@@ -13,6 +13,7 @@ import assetManagementImage1 from '@/assets/landing-page-资产管理1.png'
 import assetManagementImage2 from '@/assets/landing-page-资产管理2.png'
 import assetManagementImage3 from '@/assets/landing-page-资产管理3.png'
 import cooperativeProductionImage from '@/assets/landing-page-合作生产.png'
+import oreRefiningImage from '@/assets/landing-page-化矿计算.png'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -98,6 +99,13 @@ const features = [
     description: '支持多角色协作生产，优化资源配置，提高生产效率',
     color: '#909399',
     image: cooperativeProductionImage
+  },
+  {
+    icon: Tools,
+    title: '化矿解算',
+    description: '智能矿石精炼计算，帮助您优化化矿方案，最大化资源利用效率',
+    color: '#9c27b0',
+    image: oreRefiningImage
   }
 ]
 
@@ -157,10 +165,10 @@ const pricingPlans = [
           '可以配置想要读取的目标容器',
           '流程视图根据库存判断工作进度',
           '工作流根据库存判断原材料是否满足与蓝图是否缺失',
-          '新增报表',
-          '  • 成本视图：分析成本分布比例判断盈利空间',
-          '  • 劳动力视图：提供输出向计划容器的所有正在进行的工作者信息，提供合作利益分配手段',
-          '  • 物流视图：提供材料满足但是需要运输时的可执行方案'
+          '+ 成本视图：分析成本分布比例判断盈利空间',
+          '+ 劳动力视图：提供输出向计划容器的所有正在进行的工作者信息，提供合作利益分配手段',
+          '+ 物流视图：提供材料满足但是需要运输时的可执行方案',
+          '+ 化矿视图：对矿石配平求解'
         ]
       }
     ],

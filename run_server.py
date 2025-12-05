@@ -101,29 +101,29 @@ def setup_signal_handlers():
 async def main():
     args = parse_args()
 
-    config = Config()
-    config.bind = [f"{args.host}:{args.port}"]
+    hypercorn_config = Config()
+    hypercorn_config.bind = [f"{args.host}:{args.port}"]
 
     # 配置 worker 模式：优先使用 uvloop（性能更好），否则使用 asyncio
     # 注意：uvloop 在 Windows 上不支持，会自动回退到 asyncio
     if platform.system() != "Windows":
         try:
             import uvloop
-            config.worker_class = "uvloop"
+            hypercorn_config.worker_class = "uvloop"
             print("[性能优化] 使用 uvloop 事件循环（高性能模式）")
         except ImportError:
-            config.worker_class = "asyncio"
+            hypercorn_config.worker_class = "asyncio"
             print("[默认模式] 使用 asyncio 事件循环（安装 uvloop 可提升性能：pip install uvloop）")
     else:
-        config.worker_class = "asyncio"
+        hypercorn_config.worker_class = "asyncio"
         print("[Windows 模式] 使用 asyncio 事件循环（uvloop 不支持 Windows）")
 
     if args.dev:
         # 🔥 关键点：Hypercorn 0.18 就是用这个重载
-        config.use_reloader = True
+        hypercorn_config.use_reloader = True
         print("[开发模式] 热重载已启用（默认监控整个项目目录）")
     else:
-        config.use_reloader = False
+        hypercorn_config.use_reloader = False
         print("[生产模式] 正常启动")
 
     # 设置信号处理器
@@ -186,6 +186,14 @@ async def main():
         except Exception as e:
             logger.error(f"注册企业版 model 时发生错误: {e}")
 
+    # 启动 Jita 订单刷新定时器
+    try:
+        from src_v2.model.EVE.market.market_order_refresh_timer import MarketOrderRefreshTimer
+        MarketOrderRefreshTimer().start()
+        logger.info("Jita 订单刷新定时器已启动")
+    except Exception as e:
+        logger.error(f"启动 Jita 订单刷新定时器时发生错误: {e}", exc_info=True)
+
     # 初始化 Quart App
     app = get_app()
     
@@ -198,7 +206,7 @@ async def main():
 
     try:
         # 0.18 reloader 逻辑内置在 serve() 里
-        await serve(app, config)
+        await serve(app, hypercorn_config)
     finally:
         # 确保在退出前清理资源
         print("[清理] 开始清理资源...")

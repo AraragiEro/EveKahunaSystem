@@ -313,7 +313,6 @@ async def get_asset_pull_mission_status():
         step_progress = await rdm.r.hget(asset_status_key, "step_progress")
         is_indeterminate = await rdm.r.hget(asset_status_key, "is_indeterminate")
 
-        logger.info(f"'status': {status}, 'step_name': {step_name}, 'step_progress': {step_progress}")
         return jsonify({"status": 200, "data": {'status': status, 'step_name': step_name, 'step_progress': step_progress, 'is_indeterminate': is_indeterminate}})
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500

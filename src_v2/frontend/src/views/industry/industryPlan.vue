@@ -231,6 +231,7 @@ const ItemData = ref({
   type_name_zh: '',
   meta: '',
   group: '',
+  category: '',
   market_group_list: ''
 })
 const cancelItemInfoDialog = () => {
@@ -313,6 +314,7 @@ const handleItemInfo = async () => {
   ItemData.value.type_name_zh = data.data.type_name_zh
   ItemData.value.meta = data.data.meta
   ItemData.value.group = data.data.group
+  ItemData.value.category = data.data.category
   ItemData.value.market_group_list = data.data.market_group_list
 }
 
@@ -883,6 +885,15 @@ onUnmounted(() => {
             :title="ItemData.group ? '点击复制' : ''"
           >
             {{ ItemData.group || '—' }}
+          </span>
+        </el-descriptions-item>
+        <el-descriptions-item label="类别">
+          <span 
+            class="item-value copyable" 
+            @click="copyToClipboard(ItemData.category, '类别')"
+            :title="ItemData.category ? '点击复制' : ''"
+          >
+            {{ ItemData.category || '—' }}
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="市场组">

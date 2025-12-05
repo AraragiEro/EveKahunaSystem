@@ -294,3 +294,23 @@ class EveMarketRegionHistoryStatistic(PostgreModel):
         UniqueConstraint('type_id', 'region_id', 'date', name='eve_market_region_history_statistic_unique'),
     )
 all_model.append(EveMarketRegionHistoryStatistic)
+
+class EveMarketRegionOrders(PostgreModel):
+    __tablename__ = 'eve_market_region_orders'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    order_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    type_id = Column(BigInteger, nullable=False, index=True)
+    region_id = Column(BigInteger, index=True)
+    system_id = Column(BigInteger, index=True)
+    location_id = Column(BigInteger, index=True)
+    price = Column(Float, nullable=False)
+    volume_total = Column(BigInteger, nullable=False)
+    volume_remain = Column(BigInteger, nullable=False)
+    min_volume = Column(BigInteger, nullable=False)
+    is_buy_order = Column(Boolean, nullable=False)
+    duration = Column(Integer, nullable=False)
+    issued = Column(DateTime, nullable=False)
+    range = Column(Text)
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
+all_model.append(EveMarketRegionOrders)

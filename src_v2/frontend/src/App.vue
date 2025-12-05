@@ -209,7 +209,7 @@ onUnmounted(() => {
         <el-header class="main-header">
           <div class="header-content">
             <div class="header-title">
-              <h2>Kahuna-System V1.2.0</h2>
+              <h2>Kahuna-System V1.3.0</h2>
               <el-tag 
                 :type="isEnterprise ? 'success' : 'info'" 
                 size="small" 

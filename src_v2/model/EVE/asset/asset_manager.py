@@ -393,9 +393,11 @@ class AssetManager(metaclass=SingletonMeta):
         await tqdm_manager.complete_mission("_generate_all_locate_relation")
 
     async def _generate_forbidden_structure_node(self, mission_obj: M_EveAssetPullMission):
+        logger.info("开始生成无权限建筑节点")
         access_character = await CharacterManager().get_character_by_character_id(mission_obj.access_character_id)
         # 补全玩家建筑信息
         forbidden_structure_node_list = await NAU.get_forbidden_structure_node_list(mission_obj.asset_owner_id)
+        logger.info(f"无权限建筑节点数量: {len(forbidden_structure_node_list)}")
         status_key = f'asset_pull_mission_status:{mission_obj.asset_owner_type}:{mission_obj.asset_owner_id}'
         await rdm.r.hset(status_key, 'step_name', "生成无权限建筑节点")
         await rdm.r.hset(status_key, 'step_progress', 0.5)
@@ -404,10 +406,12 @@ class AssetManager(metaclass=SingletonMeta):
         await tqdm_manager.add_mission("_generate_forbidden_structure_node", len(forbidden_structure_node_list))
         for forbidden_structure_node in forbidden_structure_node_list:
             # 建筑信息
+            logger.info(f"开始生成无权限建筑节点: {forbidden_structure_node["item_id"]}")
             structure_info_cache = await rdm.redis.hgetall(f'eveesi:universe_structures_structure:{forbidden_structure_node["item_id"]}')
             if not structure_info_cache:
                 structure_info = await eveesi.universe_structures_structure(access_character.ac_token, forbidden_structure_node["item_id"])
                 if structure_info:
+                    logger.info(f"建筑{forbidden_structure_node["item_id"]}获取到建筑信息")
                     structure_info_cache = {
                         "name": structure_info["name"],
                         "owner_id": structure_info["owner_id"],
@@ -415,9 +419,9 @@ class AssetManager(metaclass=SingletonMeta):
                         "type_id": structure_info["type_id"]
                     }
                 else:
-                    logger.debug(f"建筑{forbidden_structure_node["item_id"]}无权限，创建无权限建筑")
+                    logger.info(f"建筑{forbidden_structure_node["item_id"]}无权限，创建无权限建筑")
                     structure_info_cache = {
-                        'name': f'Forbidden {await SdeUtils.get_name_by_id(forbidden_structure_node['type_id']) if "type_id" in forbidden_structure_node else "unknown"}',
+                        'name': f'Forbidden {await SdeUtils.get_name_by_id(int(forbidden_structure_node['type_id'])) if "type_id" in forbidden_structure_node else "unknown"}',
                         'owner_id': 'unknown',
                         'solar_system_id': 'unknown',
                         'type_id': 'unknown',
@@ -448,7 +452,7 @@ class AssetManager(metaclass=SingletonMeta):
             structure_node = {
                 'structure_id': forbidden_structure_node["item_id"],
                 'structure_name': structure_info["name"],
-                'structure_type': await SdeUtils.get_name_by_id(structure_info['type_id']) if structure_info['type_id'] != 'unknown' else 'unknown',
+                'structure_type': await SdeUtils.get_name_by_id(int(structure_info['type_id'])) if structure_info['type_id'] != 'unknown' else 'unknown',
                 'structure_type_id': structure_info['type_id'] if structure_info['type_id'] != 'unknown' else 'unknown',
                 'system_id': solar_system_node['system_id'],
                 'system_name': solar_system_node['system_name'],
@@ -525,6 +529,163 @@ class AssetManager(metaclass=SingletonMeta):
             await rdm.r.hset(status_key, 'step_progress', now_progress / len(structure_asset_nodes))
         await tqdm_manager.complete_mission("_update_structure_node")
 
+    async def _update_forbidden_structure_node(self, mission_obj: M_EveAssetPullMission):
+        """处理该owner的asset连接到已经存在的forbidden_structure_node
+        
+        找到该owner的asset连接的所有forbidden_structure_node，尝试获取建筑信息。
+        如果能够获取到，更新该node的信息，删除该node连接到unknown system的边，
+        检查建筑所在星系节点是否存在，不存在则创建，创建连接到正确星系的边
+        """
+        logger.info("开始更新无权限建筑节点")
+        access_character = await CharacterManager().get_character_by_character_id(mission_obj.access_character_id)
+        forbidden_structure_nodes = await NAU.get_forbidden_structure_nodes_by_owner(mission_obj.asset_owner_id)
+        logger.info(f"找到 {len(forbidden_structure_nodes)} 个无权限建筑节点需要更新")
+        
+        status_key = f'asset_pull_mission_status:{mission_obj.asset_owner_type}:{mission_obj.asset_owner_id}'
+        await rdm.r.hset(status_key, 'step_name', "更新无权限建筑节点")
+        await rdm.r.hset(status_key, 'step_progress', 0.0)
+        await rdm.r.hset(status_key, 'is_indeterminate', 0)
+
+        await tqdm_manager.add_mission("_update_forbidden_structure_node", len(forbidden_structure_nodes))
+        for structure_node_data in forbidden_structure_nodes:
+            structure_id = structure_node_data.get("structure_id")
+            if not structure_id:
+                logger.warning(f"跳过无structure_id的节点: {structure_node_data}")
+                await tqdm_manager.update_mission("_update_forbidden_structure_node", 1)
+                continue
+            
+            logger.info(f"开始更新无权限建筑节点: {structure_id}")
+            # 尝试获取建筑信息
+            structure_info_cache = await rdm.redis.hgetall(f'eveesi:universe_structures_structure:{structure_id}')
+            if not structure_info_cache:
+                structure_info = await eveesi.universe_structures_structure(access_character.ac_token, structure_id)
+                if structure_info:
+                    logger.info(f"建筑{structure_id}获取到建筑信息")
+                    system_info = await SdeUtils.get_system_info_by_id(structure_info["solar_system_id"])
+                    structure_info_cache = {
+                        "name": structure_info["name"],
+                        "owner_id": structure_info["owner_id"],
+                        "solar_system_id": structure_info["solar_system_id"],
+                        "type_id": structure_info["type_id"],
+                        "system_id": system_info['system_id'],
+                        "system_name": system_info['system_name'],
+                        "region_id": system_info['region_id'],
+                        "region_name": system_info['region_name'],
+                    }
+                else:
+                    logger.info(f"建筑{structure_id}无权限，跳过更新")
+                    await tqdm_manager.update_mission("_update_forbidden_structure_node", 1)
+                    continue
+                await rdm.redis.hset(f'eveesi:universe_structures_structure:{structure_id}', mapping=structure_info_cache)
+                await rdm.redis.expire(f'eveesi:universe_structures_structure:{structure_id}', 60*60*24)
+            else:
+                # 检查缓存中的信息是否有效（不是unknown）
+                if structure_info_cache.get('solar_system_id') == 'unknown' or structure_info_cache.get('solar_system_id') == b'unknown':
+                    logger.info(f"建筑{structure_id}缓存信息为unknown，尝试重新获取")
+                    structure_info = await eveesi.universe_structures_structure(access_character.ac_token, structure_id)
+                    if structure_info:
+                        logger.info(f"建筑{structure_id}重新获取到建筑信息")
+                        system_info = await SdeUtils.get_system_info_by_id(structure_info["solar_system_id"])
+                        structure_info_cache = {
+                            "name": structure_info["name"],
+                            "owner_id": structure_info["owner_id"],
+                            "solar_system_id": structure_info["solar_system_id"],
+                            "type_id": structure_info["type_id"],
+                            "system_id": system_info['system_id'],
+                            "system_name": system_info['system_name'],
+                            "region_id": system_info['region_id'],
+                            "region_name": system_info['region_name'],
+                        }
+                        await rdm.redis.hset(f'eveesi:universe_structures_structure:{structure_id}', mapping=structure_info_cache)
+                        await rdm.redis.expire(f'eveesi:universe_structures_structure:{structure_id}', 60*60*24)
+                    else:
+                        logger.info(f"建筑{structure_id}重新获取仍无权限，跳过更新")
+                        await tqdm_manager.update_mission("_update_forbidden_structure_node", 1)
+                        continue
+                else:
+                    # 确保缓存中有system_id等信息
+                    if 'system_id' not in structure_info_cache or structure_info_cache.get('system_id') == 'unknown':
+                        solar_system_id = structure_info_cache.get('solar_system_id')
+                        if solar_system_id and solar_system_id != 'unknown':
+                            if isinstance(solar_system_id, bytes):
+                                solar_system_id = int(solar_system_id.decode())
+                            else:
+                                solar_system_id = int(solar_system_id)
+                            system_info = await SdeUtils.get_system_info_by_id(solar_system_id)
+                            structure_info_cache['system_id'] = system_info['system_id']
+                            structure_info_cache['system_name'] = system_info['system_name']
+                            structure_info_cache['region_id'] = system_info['region_id']
+                            structure_info_cache['region_name'] = system_info['region_name']
+                            await rdm.redis.hset(f'eveesi:universe_structures_structure:{structure_id}', mapping=structure_info_cache)
+            
+            structure_info = structure_info_cache
+            # 处理bytes类型的值，将redis返回的bytes转换为字符串或int
+            def decode_value(value):
+                if isinstance(value, bytes):
+                    return value.decode('utf-8')
+                return value
+            
+            # 转换所有可能为bytes的值
+            for key in structure_info:
+                structure_info[key] = decode_value(structure_info[key])
+            
+            # 获取system_id（优先使用system_id，如果没有则使用solar_system_id）
+            system_id_value = structure_info.get('system_id') or structure_info.get('solar_system_id')
+            
+            # 检查是否能够获取到有效的建筑信息
+            if system_id_value == 'unknown' or not system_id_value:
+                logger.info(f"建筑{structure_id}仍为unknown，跳过更新")
+                await tqdm_manager.update_mission("_update_forbidden_structure_node", 1)
+                continue
+            
+            # 构建structure_node和solar_system_node
+            structure_name = decode_value(structure_info.get("name", ""))
+            type_id_value = structure_info.get('type_id')
+            structure_type = 'unknown'
+            if type_id_value and type_id_value != 'unknown':
+                try:
+                    structure_type = await SdeUtils.get_name_by_id(int(type_id_value))
+                except (ValueError, TypeError):
+                    logger.warning(f"建筑{structure_id}的type_id无效: {type_id_value}")
+            
+            structure_node = {
+                'structure_id': structure_id,
+                'structure_name': structure_name,
+                'structure_type': structure_type,
+            }
+            
+            # 获取system_id并查询星系信息
+            try:
+                system_id = int(system_id_value)
+            except (ValueError, TypeError):
+                logger.warning(f"建筑{structure_id}的system_id无效: {system_id_value}")
+                await tqdm_manager.update_mission("_update_forbidden_structure_node", 1)
+                continue
+            
+            system_info = await SdeUtils.get_system_info_by_id(system_id)
+            if not system_info:
+                logger.warning(f"建筑{structure_id}无法获取星系信息: {system_id}")
+                await tqdm_manager.update_mission("_update_forbidden_structure_node", 1)
+                continue
+            solar_system_node = {
+                'system_id': system_info['system_id'],
+                'system_name': system_info['system_name'],
+                'region_id': system_info['region_id'],
+                'region_name': system_info['region_name'],
+            }
+            
+            # 更新节点
+            async with CREATE_STATION_SEMAPHORE:
+                success = await NAU.update_forbidden_structure_node(structure_id, structure_node, solar_system_node)
+                if success:
+                    logger.info(f"成功更新建筑节点{structure_id}")
+                else:
+                    logger.warning(f"更新建筑节点{structure_id}失败")
+            
+            now_progress = await tqdm_manager.update_mission("_update_forbidden_structure_node", 1)
+            await rdm.r.hset(status_key, 'step_progress', now_progress / len(forbidden_structure_nodes))
+        await tqdm_manager.complete_mission("_update_forbidden_structure_node")
+
     async def processing_asset_pull_mission(self, mission_obj: M_EveAssetPullMission):
         status_key = f'asset_pull_mission_status:{mission_obj.asset_owner_type}:{mission_obj.asset_owner_id}'
 
@@ -551,6 +712,7 @@ class AssetManager(metaclass=SingletonMeta):
         await self._generate_all_locate_relation(assets_list, mission_obj)
         await self._generate_forbidden_structure_node(mission_obj)
         await self._update_structure_node(mission_obj)
+        await self._update_forbidden_structure_node(mission_obj)
         
     async def clean_asset_pull_mission_assets(self, mission_obj: M_EveAssetPullMission):
         owner_id = mission_obj.asset_owner_id
