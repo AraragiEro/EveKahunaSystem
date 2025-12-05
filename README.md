@@ -31,7 +31,8 @@ Kahuna System 是一个专为 EVE Online 玩家设计的 Web 应用平台，集�
 - **工业规划** - 智能工业制造规划与报表输出
   - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/559e5711-62b4-42e0-867e-2687d587574c" />
   - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/a3409290-7c64-42a8-a800-870d3172d45a" />
-- **化矿分析** - 矿石精炼与材料分析【**计划中**】
+- **化矿分析** - 矿石精炼与材料分析
+  - <img width="2560" height="1271" alt="landing-page-化矿计算" src="https://github.com/user-attachments/assets/9f98ee62-9211-49e6-9377-b6305954840f" />
 - **采购清单** - 可自定义数据来源的采购清单管理
   - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/6c1eb759-f83a-4c7f-b4e0-e899d865807b" />
 - **利润分析** - 深度利润分析与市场机会挖掘
