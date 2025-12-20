@@ -25,8 +25,6 @@ Kahuna System 是一个专为 EVE Online 玩家设计的 Web 应用平台，集�
 
 ## 核心功能
 
-- **自选市场价格查询与利润成本分析** - 支持吉他和联盟市场实时价格查询
-  - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/dd98f790-af19-484d-b43e-c82588a6bd88" />
 - **成本计算** - 精确计算制造和采购成本
   - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/5c45aac0-fd2e-4bfd-b5ff-57085d4eca11" />
 - **工业规划** - 智能工业制造规划与报表输出
