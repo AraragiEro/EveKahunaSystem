@@ -40,6 +40,7 @@ async def get_public_storage_data(sid: str):
             "config": asset_view_obj.config
         })
     except KahunaException as e:
+        traceback.print_exc()
         # 根据错误消息判断返回的状态码
         error_message = str(e)
         if '不存在' in error_message:
@@ -49,6 +50,7 @@ async def get_public_storage_data(sid: str):
         else:
             return jsonify({"status": 500, "message": error_message}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取公开资产视图数据失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取公开资产视图数据失败"}), 500
 

@@ -8,20 +8,16 @@ import asyncio
 from copy import deepcopy
 from math import ceil, sqrt
 from typing import Dict, List, Tuple
+from aiocache import cached
+from aiocache.serializers import PickleSerializer
 
 # 本地导入 - 核心工具
 from src_v2.core.database.connect_manager import (
-    neo4j_manager,
-    redis_manager as rdm
+    get_redis_manager
 )
-# from src_v2.core.database.neo4j_utils import (
-#     Neo4jIndustryUtils as NIU
-# )
 from src_v2.core.log import logger
-# from src_v2.core.utils import tqdm_manager
 
 # 本地导入 - EVE 模块
-# from src_v2.model.EVE.market.market_manager import MarketManager
 from src_v2.model.EVE.sde import SdeUtils
 
 # 本地导入 - 相对导入
@@ -115,7 +111,6 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
         self_index_real_quantity = await op.deal_asset_quantity(self_index_real_quantity, product_type_id, self_index_id)
 
     # 运行中任务生产 数量处理 每个(product_type_id, index)只计算一次 ==============================================================================================
-    
     if plan_settings.get('considerate_running_job', False):
         all_index_real_quantity -= await op.get_running_job_count(product_type_id) * await BPM.get_bp_product_quantity_typeid(product_type_id)
         self_index_real_quantity = await op.deal_running_job_quantity(self_index_real_quantity, product_type_id, self_index_id)
@@ -143,12 +138,33 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
     # 获取效率 ==============================================================================================
     mater_eff, time_eff = await op.get_efficiency(product_type_id)
     fake_bp_mater_eff, fake_bp_time_eff = await op.get_conf_eff(product_type_id)
+    
+    # 系数成本计算 ==============================================================================================
+    material_adjust_price = await op.get_type_adjust_price(material_type_id)
+    structure_info = await op.get_type_assign_structure_info(product_type_id)
+    if not structure_info:
+        # raise KahunaException(f"物品 {product_type_id}: {await SdeUtils.get_name_by_id(product_type_id)} 未分配建筑")
+        system_cost = {"manufacturing": 0.02, "reaction": 0.02}
+    else:
+        system_cost = await op.get_system_cost(structure_info['system_id'])
+    actype = "manufacturing" if self_relation['activity_id'] == 1 else "reaction"
+    if "manufacturing" not in system_cost or "reaction" not in system_cost:
+        logger.error(f"system_cost {system_cost} not have {actype}")
 
     # 根据配置 切分工作流 or 不切分 每个(product_type_id, index)只计算一次 ==============================================================================================
     real_work_list = []
     if (product_type_id, self_index_id) not in op.work_list_cache:
         op.work_list_cache[(product_type_id, self_index_id)] = ([], [])
         max_job_run = await op.get_max_job_run(product_type_id)
+        # 计算单轮eiv ==========================================
+        material_dict = await BPM.get_bp_materials(product_type_id, pdm=op.sdm)
+        eiv = 0
+        for material_type_id, material_quantity in material_dict.items():
+            sub_material_adjust_price = await op.get_type_adjust_price(material_type_id)
+            eiv += material_quantity * sub_material_adjust_price * float(float(system_cost[actype]) + 0.04)
+        active_time = await BPM.get_production_time(product_type_id, pdm=op.sdm)
+        product_market_list = await SdeUtils.get_market_group_list(product_type_id, pdm=op.sdm)
+
         if plan_settings.get('split_to_jobs', False):
             real_work_waiting_to_split = min_self_index_real_quantity_work
             while real_work_waiting_to_split > 0:
@@ -174,12 +190,19 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
                 elif plan_settings.get("work_type", "whole") == "in_order":
                     this_round_work = min(bp_support_runs, real_work_waiting_to_split, this_round_max_job_run)
 
+                if plan_settings.get("work_type", "whole") == "whole" and \
+                    'Manufacture & Research' in product_market_list and \
+                    plan_settings.get('full_split', False
+                ):
+                    this_round_work = max_job_run
                 real_work_list.append({
                     "type_id": product_type_id,
                     "runs": this_round_work,
                     "bp_object": bp,
                     "mater_eff": mater_eff * (fake_bp_mater_eff if bp['fake'] else (1 - 0.01 * bp['material_efficiency'])),
                     "time_eff": time_eff * (fake_bp_time_eff if bp['fake'] else (1 - 0.01 * bp['time_efficiency'])),
+                    "eiv": eiv * this_round_work,
+                    "active_time": active_time * this_round_work,
                 })
                 real_work_waiting_to_split -= this_round_work
                 op.set_uped_jobs[product_type_id] -= this_round_work
@@ -190,7 +213,11 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
             # less_work: 剩余的工作量（小于 max_job_run）
             # 注意：ceil() 返回 float，// 运算符如果操作数有 float 则结果也是 float
             # 但 range() 需要 int，所以需要转换为 int
-            if max_job_run > 0:
+            if plan_settings.get('full_split', False) > 0:
+                ceil_min_self_index_quantity_work = ceil(min_self_index_quantity_work / max_job_run)
+                full_job_num = int(ceil_min_self_index_quantity_work // max_job_run)
+                less_work = 0
+            elif max_job_run > 0:
                 full_job_num = int(min_self_index_quantity_work // max_job_run)
                 less_work = int(min_self_index_quantity_work % max_job_run)
             else:
@@ -202,6 +229,8 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
                 "runs": max_job_run,  # 每个完整任务运行 max_job_run 次
                 "mater_eff": mater_eff * fake_bp_mater_eff,
                 "time_eff": time_eff * fake_bp_time_eff,
+                "eiv": eiv * max_job_run,
+                "active_time": active_time * max_job_run,
                 "bp_object": await op.get_bp_object(product_type_id, max_job_run, False)
             } for _ in range(full_job_num)]
             if less_work > 0:
@@ -210,7 +239,9 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
                     "runs": less_work,
                     "mater_eff": mater_eff * fake_bp_mater_eff,
                     "time_eff": time_eff * fake_bp_time_eff,
-                    "bp_object": await op.get_bp_object(product_type_id, less_work, False)
+                    "active_time": active_time * less_work,
+                    "bp_object": await op.get_bp_object(product_type_id, less_work, False),
+                    "eiv": eiv * less_work,
                 })
         else:
             # ==========================================================
@@ -221,14 +252,18 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
                 "runs": min_self_index_real_quantity_work,
                 "mater_eff": mater_eff * fake_bp_mater_eff,
                 "time_eff": time_eff * fake_bp_time_eff,
-                "bp_object": await op.get_bp_object(product_type_id, min_self_index_real_quantity_work, False)
+                "bp_object": await op.get_bp_object(product_type_id, min_self_index_real_quantity_work, False),
+                "active_time": active_time * min_self_index_real_quantity_work,
+                "eiv": eiv * min_self_index_real_quantity_work,
             }]
             job_list = [{
                 "type_id": product_type_id,
                 "runs": min_self_index_quantity_work,
                 "mater_eff": mater_eff * fake_bp_mater_eff,
                 "time_eff": time_eff * fake_bp_time_eff,
-                "bp_object": await op.get_bp_object(product_type_id, min_self_index_quantity_work, False)
+                "active_time": active_time * min_self_index_quantity_work,
+                "bp_object": await op.get_bp_object(product_type_id, min_self_index_quantity_work, False),
+                "eiv": eiv * min_self_index_quantity_work,
             }]
         await op.calculate_work_material_avaliable(real_work_list)
         op.work_list_cache[(product_type_id, self_index_id)] = [real_work_list, job_list]
@@ -253,7 +288,7 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
             )
         )
         logger.debug(f"real_quantity_material_need_list: {real_quantity_material_need_list}")
-    activety_time = await BPM.get_production_time(product_type_id)
+    activety_time = await BPM.get_production_time(product_type_id, pdm=op.sdm)
     real_quantity_time_need_list = [
         ceil(
             work['runs'] * activety_time * work["time_eff"]
@@ -265,20 +300,7 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
             work['runs'] * self_relation['material_num'] * (1 if self_relation['material_num'] == 1 else work['mater_eff'])
         ) for work in job_list
     ]
-
-    # 系数成本计算 ==============================================================================================
-    structure_info = await op.get_type_assign_structure_info(product_type_id)
-    if not structure_info:
-        # raise KahunaException(f"物品 {product_type_id}: {await SdeUtils.get_name_by_id(product_type_id)} 未分配建筑")
-        system_cost = {"manufacturing": 0.14 / 100, "reaction": 0.14 / 100}
-    else:
-        system_cost = await op.get_system_cost(structure_info['system_id'])
     
-    material_adjust_price = await op.get_type_adjust_price(material_type_id)
-    
-    actype = "manufacturing" if self_relation['activity_id'] == 1 else "reaction"
-    if "manufacturing" not in system_cost or "reaction" not in system_cost:
-        logger.error(f"system_cost {system_cost} not have {actype}")
     eiv_cost = float(float(system_cost[actype]) + 0.04) * material_adjust_price * self_relation['material_num']
     real_eiv_cost_list = [eiv_cost * work['runs'] for work in job_list]
     quantity_material_need = sum(quantity_material_need_list)
@@ -353,19 +375,42 @@ async def update_plan_status(op: ConfigFlowOperateCenter, all_relation_list: Lis
         now_progress = (len(all_relation_list) - len(uncomplete_relation_list)) / len(all_relation_list) * 100
         if now_progress > last_progress + 1:
             if not subprocess:
-                await rdm.r.hset(op.current_progress_key, mapping={"name": "更新树状态", "progress": now_progress, "is_indeterminate": 0})
+                await get_redis_manager().r.hset(op.current_progress_key, mapping={"name": "更新树状态", "progress": now_progress, "is_indeterminate": 0})
             last_progress = now_progress
 
     # await tqdm_manager.complete_mission("relation_moniter_process")
     logger.info(f"plan {plan_name} status update complete")
 
-async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, subprocess=False):
+@cached(ttl=3600, serializer=PickleSerializer())
+async def _get_work_product_class_type(type_id: int, sdm=None):
+    """获取材料类型"""
+    market_group_list = await SdeUtils.get_market_group_list(type_id, pdm=sdm)
+    if 'Processed Moon Materials' in market_group_list:
+        return "低反"
+    elif 'Advanced Moon Materials' in market_group_list:
+        return '高反'
+    elif 'Forged Materials' in market_group_list:
+        return '分子熔铸'
+    elif 'Reaction Materials' in market_group_list:
+        return '聚合物'
+    elif 'Advanced Components' in market_group_list:
+        return '高级组件'
+    elif 'Standard Capital Ship Components' in market_group_list or 'Advanced Capital Components' in market_group_list:
+        return '旗舰组件'
+    else:
+        return '其他'
+
+async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, subprocess=False, inrdm=None, sdm=None):
     """
     获取计划表格视图数据
     """
     user_name = op.user_name
     plan_name = op.plan_name
     plan_settings = op.plan_settings
+    if not inrdm:
+        rdm = get_redis_manager()
+    else:
+        rdm = inrdm
 
     # 定义原材料大类
     material_type = ["矿石", "冰矿产物", "燃料块", "元素", "气云", "行星工业", "杂货"]
@@ -373,14 +418,6 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
     if not subprocess:
         await rdm.r.hset(op.current_progress_key, mapping={"name": "获取路径数据", "progress": 50, "is_indeterminate": 1})
     logger.info("收集路径深度")
-    # node_dict = {
-    #     node['type_id']: node for node in await NIU.get_user_plan_node_with_distance(user_name, plan_name)
-    # }
-
-    # 获取材料报价
-    if not subprocess:
-        await rdm.r.hset(op.current_progress_key, mapping={"name": "获取材料报价", "progress": 50, "is_indeterminate": 1})
-    # await MarketManager().update_jita_price()
 
     job_deal_set = set()
     logger.info("收集关系数据")
@@ -410,7 +447,7 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
                 eiv_cost_dict[top_product_type_id] = {
                     "eiv_cost": 0,
                     "type_id": top_product_type_id,
-                    "type_name": await SdeUtils.get_name_by_id(top_product_type_id),
+                    "type_name": await SdeUtils.get_name_by_id(top_product_type_id, pdm=sdm),
                     "index_id": relation["index_id"],
                     "product_num": op.product_num_dict[top_product_type_id],
                     "asset_quantity": await op.get_type_assets_quantity(top_product_type_id),
@@ -421,12 +458,12 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
                 "eiv_cost": eiv_cost_dict[top_product_type_id].get('eiv_cost', 0) + relation['real_eiv_cost_total'],
             })
             if op.get_node_type(relation['material']) != "product":
-                material_type_node = await get_material_type(relation['material'])
+                material_type_node = await get_material_type(relation['material'], sdm=sdm)
                 jita_buy_price = await rdm.r.hget(f"market_price:jita:{relation['material']}", "max_buy")
                 jita_sell_price = await rdm.r.hget(f"market_price:jita:{relation['material']}", "min_sell")
                 eiv_cost_dict[top_product_type_id]['children'].append({
                     "type_id": relation['material'],
-                    "type_name": await SdeUtils.get_name_by_id(relation['material']),
+                    "type_name": await SdeUtils.get_name_by_id(relation['material'], pdm=sdm),
                     "index_id": relation["index_id"],
                     "quantity": relation['quantity'],
                     "jita_buy_price": jita_buy_price if jita_buy_price else 0,
@@ -473,12 +510,14 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
     flow_output = [
         {
             "layer_id": index,
+            "row_id": 100000 + index,
             "children": []
         } for index in distance_list
     ]
     material_output = {
         t: {
             "layer_id": t,
+            "row_id": "100000" + t,
             "children": []
         } for t in material_type
     }
@@ -491,31 +530,37 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
     mission_count = 0
     for node in node_dict.values():
         # 整理库存状态
-        node['tpye_name_zh'] = await SdeUtils.get_cn_name_by_id(node['type_id'])
+        node['tpye_name_zh'] = await SdeUtils.get_name_by_id(node['type_id'], zh=True, pdm=sdm)
         if op.get_node_type(node['type_id']) != "product":
-            material_type_node = await get_material_type(node['type_id'])
+            material_type_node = await get_material_type(node['type_id'], sdm=sdm)
             buy_price = await rdm.r.hget(f"market_price:jita:{node['type_id']}", "max_buy")
             sell_price = await rdm.r.hget(f"market_price:jita:{node['type_id']}", "min_sell")
             node['buy_price'] = buy_price if buy_price else 0
             node['sell_price'] = sell_price if sell_price else 0
+            node.update({"row_id": node["type_id"]})
             material_output[material_type_node]['children'].append(node)
         else:
+            node.update({"row_id": node["type_id"]})
             flow_output[node['max_distance'] - 1]["children"].append(node)
         # mission_count = await tqdm_manager.update_mission(f"分类节点 {plan_name}", 1)
+        
         
         
         # 整理工作流输出
         work_flow.extend([{
                 "type_id": work["type_id"],
-                "active_id": await BPM.get_activity_id_by_product_typeid(work["type_id"]),
-                "type_name_zh": await SdeUtils.get_cn_name_by_id(work["type_id"]),
-                "type_name": await SdeUtils.get_name_by_id(work["type_id"]),
+                "active_id": await BPM.get_activity_id_by_product_typeid(work["type_id"], pdm=sdm),
+                "type_name_zh": await SdeUtils.get_name_by_id(work["type_id"], zh=True, pdm=sdm),
+                "type_name": await SdeUtils.get_name_by_id(work["type_id"], pdm=sdm),
                 "avaliable": work["avaliable"],
                 "runs": work["runs"],
                 "bp_object": work["bp_object"],
                 "type_order_id": node["order_id"],
                 "mater_eff": work["mater_eff"],
                 "time_eff": work["time_eff"],
+                "class_type": await _get_work_product_class_type(work["type_id"], sdm=op.sdm),
+                "eiv": work.get("eiv", 0),
+                "active_time": work.get("active_time", 0),
             } for work in node.get("real_job_list", []) if work
         ])
 
@@ -530,6 +575,10 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
             last_progress = now_progress
     # await tqdm_manager.complete_mission(f"分类节点 {plan_name}")
     
+    # 排序
+    for nodes in flow_output:
+            nodes['children'].sort(key=lambda x: x['order_id'])
+
     # 整理物流信息
     # 建筑需求
     structure_material_need_dict = {}
@@ -602,10 +651,10 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
         provide_structure_info = logistic_info["provide_structure_info"]
         lack_structure_info = logistic_info["lack_structure_info"]
         light_year = 9.461e15
-        provide_system_info = await SdeUtils.get_system_info_by_id(provide_structure_info["system_id"])
-        lack_system_info = await SdeUtils.get_system_info_by_id(lack_structure_info["system_id"])
+        provide_system_info = await SdeUtils.get_system_info_by_id(provide_structure_info["system_id"], pdm=sdm)
+        lack_system_info = await SdeUtils.get_system_info_by_id(lack_structure_info["system_id"], pdm=sdm)
         if not provide_system_info or not lack_system_info:
-            logger.error(f"物流线路 {d} 缺少星系信息")
+            logger.error(f"物流线路 {d} 缺少星系信息, provide_system_id: {provide_structure_info['system_id']}, lack_system_id: {lack_structure_info['system_id']}")
             continue
         save_logistic_data.append({
             "lack_structure_id": lack_structure_id,
@@ -624,9 +673,9 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
                 (provide_system_info["z"] - lack_system_info["z"])**2
             ) / light_year,
             "lack_type_id": lack_type_id,
-            "lack_type_name": await SdeUtils.get_cn_name_by_id(lack_type_id),
+            "lack_type_name": await SdeUtils.get_name_by_id(lack_type_id, pdm=sdm),
             "provide_quantity": logistic_info["provide_quantity"],
-            "provide_volume": await SdeUtils.get_volume_by_type_id(lack_type_id) * logistic_info["provide_quantity"],
+            "provide_volume": await SdeUtils.get_volume_by_type_id(lack_type_id, sdm=sdm) * logistic_info["provide_quantity"],
         })
 
 
@@ -635,6 +684,10 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
         await rdm.r.hset(op.current_progress_key, mapping={"name": "获取劳动力数据", "progress": 50, "is_indeterminate": 1})
     running_job_tableview_data = await op.get_running_job_tableview_data(plan_settings.get("considerate_running_job", False))
     
+    # 后处理
+    for layer in flow_output:
+        if len(layer["children"]) == 0:
+            flow_output.remove(layer)
     return {
         "flow_output": flow_output,
         "material_output": [material_output[t] for t in material_type],

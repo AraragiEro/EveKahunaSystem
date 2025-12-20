@@ -21,16 +21,34 @@ const STORAGE_KEY_PREFIX = 'compressed_asteroid_'
 const loading = ref(false)
 const refinementRate = ref(90.6) // 化矿率，默认90.6%（百分比）
 const wastePenalty = ref(0.1) // 多余矿物权重，默认0.1
+const shortagePenalty = ref(2.0) // 不足矿物权重，默认2.0
+const liquidityImpact = ref(5.0) // 收单流动性溢价系数，默认0（不启用）
+const purchaseTimeLimit = ref(7) // 采购时间上限（天），默认7天
+const shippingCostPerVolume = ref(0) // 运费设置，单位为isk/立方，默认0
 const purchaseMode = ref<'扫单' | '收单'>('扫单') // 采购模式：扫单或收单
 const quantityMode = ref<'缺失' | '全部'>('缺失') // 数量模式：缺失或全部
 const lastFetchTime = ref<string | null>(null) // 上次获取数据的时间（ISO 格式）
+const useCustomData = ref(false) // 是否使用自定义数据
+const customMineralData = ref<Array<{
+    type_id: number
+    type_name: string
+    type_name_zh: string
+    quantity: number
+    real_quantity: number
+}>>([]) // 自定义矿物数据
+const importDialogVisible = ref(false) // 导入弹窗显示状态
+const importText = ref('') // 导入的文本内容
+const importLoading = ref(false) // 导入处理中的状态
 const compressedAsteroidData = ref<{
     purcheses_res?: Record<string, {
         quantity: number
         total_price: number
+        total_price_with_liquidity?: number
         name: string
         name_zh: string
         avrprice: number
+        base_avrprice?: number
+        liquidity_premium_rate?: number
         volume: number
     }>
     excess_minerals_res?: Record<string, {
@@ -39,9 +57,25 @@ const compressedAsteroidData = ref<{
         name_zh: string
         price: number
     }>
+    shortage_minerals_res?: Record<string, {
+        quantity: number
+        name: string
+        name_zh: string
+        price: number
+    }>
     mineral_yields?: Record<string, Record<string, [number, number]>>
     total_cost?: number
+    total_cost_with_liquidity?: number
     total_excess_price?: number
+    mineral_purchases_res?: Record<string, {
+        quantity: number
+        total_price: number
+        name: string
+        name_zh: string
+        avrprice: number
+        volume: number
+    }>
+    total_mineral_cost?: number
     is_empty?: boolean  // 标识为空数据（无缺失矿物）
 } | null>(null)
 
@@ -70,13 +104,19 @@ const saveToLocalStorage = () => {
             compressedAsteroidData: compressedAsteroidData.value,
             refinementRate: refinementRate.value,
             wastePenalty: wastePenalty.value,
+            shortagePenalty: shortagePenalty.value,
             purchaseMode: purchaseMode.value,
+            liquidityImpact: liquidityImpact.value,
+            purchaseTimeLimit: purchaseTimeLimit.value,
+            shippingCostPerVolume: shippingCostPerVolume.value,
             fetchTime: new Date().toISOString()
         }
         
         // 合并到现有数据中
         existingData[modeKey] = dataToSave
         existingData.quantityMode = quantityMode.value
+        existingData.useCustomData = useCustomData.value
+        existingData.customMineralData = customMineralData.value
         
         localStorage.setItem(key, JSON.stringify(existingData))
         lastFetchTime.value = dataToSave.fetchTime
@@ -102,6 +142,14 @@ const loadFromLocalStorage = () => {
                 quantityMode.value = parsed.quantityMode
             }
             
+            // 恢复自定义数据相关设置
+            if (parsed.useCustomData !== undefined) {
+                useCustomData.value = parsed.useCustomData
+            }
+            if (parsed.customMineralData !== undefined && Array.isArray(parsed.customMineralData)) {
+                customMineralData.value = parsed.customMineralData
+            }
+            
             // 根据当前模式加载对应的数据
             const modeKey = quantityMode.value === '缺失' ? 'missing' : 'all'
             const modeData = parsed[modeKey]
@@ -116,8 +164,20 @@ const loadFromLocalStorage = () => {
                 if (modeData.wastePenalty !== undefined) {
                     wastePenalty.value = modeData.wastePenalty
                 }
+                if (modeData.shortagePenalty !== undefined) {
+                    shortagePenalty.value = modeData.shortagePenalty
+                }
                 if (modeData.purchaseMode !== undefined) {
                     purchaseMode.value = modeData.purchaseMode
+                }
+                if (modeData.liquidityImpact !== undefined) {
+                    liquidityImpact.value = modeData.liquidityImpact
+                }
+                if (modeData.purchaseTimeLimit !== undefined) {
+                    purchaseTimeLimit.value = modeData.purchaseTimeLimit
+                }
+                if (modeData.shippingCostPerVolume !== undefined) {
+                    shippingCostPerVolume.value = modeData.shippingCostPerVolume
                 }
                 if (modeData.fetchTime) {
                     lastFetchTime.value = modeData.fetchTime
@@ -149,22 +209,34 @@ const loadFromLocalStorage = () => {
 }
 
 const getCompressedAsteroidData = async () => {
-    // materialData 的结构是 [{ layer_id: "矿石", children: [...] }, ...]
-    // 需要找到 layer_id === '矿石' 或 '冰矿产物' 的对象，然后合并它们的 children
-    const mineralLayers = (props.materialData || []).filter(item => ['矿石', '冰矿产物'].includes(item.layer_id))
-    // 合并所有匹配层的 children
-    const allChildren: any[] = []
-    mineralLayers.forEach(layer => {
-        if (layer?.children && Array.isArray(layer.children)) {
-            allChildren.push(...layer.children)
-        }
-    })
-    const mineralData = allChildren.map((child: any) => ({
-        type_id: child.type_id,
-        type_name: child.type_name,
-        quantity: child.quantity,
-        real_quantity: child.real_quantity
-    }))
+    let mineralData: any[] = []
+    
+    // 如果使用自定义数据，使用自定义数据
+    if (useCustomData.value && customMineralData.value.length > 0) {
+        mineralData = customMineralData.value.map((item) => ({
+            type_id: item.type_id,
+            type_name: item.type_name,
+            quantity: item.quantity,
+            real_quantity: item.real_quantity
+        }))
+    } else {
+        // materialData 的结构是 [{ layer_id: "矿石", children: [...] }, ...]
+        // 需要找到 layer_id === '矿石' 或 '冰矿产物' 的对象，然后合并它们的 children
+        const mineralLayers = (props.materialData || []).filter(item => ['矿石', '冰矿产物'].includes(item.layer_id))
+        // 合并所有匹配层的 children
+        const allChildren: any[] = []
+        mineralLayers.forEach(layer => {
+            if (layer?.children && Array.isArray(layer.children)) {
+                allChildren.push(...layer.children)
+            }
+        })
+        mineralData = allChildren.map((child: any) => ({
+            type_id: child.type_id,
+            type_name: child.type_name,
+            quantity: child.quantity,
+            real_quantity: child.real_quantity
+        }))
+    }
     
     if (mineralData.length === 0) {
         ElMessage.warning('没有找到矿物数据')
@@ -173,17 +245,31 @@ const getCompressedAsteroidData = async () => {
     
     loading.value = true
     try {
+        // 自定义数据模式下，quantity_mode 参数应该被忽略（因为 quantity 和 real_quantity 相同）
+        const quantityModeParam = useCustomData.value ? '全部' : quantityMode.value
+        // 仅在收单模式下启用流动性溢价参数，其余情况下传 0
+        const liquidityImpactParam = purchaseMode.value === '收单' ? liquidityImpact.value : 0.0
+        // 仅在收单模式下传递采购时间上限参数
+        const purchaseTimeLimitParam = purchaseMode.value === '收单' ? purchaseTimeLimit.value : 7
         const res = await http.post('/EVE/industry/getCompressedAsteroidData', {
             mineral_data: mineralData,
             refinement_rate: refinementRate.value / 100, // 将百分比转换为小数
             waste_penalty: wastePenalty.value,
+            shortage_penalty: shortagePenalty.value,
             purchase_mode: purchaseMode.value,
-            quantity_mode: quantityMode.value
+            quantity_mode: quantityModeParam,
+            liquidity_impact: liquidityImpactParam,
+            purchase_time_limit: purchaseTimeLimitParam,
+            shipping_cost_per_volume: shippingCostPerVolume.value
         })
         
         if (!res.ok) {
-            ElMessage.error(`请求失败: HTTP ${res.status}`)
-            ElMessage.error((await res.json()).message)
+            try {
+                const errorData = await res.json()
+                ElMessage.error(errorData.message || `请求失败: HTTP ${res.status}`)
+            } catch {
+                ElMessage.error(`请求失败: HTTP ${res.status}`)
+            }
             return
         }
         
@@ -230,6 +316,11 @@ const formatAccounting = (value: number | string | null | undefined): string => 
 
 // 需求矿物数据（从 props.materialData 提取）
 const requiredMinerals = computed(() => {
+    // 如果使用自定义数据，直接返回自定义数据
+    if (useCustomData.value && customMineralData.value.length > 0) {
+        return customMineralData.value
+    }
+    
     // 找到所有 layer_id === '矿石' 或 '冰矿产物' 的对象
     const mineralLayers = (props.materialData || []).filter(item => ['矿石', '冰矿产物'].includes(item.layer_id))
     if (mineralLayers.length === 0) {
@@ -311,14 +402,75 @@ const excessMinerals = computed(() => {
     return compressedAsteroidData.value?.excess_minerals_res || {}
 })
 
+// 不足矿物数据
+const shortageMinerals = computed(() => {
+    return compressedAsteroidData.value?.shortage_minerals_res || {}
+})
+
 // 矿石采购表数据（将 purcheses_res 转为数组）
 const orePurchaseTableData = computed(() => {
     if (!compressedAsteroidData.value?.purcheses_res) {
         return []
     }
     
-    return Object.entries(compressedAsteroidData.value.purcheses_res).map(([oreId, data]) => ({
-        type_id: oreId,
+    return Object.entries(compressedAsteroidData.value.purcheses_res).map(([oreId, data]) => {
+        const basePrice = data.base_avrprice ?? data.avrprice
+        
+        // 计算产出价值：从 mineral_yields 中获取该矿石产出的所有矿物，计算总价值
+        let outputValue = 0
+        if (compressedAsteroidData.value?.mineral_yields?.[oreId]) {
+            Object.entries(compressedAsteroidData.value.mineral_yields[oreId]).forEach(([mineralId, [yieldQuantity]]) => {
+                // 获取矿物的jitabuy价格（优先从 shortage_minerals_res 获取，然后从 excess_minerals_res 获取）
+                const mineralPrice = 
+                    compressedAsteroidData.value?.shortage_minerals_res?.[mineralId]?.price ||
+                    compressedAsteroidData.value?.excess_minerals_res?.[mineralId]?.price ||
+                    0
+                outputValue += yieldQuantity * mineralPrice
+            })
+        }
+        
+        return {
+            type_id: oreId,
+            name: data.name,
+            name_zh: data.name_zh,
+            quantity: data.quantity,
+            // 表格主展示使用基准均价
+            avrprice: basePrice,
+            // 保留基准价字段以便需要时调试
+            base_avrprice: basePrice,
+            liquidity_premium_rate: data.liquidity_premium_rate,
+            // 表格主展示使用基准总价
+            total_price: data.total_price,
+            total_price_with_liquidity: data.total_price_with_liquidity,
+            // 产出价值（精炼后的价值，使用jitabuy价格）
+            output_value: outputValue
+        }
+    })
+})
+
+// 总价计算（所有矿石的总价之和，使用基准成本）
+const totalCost = computed(() => {
+    // 优先使用后端返回的基准总成本
+    if (compressedAsteroidData.value?.total_cost !== undefined) {
+        return compressedAsteroidData.value.total_cost
+    }
+    // 兼容旧数据：从表数据汇总
+    if (!compressedAsteroidData.value?.purcheses_res) {
+        return 0
+    }
+    return Object.values(compressedAsteroidData.value.purcheses_res).reduce((sum, ore) => {
+        return sum + (ore.total_price || 0)
+    }, 0)
+})
+
+// 矿物采购表数据（将 mineral_purchases_res 转为数组）
+const mineralPurchaseTableData = computed(() => {
+    if (!compressedAsteroidData.value?.mineral_purchases_res) {
+        return []
+    }
+    
+    return Object.entries(compressedAsteroidData.value.mineral_purchases_res).map(([mineralId, data]) => ({
+        type_id: mineralId,
         name: data.name,
         name_zh: data.name_zh,
         quantity: data.quantity,
@@ -327,14 +479,24 @@ const orePurchaseTableData = computed(() => {
     }))
 })
 
-// 总价计算（所有矿石的总价之和）
-const totalCost = computed(() => {
-    if (!compressedAsteroidData.value?.purcheses_res) {
+// 矿物采购总价值
+const totalMineralCost = computed(() => {
+    // 优先使用后端返回的值
+    if (compressedAsteroidData.value?.total_mineral_cost !== undefined) {
+        return compressedAsteroidData.value.total_mineral_cost
+    }
+    // 如果后端未返回，则从前端数据计算
+    if (!compressedAsteroidData.value?.mineral_purchases_res) {
         return 0
     }
-    return Object.values(compressedAsteroidData.value.purcheses_res).reduce((sum, ore) => {
-        return sum + (ore.total_price || 0)
+    return Object.values(compressedAsteroidData.value.mineral_purchases_res).reduce((sum, mineral) => {
+        return sum + (mineral.total_price || 0)
     }, 0)
+})
+
+// 总采购价值（矿石采购总价值 + 矿物采购总价值）
+const totalPurchaseCost = computed(() => {
+    return totalCost.value + totalMineralCost.value
 })
 
 // 产出价值总和
@@ -344,6 +506,14 @@ const totalProducedValue = computed(() => {
     }, 0)
 })
 
+// 折扣比例（矿物产出总价值 / 矿石采购总价值）
+const discountRatio = computed(() => {
+    if (totalCost.value === 0) {
+        return 0
+    }
+    return (totalCost.value / totalProducedValue.value) * 100
+})
+
 // 多余价值总和
 const totalExcessValue = computed(() => {
     return mineralComparisonTableData.value.reduce((sum, row) => {
@@ -351,8 +521,42 @@ const totalExcessValue = computed(() => {
     }, 0)
 })
 
+// 不足价值总和
+const totalShortageValue = computed(() => {
+    return mineralComparisonTableData.value.reduce((sum, row) => {
+        return sum + (row.shortage_value || 0)
+    }, 0)
+})
+
+// 需求总价值（所有需求矿物的总价值）
+const totalRequiredValue = computed(() => {
+    if (!requiredMinerals.value || requiredMinerals.value.length === 0) {
+        return 0
+    }
+    
+    return requiredMinerals.value.reduce((sum, mineral: any) => {
+        const mineralId = String(mineral.type_id || '')
+        const quantity = mineral.quantity || 0
+        
+        // 只计算正数需求，负数表示有盈余，不需要计入需求总价值
+        if (quantity <= 0) {
+            console.log(`矿物 ${mineralId} 需求为 ${quantity}，不需要计入需求总价值`)
+            return sum
+        }
+        
+        // 从 excess_minerals_res 或 shortage_minerals_res 中获取价格
+        const price = compressedAsteroidData.value?.excess_minerals_res?.[mineralId]?.price 
+            || compressedAsteroidData.value?.shortage_minerals_res?.[mineralId]?.price 
+            || 0
+        
+        console.log(`矿物 ${mineralId} 需求为 ${quantity}，价格为 ${price}，需要计入需求总价值`)
+        console.log(`需求总价值为 ${sum + (quantity * price)}`)
+        return sum + (quantity * price)
+    }, 0)
+})
+
 // 矿石采购总体积
-const totalVolume = computed(() => {
+const totalOreVolume = computed(() => {
     if (!compressedAsteroidData.value?.purcheses_res) {
         return 0
     }
@@ -363,12 +567,42 @@ const totalVolume = computed(() => {
     }, 0)
 })
 
-// 预估运费（按照 20000m³ = 10000000 ISK 计算）
-const estimatedShippingCost = computed(() => {
-    if (totalVolume.value === 0) {
+// 矿物采购总体积
+const totalMineralVolume = computed(() => {
+    if (!compressedAsteroidData.value?.mineral_purchases_res) {
         return 0
     }
-    return (totalVolume.value / 20000) * 10000000
+    return Object.values(compressedAsteroidData.value.mineral_purchases_res).reduce((sum, mineral) => {
+        const volume = mineral.volume || 0
+        const quantity = mineral.quantity || 0
+        return sum + (volume * quantity)
+    }, 0)
+})
+
+// 采购总体积（矿石 + 矿物）
+const totalVolume = computed(() => {
+    return totalOreVolume.value + totalMineralVolume.value
+})
+
+// 预估运费（使用用户设置的运费单价）
+const estimatedShippingCost = computed(() => {
+    if (totalVolume.value === 0 || shippingCostPerVolume.value === 0) {
+        return 0
+    }
+    return totalVolume.value * shippingCostPerVolume.value
+})
+
+// 总成本（采购价值 + 运费）
+const totalCostWithShipping = computed(() => {
+    return totalPurchaseCost.value + estimatedShippingCost.value
+})
+
+// 总成本折扣比例（总成本 / 需求总价值 * 100）
+const totalCostDiscountRatio = computed(() => {
+    if (totalRequiredValue.value === 0) {
+        return 0
+    }
+    return (totalCostWithShipping.value / totalRequiredValue.value) * 100
 })
 
 // 多余价值占产出价值百分比
@@ -379,7 +613,7 @@ const excessValuePercentage = computed(() => {
     return (totalExcessValue.value / totalProducedValue.value) * 100
 })
 
-// 矿物对比表数据（合并需求、产出、多余矿物）
+// 矿物对比表数据（合并需求、产出、多余矿物、不足矿物）
 const mineralComparisonTableData = computed(() => {
     const result: Array<{
         type_id: string
@@ -388,8 +622,10 @@ const mineralComparisonTableData = computed(() => {
         required_quantity: number
         produced_quantity: number
         excess_quantity: number
+        shortage_quantity: number
         produced_value: number
         excess_value: number
+        shortage_value: number
     }> = []
     
     // 获取所有唯一的矿物ID，统一转换为字符串类型
@@ -410,47 +646,65 @@ const mineralComparisonTableData = computed(() => {
         mineralIds.add(String(mineralId))
     })
     
+    // 从不足矿物中添加
+    Object.keys(shortageMinerals.value).forEach(mineralId => {
+        mineralIds.add(String(mineralId))
+    })
+    
     // 构建表格数据
     mineralIds.forEach(mineralId => {
         // 统一使用字符串类型的 mineralId 进行查找
         const required = requiredMinerals.value.find((m: any) => String(m.type_id || '') === mineralId)
         const produced = producedMinerals.value[mineralId]
         const excess = excessMinerals.value[mineralId]
+        const shortage = shortageMinerals.value[mineralId]
         
-        // 获取矿物价格（从 excess_minerals_res 中获取，如果不存在则使用 0）
-        const mineralPrice = excess?.price || compressedAsteroidData.value?.excess_minerals_res?.[mineralId]?.price || 0
+        // 获取矿物价格（优先从 shortage_minerals_res 获取，然后从 excess_minerals_res 获取，如果不存在则使用 0）
+        const mineralPrice = shortage?.price || excess?.price || compressedAsteroidData.value?.shortage_minerals_res?.[mineralId]?.price || compressedAsteroidData.value?.excess_minerals_res?.[mineralId]?.price || 0
         
         const producedQuantity = produced?.quantity || 0
         const excessQuantity = excess?.quantity || 0
+        const shortageQuantity = shortage?.quantity || 0
         
         result.push({
             type_id: mineralId,
-            type_name: required?.type_name || produced?.type_id || excess?.name || '',
-            type_name_zh: required?.type_name_zh || excess?.name_zh || '',
+            type_name: required?.type_name || produced?.type_id || excess?.name || shortage?.name || '',
+            type_name_zh: required?.type_name_zh || excess?.name_zh || shortage?.name_zh || '',
             required_quantity: required?.quantity || 0,
             produced_quantity: producedQuantity,
             excess_quantity: excessQuantity,
+            shortage_quantity: shortageQuantity,
             produced_value: producedQuantity * mineralPrice,
-            excess_value: excessQuantity * mineralPrice
+            excess_value: excessQuantity * mineralPrice,
+            shortage_value: shortageQuantity * mineralPrice
         })
     })
     
-    // 过滤掉需求为0的行
-    return result.filter(row => row.required_quantity > 0)
+    // 显示所有有需求或产出的矿物（过滤掉既无需求也无产出的行）
+    return result.filter(row => row.required_quantity > 0 || row.produced_quantity > 0)
 })
 
-// 步骤5：桑吉图数据准备
+// 步骤5：桑吉图数据准备（按价值分配比例）
 const sankeyData = computed(() => {
     if (!compressedAsteroidData.value?.mineral_yields || !compressedAsteroidData.value?.purcheses_res) {
         return { nodes: [], links: [] }
     }
     
     const nodes: Array<{ name: string }> = []
-    const links: Array<{ source: string; target: string; value: number }> = []
+    const links: Array<{
+        source: string
+        target: string
+        value: number           // 显示用的“价值占比”（百分比）
+        rawValue: number        // 实际价值（ISK）
+        percentage: number      // 占比（同 value，单独存一份方便 tooltip 使用）
+    }> = []
     
     // 创建节点映射，避免重复
     const nodeMap = new Map<string, number>()
     let nodeIndex = 0
+    
+    // 记录每个矿石对应的总产出价值，用于计算占比
+    const oreTotalValueMap = new Map<string, number>()
     
     // 添加矿石节点（左侧）
     Object.entries(compressedAsteroidData.value.purcheses_res).forEach(([oreId, oreData]) => {
@@ -461,7 +715,14 @@ const sankeyData = computed(() => {
         }
     })
     
-    // 添加矿物节点（右侧）并构建连接
+    // 临时保存原始价值，用于后续计算占比
+    const tempLinks: Array<{
+        source: string
+        target: string
+        rawValue: number
+    }> = []
+    
+    // 添加矿物节点（右侧）并构建连接（使用价值而非数量）
     Object.entries(compressedAsteroidData.value.mineral_yields).forEach(([oreId, minerals]) => {
         const oreData = compressedAsteroidData.value?.purcheses_res?.[oreId]
         if (!oreData) return
@@ -474,18 +735,53 @@ const sankeyData = computed(() => {
             const requiredData = requiredMinerals.value.find((m: any) => m.type_id === mineralId)
             const targetName = excessData?.name_zh || requiredData?.type_name_zh || requiredData?.type_name || mineralId
             
+            // 获取矿物价格（与矿物对比表中一致的价格获取逻辑）
+            const shortageData = compressedAsteroidData.value?.shortage_minerals_res?.[mineralId]
+            const mineralPrice =
+                shortageData?.price ||
+                excessData?.price ||
+                compressedAsteroidData.value?.shortage_minerals_res?.[mineralId]?.price ||
+                compressedAsteroidData.value?.excess_minerals_res?.[mineralId]?.price ||
+                0
+            
+            // 按价值计算（数量 * 单价）
+            const rawValue = yieldQuantity * mineralPrice
+            if (!rawValue || rawValue <= 0) {
+                return
+            }
+            
             // 添加矿物节点（如果不存在）
             if (!nodeMap.has(targetName)) {
                 nodes.push({ name: targetName })
                 nodeMap.set(targetName, nodeIndex++)
             }
             
-            // 添加连接
-            links.push({
+            // 记录原始价值
+            tempLinks.push({
                 source: sourceName,
                 target: targetName,
-                value: yieldQuantity
+                rawValue
             })
+            
+            // 累计该矿石的总产出价值
+            const prevTotal = oreTotalValueMap.get(sourceName) || 0
+            oreTotalValueMap.set(sourceName, prevTotal + rawValue)
+        })
+    })
+    
+    // 将原始价值转换为“占比”（百分比），保证每个矿石的输出总和为 100
+    tempLinks.forEach(link => {
+        const oreTotal = oreTotalValueMap.get(link.source) || 0
+        if (!oreTotal || oreTotal <= 0) {
+            return
+        }
+        const percentage = (link.rawValue / oreTotal) * 100
+        links.push({
+            source: link.source,
+            target: link.target,
+            value: link.rawValue,  // 使用实际价值，让条带宽度按价值比例显示
+            rawValue: link.rawValue,
+            percentage  // 保留百分比用于 tooltip 显示
         })
     })
     
@@ -609,9 +905,25 @@ const updateSankeyChart = () => {
                 triggerOn: 'mousemove',
                 formatter: (params: any) => {
                     if (params.dataType === 'edge') {
-                        return `${params.data.source} → ${params.data.target}<br/>数量: ${formatAccounting(params.data.value)}`
+                        const rawValue = params.data.rawValue ?? params.data.value
+                        const percentage = params.data.percentage ?? params.data.value
+                        return `${params.data.source} → ${params.data.target}` +
+                            `<br/>价值: ${formatAccounting(rawValue)} ISK` +
+                            `<br/>价值占比: ${formatAccounting(percentage)}%`
                     }
-                    return params.name
+                    
+                    // 节点（尤其是右侧矿物节点）显示总价值
+                    const name = params.name
+                    // 汇总所有指向该节点的连线 rawValue 作为总价值
+                    const totalValue = sankeyData.value.links
+                        .filter(link => link.target === name)
+                        .reduce((sum, link) => sum + (link.rawValue || 0), 0)
+                    
+                    if (totalValue > 0) {
+                        return `${name}<br/>总价值: ${formatAccounting(totalValue)} ISK`
+                    }
+                    
+                    return name
                 }
             },
             series: [
@@ -764,6 +1076,35 @@ watch(
     }
 )
 
+// 监听 useCustomData 变化
+watch(
+    () => useCustomData.value,
+    (newValue) => {
+        if (newValue) {
+            // 切换到自定义数据模式
+            // 如果有自定义数据且已计算过，直接显示结果
+            if (customMineralData.value.length > 0 && compressedAsteroidData.value) {
+                console.log('切换到自定义数据模式，使用已有计算结果')
+                // 数据已经存在，图表会自动更新
+            } else if (customMineralData.value.length > 0) {
+                // 有自定义数据但未计算，可以提示用户点击求解
+                console.log('切换到自定义数据模式，请点击求解按钮进行计算')
+            } else {
+                console.log('切换到自定义数据模式，但暂无自定义数据')
+            }
+        } else {
+            // 切换回普通模式
+            console.log('切换回普通模式')
+            // 如果当前有计算结果，可能需要重新计算（因为数据源变了）
+            if (compressedAsteroidData.value) {
+                // 可以选择清空数据或保持显示（这里选择保持显示，用户需要时再点击求解）
+            }
+        }
+        // 保存状态
+        saveToLocalStorage()
+    }
+)
+
 onMounted(() => {
     // 加载本地数据
     loadFromLocalStorage()
@@ -824,6 +1165,192 @@ const copyOreData = () => {
     })
 }
 
+// 复制矿物名称和数量
+const copyMineralData = () => {
+    if (!mineralPurchaseTableData.value || mineralPurchaseTableData.value.length === 0) {
+        ElMessage.warning('没有可复制的数据')
+        return
+    }
+    
+    // 格式化数据：每行格式为 "矿物名称 数量"
+    const text = mineralPurchaseTableData.value.map(row => {
+        const name = row.name_zh || row.name || ''
+        const quantity = formatAccounting(row.quantity)
+        return `${name}\t${quantity}`
+    }).join('\n')
+    
+    // 复制到剪贴板
+    navigator.clipboard.writeText(text).then(() => {
+        ElMessage.success('已复制矿物名称和数量到剪贴板')
+    }).catch(err => {
+        console.error('复制失败:', err)
+        ElMessage.error('复制失败，请重试')
+    })
+}
+
+// 解析导入文本
+const parseImportText = async () => {
+    if (!importText.value.trim()) {
+        ElMessage.warning('请输入要导入的内容')
+        return
+    }
+    
+    importLoading.value = true
+    const lines = importText.value.split('\n')
+    const parsedData: Array<{
+        type_id: number
+        type_name: string
+        type_name_zh: string
+        quantity: number
+        real_quantity: number
+    }> = []
+    const errors: string[] = []
+    const mineralMap = new Map<number, {
+        type_id: number
+        type_name: string
+        type_name_zh: string
+        quantity: number
+    }>()
+    
+    try {
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim()
+            if (!line) continue
+            
+            // 使用空格或制表符切分
+            const parts = line.split(/\s+/).filter(part => part.length > 0)
+            if (parts.length === 0) continue
+            
+            let quantity: number | null = null
+            const nameParts: string[] = []
+            
+            // 从左到右遍历，找到第一个数字作为需求数量
+            for (const part of parts) {
+                // 尝试解析为数字（支持千分位分隔符）
+                const numStr = part.replace(/,/g, '')
+                const num = parseFloat(numStr)
+                if (!isNaN(num) && isFinite(num) && num > 0) {
+                    quantity = num
+                    break
+                } else {
+                    nameParts.push(part)
+                }
+            }
+            
+            if (quantity === null) {
+                errors.push(`第 ${i + 1} 行：未找到有效的数量`)
+                continue
+            }
+            
+            if (nameParts.length === 0) {
+                errors.push(`第 ${i + 1} 行：未找到矿物名称`)
+                continue
+            }
+            
+            // 尝试组合名称片段查询
+            let found = false
+            for (let j = nameParts.length; j > 0; j--) {
+                const testName = nameParts.slice(0, j).join(' ')
+                try {
+                    const res = await http.post('/EVE/industry/searchMineralOrIceProduct', {
+                        name: testName
+                    })
+                    
+                    if (!res.ok) {
+                        // 如果有后端返回的message，记录到errors中（但不立即显示，避免循环中产生太多消息）
+                        try {
+                            const errorData = await res.json()
+                            if (errorData.message && j === nameParts.length) {
+                                // 只在最后一次尝试失败时记录，避免重复
+                                errors.push(`第 ${i + 1} 行查询失败: ${errorData.message}`)
+                            }
+                        } catch {
+                            // 无法解析响应体，继续重试
+                        }
+                        continue
+                    }
+                    
+                    const data = await res.json()
+                    if (data.status === 200 && data.data) {
+                        const typeId = Number(data.data.type_id)
+                        
+                        // 如果已存在，累加数量
+                        if (mineralMap.has(typeId)) {
+                            const existing = mineralMap.get(typeId)!
+                            existing.quantity += quantity
+                        } else {
+                            mineralMap.set(typeId, {
+                                type_id: typeId,
+                                type_name: data.data.type_name || '',
+                                type_name_zh: data.data.type_name_zh || '',
+                                quantity: quantity
+                            })
+                        }
+                        found = true
+                        break
+                    }
+                } catch (error) {
+                    // 继续尝试下一个名称片段
+                    continue
+                }
+            }
+            
+            if (!found) {
+                errors.push(`第 ${i + 1} 行：无法识别矿物 "${nameParts.join(' ')}"`)
+            }
+        }
+        
+        // 转换为数组格式
+        mineralMap.forEach((value) => {
+            parsedData.push({
+                type_id: value.type_id,
+                type_name: value.type_name,
+                type_name_zh: value.type_name_zh,
+                quantity: value.quantity,
+                real_quantity: value.quantity
+            })
+        })
+        
+        if (parsedData.length === 0) {
+            ElMessage.error('未能解析出任何有效的矿物数据')
+            return
+        }
+        
+        // 保存解析结果
+        customMineralData.value = parsedData
+        saveToLocalStorage()
+        
+        // 显示结果
+        const successMsg = `成功导入 ${parsedData.length} 种矿物`
+        if (errors.length > 0) {
+            ElMessage.warning(`${successMsg}，但有 ${errors.length} 行解析失败`)
+            console.warn('解析错误:', errors)
+        } else {
+            ElMessage.success(successMsg)
+        }
+        
+        // 关闭弹窗
+        importDialogVisible.value = false
+        importText.value = ''
+        
+        // 如果已开启自定义数据模式，自动触发计算
+        if (useCustomData.value && parsedData.length > 0) {
+            await getCompressedAsteroidData()
+        }
+    } catch (error) {
+        console.error('解析导入文本失败:', error)
+        ElMessage.error('解析导入文本失败，请重试')
+    } finally {
+        importLoading.value = false
+    }
+}
+
+// 打开导入弹窗
+const openImportDialog = () => {
+    importDialogVisible.value = true
+    importText.value = ''
+}
+
 </script>
 
 <template>
@@ -843,16 +1370,71 @@ const copyOreData = () => {
                 <span class="unit">%</span>
             </div>
             <div class="control-item">
-                <label>多余矿物权重：</label>
+                <label>多余矿物惩罚：</label>
                 <el-input-number
                     v-model="wastePenalty"
                     :min="0"
-                    :max="1"
+                    :max="100"
+                    :step="0.1"
+                    :precision="2"
+                    controls-position="right"
+                    style="width: 150px;"
+                />
+            </div>
+            <!-- <div class="control-item">
+                <label>不足矿物惩罚：</label>
+                <el-input-number
+                    v-model="shortagePenalty"
+                    :min="0"
+                    :max="100"
+                    :step="0.1"
+                    :precision="2"
+                    controls-position="right"
+                    style="width: 150px;"
+                />
+            </div> -->
+            <div class="control-item">
+                <label>运费设置：</label>
+                <el-input-number
+                    v-model="shippingCostPerVolume"
+                    :min="0"
+                    :step="1"
+                    :precision="0"
+                    controls-position="right"
+                    style="width: 150px;"
+                />
+                <span class="unit">isk/m³</span>
+            </div>
+            <div class="control-item" v-if="purchaseMode === '收单'">
+                <label>收单流动性溢价：</label>
+                <el-input-number
+                    v-model="liquidityImpact"
+                    :min="0"
+                    :max="100"
                     :step="0.01"
                     :precision="2"
                     controls-position="right"
                     style="width: 150px;"
                 />
+                <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                    仅在收单模式生效，0 为关闭，建议 0.1～5.0
+                </span>
+            </div>
+            <div class="control-item" v-if="purchaseMode === '收单'">
+                <label>采购时间上限：</label>
+                <el-input-number
+                    v-model="purchaseTimeLimit"
+                    :min="1"
+                    :max="30"
+                    :step="1"
+                    :precision="0"
+                    controls-position="right"
+                    style="width: 150px;"
+                />
+                <span class="unit">天</span>
+                <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                    用于流动性检查，基于30天平均交易量计算预期交易量
+                </span>
             </div>
             <div class="control-item">
                 <label>采购模式：</label>
@@ -872,10 +1454,26 @@ const copyOreData = () => {
                     inactive-value="全部"
                     active-text="缺失"
                     inactive-text="全部"
+                    :disabled="useCustomData"
                 />
             </div>
-            <el-button @click="getCompressedAsteroidData" :loading="loading">
-                获取压缩矿
+            <div class="control-item">
+                <label>使用自定义数据：</label>
+                <el-switch
+                    v-model="useCustomData"
+                    active-text="是"
+                    inactive-text="否"
+                />
+            </div>
+            <el-button 
+                v-if="useCustomData" 
+                @click="openImportDialog"
+                type="primary"
+            >
+                导入自定义清单
+            </el-button>
+            <el-button @click="getCompressedAsteroidData" :loading="loading" type="primary">
+                <el-icon :size="18"><Cpu /></el-icon> 求解
             </el-button>
             <div v-if="lastFetchTime" class="control-item">
                 <label>上次获取时间：</label>
@@ -948,23 +1546,49 @@ const copyOreData = () => {
                                 <template #title>
                                     <div class="statistic-title">
                                         <span class="statistic-icon">📦</span>
-                                        矿石采购总体积
+                                        采购总体积
                                     </div>
                                 </template>
                             </el-statistic>
+                            <div class="volume-details">
+                                <div>矿石: {{ formatAccounting(totalOreVolume) }} m³</div>
+                                <div>矿物: {{ formatAccounting(totalMineralVolume) }} m³</div>
+                                <div class="volume-total">总计: {{ formatAccounting(totalVolume) }} m³</div>
+                            </div>
                         </div>
                     </el-col>
                     <el-col :xs="24" :sm="12" :md="8" :lg="8" :xl="8" class="statistic-col">
-                        <div class="statistic-item statistic-item-cost">
+                        <div class="statistic-item statistic-item-purchase">
                             <el-statistic 
-                                :value="totalCost" 
+                                :value="totalPurchaseCost" 
                                 :precision="2"
                                 suffix=" ISK"
                             >
                                 <template #title>
                                     <div class="statistic-title">
-                                        <span class="statistic-icon">💰</span>
-                                        矿石采购总价值
+                                        <span class="statistic-icon">🛒</span>
+                                        采购总价值
+                                    </div>
+                                </template>
+                            </el-statistic>
+                            <div class="purchase-details">
+                                <div>矿石: {{ formatAccounting(totalCost) }} ISK</div>
+                                <div>矿物: {{ formatAccounting(totalMineralCost) }} ISK</div>
+                                <div class="purchase-total">总计: {{ formatAccounting(totalPurchaseCost) }} ISK</div>
+                            </div>
+                        </div>
+                    </el-col>
+                    <el-col :xs="24" :sm="12" :md="8" :lg="8" :xl="8" class="statistic-col">
+                        <div class="statistic-item statistic-item-required">
+                            <el-statistic 
+                                :value="totalRequiredValue" 
+                                :precision="2"
+                                suffix=" ISK"
+                            >
+                                <template #title>
+                                    <div class="statistic-title">
+                                        <span class="statistic-icon">🎯</span>
+                                        需求总价值
                                     </div>
                                 </template>
                             </el-statistic>
@@ -986,7 +1610,8 @@ const copyOreData = () => {
                             </el-statistic>
                         </div>
                     </el-col>
-                    <el-col :xs="24" :sm="12" :md="12" :lg="12" :xl="12" class="statistic-col">
+                    
+                    <el-col :xs="24" :sm="12" :md="8" :lg="8" :xl="8" class="statistic-col">
                         <div class="statistic-item statistic-item-produced">
                             <el-statistic 
                                 :value="totalProducedValue" 
@@ -1000,22 +1625,37 @@ const copyOreData = () => {
                                     </div>
                                 </template>
                             </el-statistic>
+                            <div class="produced-details">
+                                <div class="discount-ratio">多余价值: {{ formatAccounting(totalExcessValue) }} </div>
+                            </div>
+                            <div class="produced-details">
+                                <div class="discount-ratio">多余比例: {{ formatAccounting(totalExcessValue / totalProducedValue * 100) }}% </div>
+                            </div>
+                            <div class="produced-details">
+                                <div class="discount-ratio">折扣比例: {{ formatAccounting(discountRatio) }}%</div>
+                            </div>
                         </div>
                     </el-col>
-                    <el-col :xs="24" :sm="12" :md="12" :lg="12" :xl="12" class="statistic-col">
-                        <div class="statistic-item statistic-item-percentage">
+                    <el-col :xs="24" :sm="12" :md="8" :lg="8" :xl="8" class="statistic-col">
+                        <div class="statistic-item statistic-item-total-cost">
                             <el-statistic 
-                                :value="excessValuePercentage" 
+                                :value="totalCostWithShipping" 
                                 :precision="2"
-                                suffix=" %"
+                                suffix=" ISK"
                             >
                                 <template #title>
                                     <div class="statistic-title">
-                                        <span class="statistic-icon">📊</span>
-                                        多余价值占产出价值百分比
+                                        <span class="statistic-icon">💳</span>
+                                        总成本
                                     </div>
                                 </template>
                             </el-statistic>
+                            <div class="total-cost-details">
+                                <div>采购: {{ formatAccounting(totalPurchaseCost) }} ISK</div>
+                                <div>运费: {{ formatAccounting(estimatedShippingCost) }} ISK</div>
+                                <div class="total-cost-total">总计: {{ formatAccounting(totalCostWithShipping) }} ISK</div>
+                                <div class="total-cost-discount">折扣比例: {{ formatAccounting(totalCostDiscountRatio) }}%</div>
+                            </div>
                         </div>
                     </el-col>
                 </el-row>
@@ -1023,8 +1663,11 @@ const copyOreData = () => {
         </div>
         
         <div v-if="compressedAsteroidData && !compressedAsteroidData.is_empty" class="compressed-asteroid-container">
-            <!-- 矿物对比表格 -->
-            <div class="layout-item mineral-comparison">
+            <el-row :gutter="20">
+                <!-- 第一行：矿物对比表格 和 矿石采购表格 -->
+                <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12" class="layout-item">
+                    <!-- 矿物对比表格 -->
+                    <div class="mineral-comparison">
                 <el-card shadow="never">
                     <template #header>
                         <span>矿物对比</span>
@@ -1032,7 +1675,7 @@ const copyOreData = () => {
                     <el-table
                         :data="mineralComparisonTableData"
                         border
-                        max-height="100%"
+                        max-height="600"
                         show-overflow-tooltip
                         style="font-size: 14px;"
                     >
@@ -1078,12 +1721,31 @@ const copyOreData = () => {
                                 {{ formatAccounting(row.excess_value) }}
                             </template>
                         </el-table-column>
+                        <el-table-column label="不足数量" prop="shortage_quantity" width="120">
+                            <template #default="{ row }">
+                                <span :style="{ color: row.shortage_quantity > 0 ? '#f56c6c' : 'inherit' }">
+                                    {{ formatAccounting(row.shortage_quantity) }}
+                                </span>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="不足价值" prop="shortage_value" width="150">
+                            <template #header>
+                                不足价值 {{ formatAccounting(totalShortageValue) }}
+                            </template>
+                            <template #default="{ row }">
+                                <span :style="{ color: row.shortage_value > 0 ? '#f56c6c' : 'inherit' }">
+                                    {{ formatAccounting(row.shortage_value) }}
+                                </span>
+                            </template>
+                        </el-table-column>
                     </el-table>
                 </el-card>
-            </div>
-            
-            <!-- 矿石采购表格 -->
-            <div class="layout-item ore-purchase">
+                    </div>
+                </el-col>
+                
+                <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12" class="layout-item">
+                    <!-- 矿石采购表格 -->
+                    <div class="ore-purchase">
                 <el-card shadow="never">
                     <template #header>
                         <span>矿石采购表</span>
@@ -1091,7 +1753,7 @@ const copyOreData = () => {
                     <el-table
                         :data="orePurchaseTableData"
                         border
-                        max-height="100%"
+                        max-height="600"
                         show-overflow-tooltip
                         style="font-size: 14px;"
                     >
@@ -1126,25 +1788,48 @@ const copyOreData = () => {
                                 {{ formatAccounting(row.quantity) }}
                             </template>
                         </el-table-column>
-                        <el-table-column label="平均价格" prop="avrprice" width="150">
+                        <el-table-column label="平均价格" prop="avrprice" width="180">
                             <template #default="{ row }">
-                                {{ formatAccounting(row.avrprice) }}
+                                <div>
+                                    <div>{{ formatAccounting(row.avrprice) }}</div>
+                                    <div
+                                        v-if="row.liquidity_premium_rate && row.liquidity_premium_rate > 0"
+                                        style="font-size: 12px; color: #909399; margin-top: 2px;"
+                                    >
+                                        流动性溢价：+{{ formatAccounting(row.liquidity_premium_rate * 100) }}%
+                                    </div>
+                                </div>
                             </template>
                         </el-table-column>
                         <el-table-column label="总价" prop="total_price" width="150">
                             <template #header>
-                                总价 {{ formatAccounting(totalCost) }}
+                                总采购价值 {{ formatAccounting(totalPurchaseCost) }}
                             </template>
                             <template #default="{ row }">
                                 {{ formatAccounting(row.total_price) }}
                             </template>
                         </el-table-column>
+                        <el-table-column label="产出价值" prop="output_value" width="150">
+                            <template #default="{ row }">
+                                {{ formatAccounting(row.output_value) }}
+                            </template>
+                        </el-table-column>
                     </el-table>
                 </el-card>
-            </div>
-            
-            <!-- 桑吉图 -->
-            <div class="layout-item sankey-chart">
+                    </div>
+                </el-col>
+                
+                <!-- 第二行：矿物采购表格 和 桑吉图 -->
+                <el-col 
+                    :xs="24" 
+                    :sm="24" 
+                    :md="mineralPurchaseTableData.length > 0 ? 12 : 24" 
+                    :lg="mineralPurchaseTableData.length > 0 ? 12 : 24" 
+                    :xl="mineralPurchaseTableData.length > 0 ? 12 : 24" 
+                    class="layout-item"
+                >
+                    <!-- 桑吉图 -->
+                    <div class="sankey-chart">
                 <el-card shadow="never">
                     <template #header>
                         <span>矿石产出矿物关系图</span>
@@ -1154,8 +1839,113 @@ const copyOreData = () => {
                         style="width: 100%; height: 600px;"
                     ></div>
                 </el-card>
-            </div>
+                    </div>
+                </el-col>
+
+                <el-col 
+                    v-if="mineralPurchaseTableData.length > 0"
+                    :xs="24" 
+                    :sm="24" 
+                    :md="12" 
+                    :lg="12" 
+                    :xl="12" 
+                    class="layout-item"
+                >
+                    <!-- 矿物采购表格 -->
+                    <div class="mineral-purchase">
+                <el-card shadow="never">
+                    <template #header>
+                        <span>矿物采购表</span>
+                    </template>
+                    <el-table
+                        :data="mineralPurchaseTableData"
+                        border
+                        max-height="600"
+                        show-overflow-tooltip
+                        style="font-size: 14px;"
+                    >
+                        <el-table-column width="70">
+                            <template #header>
+                                <el-button 
+                                    type="primary" 
+                                    size="small" 
+                                    square
+                                    @click="copyMineralData"
+                                    :icon="DocumentCopy"
+                                    title="复制全部"
+                                />
+                            </template>
+                            <template #default="{ row }">
+                                <img 
+                                    v-if="row?.type_id"
+                                    :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" 
+                                    alt="类型" 
+                                    width="40" 
+                                    height="40" 
+                                />
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="矿物名称" prop="name_zh" width="200">
+                            <template #default="{ row }">
+                                {{ row.name_zh || row.name }}
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="数量" prop="quantity" width="120">
+                            <template #default="{ row }">
+                                {{ formatAccounting(row.quantity) }}
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="平均价格" prop="avrprice" width="150">
+                            <template #default="{ row }">
+                                {{ formatAccounting(row.avrprice) }}
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="总价" prop="total_price" width="150">
+                            <template #header>
+                                总价 {{ formatAccounting(totalMineralCost) }}
+                            </template>
+                            <template #default="{ row }">
+                                {{ formatAccounting(row.total_price) }}
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </el-card>
+                    </div>
+                </el-col>
+                
+
+            </el-row>
         </div>
+        
+        <!-- 导入自定义清单弹窗 -->
+        <el-dialog
+            v-model="importDialogVisible"
+            title="导入自定义清单"
+            width="600px"
+            :close-on-click-modal="false"
+        >
+            <div style="margin-bottom: 10px;">
+                <p style="color: #606266; font-size: 14px; margin-bottom: 10px;">
+                    请输入矿物需求清单，每行格式：矿物名称 数量<br/>
+                    例如：类银超金属 Mexallon 50000000
+                </p>
+                <el-input
+                    v-model="importText"
+                    type="textarea"
+                    :rows="10"
+                    placeholder="请输入矿物需求清单..."
+                    style="font-family: monospace;"
+                />
+            </div>
+            <template #footer>
+                <span class="dialog-footer">
+                    <el-button @click="importDialogVisible = false">取消</el-button>
+                    <el-button type="primary" @click="parseImportText" :loading="importLoading">
+                        确定
+                    </el-button>
+                </span>
+            </template>
+        </el-dialog>
     </div>
 </template>
 
@@ -1249,8 +2039,16 @@ const copyOreData = () => {
     padding: 24px;
 }
 
+.statistics-card :deep(.el-row) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+}
+
 .statistic-col {
     margin-bottom: 20px;
+    display: flex;
+    align-items: stretch;
 }
 
 .statistic-col:last-child,
@@ -1268,10 +2066,14 @@ const copyOreData = () => {
     min-height: 140px;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
+    align-items: center;
     position: relative;
     overflow: hidden;
     box-sizing: border-box;
+    width: 100%;
+    flex: 1;
+    height: 100%;
 }
 
 .statistic-item::before {
@@ -1301,8 +2103,36 @@ const copyOreData = () => {
     border-top-color: #409eff;
 }
 
+.statistic-item-volume .volume-details {
+    font-size: 12px;
+    color: #909399;
+    margin-top: auto;
+    padding-top: 12px;
+    text-align: left;
+    line-height: 1.6;
+    width: 100%;
+}
+
+.statistic-item-volume .volume-total {
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    margin-top: 4px;
+}
+
+.statistic-item :deep(.el-statistic) {
+    flex: 0 0 auto;
+}
+
+.statistic-item :deep(.el-statistic__head) {
+    margin-bottom: 12px;
+}
+
 .statistic-item-cost {
     border-top-color: #67c23a;
+}
+
+.statistic-item-mineral-cost {
+    border-top-color: #409eff;
 }
 
 .statistic-item-shipping {
@@ -1315,6 +2145,73 @@ const copyOreData = () => {
 
 .statistic-item-percentage {
     border-top-color: #f56c6c;
+}
+
+.statistic-item-purchase {
+    border-top-color: #f093fb;
+}
+
+.statistic-item-required {
+    border-top-color: #4facfe;
+}
+
+.statistic-item-total-cost {
+    border-top-color: #9c27b0;
+}
+
+.statistic-item-total-cost .total-cost-details {
+    font-size: 12px;
+    color: #909399;
+    margin-top: auto;
+    padding-top: 12px;
+    text-align: left;
+    line-height: 1.6;
+    width: 100%;
+}
+
+.statistic-item-total-cost .total-cost-total {
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    margin-top: 4px;
+}
+
+.statistic-item-total-cost .total-cost-discount {
+    font-weight: 600;
+    color: var(--el-color-primary);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.statistic-item-purchase .purchase-details {
+    font-size: 12px;
+    color: #909399;
+    margin-top: auto;
+    padding-top: 12px;
+    text-align: left;
+    line-height: 1.6;
+    width: 100%;
+}
+
+.statistic-item-purchase .purchase-total {
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    margin-top: 4px;
+}
+
+.statistic-item-produced .produced-details {
+    font-size: 12px;
+    color: #909399;
+    margin-top: auto;
+    padding-top: 12px;
+    text-align: left;
+    line-height: 1.6;
+    width: 100%;
+}
+
+.statistic-item-produced .discount-ratio {
+    font-weight: 600;
+    color: var(--el-text-color-primary);
 }
 
 .statistic-title {
@@ -1386,7 +2283,8 @@ const copyOreData = () => {
         margin-bottom: 16px;
     }
     
-    .statistic-col:nth-child(3) {
+    .statistic-col:nth-child(3),
+    .statistic-col:nth-child(6) {
         margin-bottom: 0;
     }
 }
@@ -1397,81 +2295,20 @@ const copyOreData = () => {
     }
     
     .statistic-col:nth-child(3),
-    .statistic-col:nth-child(4),
-    .statistic-col:nth-child(5) {
+    .statistic-col:nth-child(6) {
         margin-bottom: 0;
     }
 }
 
 .compressed-asteroid-container {
     margin-top: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
 }
 
 .layout-item {
-    width: 100%;
+    margin-bottom: 20px;
 }
 
-/* 小于1800px：三个组件分三行 */
-@media (max-width: 1799px) {
-    .compressed-asteroid-container {
-        flex-direction: column;
-    }
-    
-    .layout-item {
-        width: 100%;
-    }
-}
-
-/* 大于1800px且小于等于2300px：两个表格第一行，桑基图第二行 */
-@media (min-width: 1800px) and (max-width: 2300px) {
-    .compressed-asteroid-container {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        grid-template-rows: auto auto;
-        gap: 20px;
-    }
-    
-    .mineral-comparison {
-        grid-column: 1;
-        grid-row: 1;
-    }
-    
-    .ore-purchase {
-        grid-column: 2;
-        grid-row: 1;
-    }
-    
-    .sankey-chart {
-        grid-column: 1 / 3;
-        grid-row: 2;
-    }
-}
-
-/* 大于2300px：三个组件同一行，宽度可调 */
-@media (min-width: 2301px) {
-    .compressed-asteroid-container {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        grid-template-rows: auto;
-        gap: 20px;
-    }
-    
-    .mineral-comparison {
-        grid-column: 1;
-        grid-row: 1;
-    }
-    
-    .ore-purchase {
-        grid-column: 2;
-        grid-row: 1;
-    }
-    
-    .sankey-chart {
-        grid-column: 3;
-        grid-row: 1;
-    }
+.layout-item:last-child {
+    margin-bottom: 0;
 }
 </style>

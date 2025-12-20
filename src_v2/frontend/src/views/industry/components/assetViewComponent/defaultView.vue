@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { Refresh } from '@element-plus/icons-vue'
+
 interface AssetItem {
     type_id: number
     type_name: string
@@ -9,9 +12,52 @@ interface AssetItem {
 interface Props {
     loading: boolean
     assetView: AssetItem[]
+    lastUpdateTime?: number | string | Date
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+    refresh: []
+}>()
+
+// 计算 lastUpdateTime，如果没有传入则返回 undefined（formatTime 会处理）
+const lastUpdateTime = computed(() => {
+    return props.lastUpdateTime
+})
+
+// 格式化时间
+const formatTime = (time?: number | string | Date): string => {
+    if (!time) return '未知'
+    
+    let date: Date
+    if (typeof time === 'number') {
+        // 如果是时间戳（毫秒），直接使用；如果是秒级时间戳，转换为毫秒
+        date = time > 1e12 ? new Date(time) : new Date(time * 1000)
+    } else if (typeof time === 'string') {
+        date = new Date(time)
+    } else {
+        date = time
+    }
+    
+    if (isNaN(date.getTime())) {
+        return '未知'
+    }
+    
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+}
+
+// 处理刷新
+const handleRefresh = () => {
+    emit('refresh')
+}
 </script>
 
 <template>
@@ -19,7 +65,28 @@ defineProps<Props>()
         <div v-if="!loading && assetView.length === 0" class="empty-state">
             <el-empty description="暂无数据" />
         </div>
-        <div v-else class="asset-grid">
+        <div v-else class="default-view-container">
+            <!-- 工具栏 -->
+            <div class="toolbar">
+                <div class="toolbar-right">
+                    <div class="last-update-time">
+                        <span class="time-label">上次获取时间：</span>
+                        <span class="time-value">{{ formatTime(lastUpdateTime) }}</span>
+                    </div>
+                    <el-button 
+                        type="primary" 
+                        :icon="Refresh"
+                        @click="handleRefresh"
+                        :loading="loading"
+                        class="refresh-button"
+                    >
+                        立即刷新
+                    </el-button>
+                </div>
+            </div>
+            
+            <!-- 资产网格 -->
+            <div class="asset-grid">
             <el-card 
                 v-for="asset in assetView" 
                 :key="asset.type_id" 
@@ -39,7 +106,8 @@ defineProps<Props>()
                         <el-tag type="success" class="asset-quantity" size="large">{{ asset.quantity }} 个</el-tag>
                     </div>
                 </div>
-            </el-card>
+                </el-card>
+            </div>
         </div>
     </div>
 </template>
@@ -54,6 +122,61 @@ defineProps<Props>()
     justify-content: center;
     align-items: center;
     min-height: 400px;
+}
+
+.default-view-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* 工具栏 */
+.toolbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    border-radius: 8px;
+}
+
+.toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.last-update-time {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #606266;
+}
+
+.time-label {
+    font-weight: 500;
+    color: #909399;
+}
+
+.time-value {
+    font-weight: 600;
+    color: #303133;
+}
+
+.refresh-button {
+    font-size: 14px;
+    padding: 10px 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+    transition: all 0.3s ease;
+}
+
+.refresh-button:hover {
+    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    transform: translateY(-1px);
 }
 
 .asset-grid {
@@ -115,6 +238,27 @@ defineProps<Props>()
 
 /* 响应式设计 */
 @media (max-width: 768px) {
+    .toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .toolbar-right {
+        width: 100%;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+    
+    .last-update-time {
+        justify-content: center;
+        width: 100%;
+    }
+    
+    .refresh-button {
+        width: 100%;
+    }
+    
     .asset-grid {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
         gap: 12px;

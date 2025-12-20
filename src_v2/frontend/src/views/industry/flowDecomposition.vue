@@ -13,10 +13,14 @@ import FlowView from './components/industryViewComponent/FlowView.vue'
 import LogisticsView from './components/industryViewComponent/LogisticsView.vue'
 import CompressedAsteroidView from './components/industryViewComponent/compressedAsteroidView.vue'
 import { useAuthStore } from '@/stores/auth'
+import LZString from 'lz-string'
 
 const authStore = useAuthStore()
 const haveAlphaRole = computed(() => {
     return authStore.user?.roles.includes('vip_alpha') || false
+})
+const haveAdminRole = computed(() => {
+    return authStore.user?.roles.includes('admin') || false
 })
 
 // localStorage key 前缀
@@ -29,7 +33,20 @@ const planList = ref<PlanTableData[]>([])
 const getPlanList = async () => {
     const res = await http.post('/EVE/industry/getPlanTableData')
     const data = await res.json()
-    planList.value = data.data
+    if (data.status !== 200) {
+        ElMessage.error(data.message || '获取计划列表失败')
+        return
+    }
+    // 如果是管理员模式，为每个计划添加 plan_key 和 plan_display_name
+    if (haveAdminRole.value) {
+        planList.value = data.data.map((plan: PlanTableData) => ({
+            ...plan,
+            plan_key: `${plan.user_name}:${plan.plan_name}`,
+            plan_display_name: `${plan.user_name}:${plan.plan_name}`
+        }))
+    } else {
+        planList.value = data.data
+    }
     
     // 如果计划列表加载完成，尝试恢复之前选择的计划
     if (planList.value.length > 0 && !selectedPlan.value) {
@@ -37,11 +54,37 @@ const getPlanList = async () => {
     }
 }
 
+// 获取当前选中计划的完整信息（包含user_name）
+const getSelectedPlanInfo = () => {
+    if (!selectedPlan.value) return null
+    
+    // 如果是管理员模式，selectedPlan 是 plan_key 格式 "user_name:plan_name"
+    if (haveAdminRole.value) {
+        // 从 planList 中查找匹配的计划
+        const plan = planList.value.find((p: any) => {
+            const key = p.plan_key || `${p.user_name}:${p.plan_name}`
+            return key === selectedPlan.value
+        })
+        if (plan) {
+            return { user_name: plan.user_name, plan_name: plan.plan_name }
+        }
+        // 如果找不到，尝试直接解析 selectedPlan（向后兼容）
+        if (selectedPlan.value.includes(':')) {
+            const [user_name, plan_name] = selectedPlan.value.split(':', 2)
+            return { user_name, plan_name }
+        }
+    }
+    
+    // 普通模式，只有 plan_name
+    const plan = planList.value.find(p => p.plan_name === selectedPlan.value)
+    return plan ? { user_name: plan.user_name, plan_name: plan.plan_name } : null
+}
+
 // 保存选中的计划到本地
-const saveSelectedPlan = (planName: string | null) => {
+const saveSelectedPlan = (planValue: string | null) => {
     try {
-        if (planName) {
-            localStorage.setItem(SELECTED_PLAN_KEY, planName)
+        if (planValue) {
+            localStorage.setItem(SELECTED_PLAN_KEY, planValue)
         } else {
             localStorage.removeItem(SELECTED_PLAN_KEY)
         }
@@ -56,7 +99,18 @@ const restoreSelectedPlan = () => {
         const savedPlan = localStorage.getItem(SELECTED_PLAN_KEY)
         if (savedPlan && planList.value.length > 0) {
             // 检查保存的计划是否还在计划列表中
-            const planExists = planList.value.some(plan => plan.plan_name === savedPlan)
+            let planExists = false
+            if (haveAdminRole.value) {
+                // 管理员模式：查找 plan_key 匹配的计划
+                planExists = planList.value.some(plan => {
+                    const planKey = (plan as any).plan_key || `${plan.user_name}:${plan.plan_name}`
+                    return planKey === savedPlan
+                })
+            } else {
+                // 普通模式：只有 plan_name
+                planExists = planList.value.some(plan => plan.plan_name === savedPlan)
+            }
+            
             if (planExists) {
                 selectedPlan.value = savedPlan
                 console.log(`恢复选中的计划: ${savedPlan}`)
@@ -71,24 +125,132 @@ const restoreSelectedPlan = () => {
     }
 }
 
-// 保存计算结果到本地
-const saveToLocal = (planName: string, data: any, keys: string) => {
+// 清理旧的存储数据（当存储空间不足时）
+const cleanupOldStorage = () => {
     try {
-        const key = `${STORAGE_KEY_PREFIX}${keys}${planName}`
-        localStorage.setItem(key, JSON.stringify(data))
-        console.log(`计算结果已保存到本地: ${planName}`)
+        const keys: string[] = []
+        // 收集所有相关的存储键
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i)
+            if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
+                keys.push(key)
+            }
+        }
+        
+        // 按时间戳排序（如果有的话），或者简单地删除最旧的一半
+        // 这里我们删除除了当前计划之外的所有数据
+        const currentPlanKeys = keys.filter(key => {
+            // 保留当前选中计划的数据
+            if (selectedPlan.value) {
+                return key.includes(selectedPlan.value)
+            }
+            return false
+        })
+        
+        // 删除其他计划的数据
+        keys.forEach(key => {
+            if (!currentPlanKeys.includes(key)) {
+                localStorage.removeItem(key)
+            }
+        })
+        
+        console.log('已清理旧的存储数据')
     } catch (error) {
-        console.error('保存到本地失败:', error)
+        console.error('清理存储数据失败:', error)
     }
 }
 
-// 从本地读取计算结果
+// 保存计算结果到本地（带压缩）
+const saveToLocal = (planName: string, data: any, keys: string) => {
+    try {
+        const key = `${STORAGE_KEY_PREFIX}${keys}${planName}`
+        const jsonString = JSON.stringify(data)
+        
+        // 尝试压缩数据
+        const compressed = LZString.compress(jsonString)
+        
+        // 如果压缩后仍然太大（超过 4MB），尝试清理旧数据
+        if (compressed && compressed.length > 4 * 1024 * 1024) {
+            console.warn('压缩后的数据仍然很大，尝试清理旧数据')
+            cleanupOldStorage()
+        }
+        
+        // 尝试保存压缩后的数据
+        if (compressed) {
+            try {
+                localStorage.setItem(key, compressed)
+                // 添加标记表示这是压缩数据
+                localStorage.setItem(`${key}_compressed`, 'true')
+                console.log(`计算结果已保存到本地（已压缩）: ${planName}, 原始大小: ${(jsonString.length / 1024).toFixed(2)}KB, 压缩后: ${(compressed.length / 1024).toFixed(2)}KB`)
+            } catch (error) {
+                // 如果压缩后仍然太大，尝试清理旧数据后重试
+                if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+                    console.warn('存储空间不足，清理旧数据后重试')
+                    cleanupOldStorage()
+                    try {
+                        localStorage.setItem(key, compressed)
+                        localStorage.setItem(`${key}_compressed`, 'true')
+                        console.log(`清理后成功保存: ${planName}`)
+                    } catch (retryError) {
+                        console.error('清理后仍然无法保存:', retryError)
+                        ElMessage.warning('数据量过大，无法保存到本地存储。部分数据可能无法离线访问。')
+                    }
+                } else {
+                    throw error
+                }
+            }
+        } else {
+            // 压缩失败，尝试保存原始数据
+            try {
+                localStorage.setItem(key, jsonString)
+                localStorage.removeItem(`${key}_compressed`)
+                console.log(`计算结果已保存到本地（未压缩）: ${planName}`)
+            } catch (error) {
+                if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+                    cleanupOldStorage()
+                    try {
+                        localStorage.setItem(key, jsonString)
+                        localStorage.removeItem(`${key}_compressed`)
+                        console.log(`清理后成功保存（未压缩）: ${planName}`)
+                    } catch (retryError) {
+                        console.error('清理后仍然无法保存:', retryError)
+                        ElMessage.warning('数据量过大，无法保存到本地存储。部分数据可能无法离线访问。')
+                    }
+                } else {
+                    throw error
+                }
+            }
+        }
+    } catch (error) {
+        console.error('保存到本地失败:', error)
+        if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+            ElMessage.warning('本地存储空间不足，无法保存数据。请清理浏览器缓存或使用其他浏览器。')
+        }
+    }
+}
+
+// 从本地读取计算结果（支持解压）
 const loadFromLocal = (planName: string, keys: string): any[] | null => {
     try {
         const key = `${STORAGE_KEY_PREFIX}${keys}${planName}`
+        const compressedFlag = localStorage.getItem(`${key}_compressed`)
         const data = localStorage.getItem(key)
+        
         if (data) {
-            const parsed = JSON.parse(data)
+            let parsed: any
+            if (compressedFlag === 'true') {
+                // 数据是压缩的，需要解压
+                const decompressed = LZString.decompress(data)
+                if (decompressed) {
+                    parsed = JSON.parse(decompressed)
+                } else {
+                    console.error('解压数据失败')
+                    return null
+                }
+            } else {
+                // 数据未压缩，直接解析
+                parsed = JSON.parse(data)
+            }
             console.log(`从本地加载计算结果: ${planName}`)
             return parsed
         }
@@ -126,16 +288,31 @@ const getPlanCalculateResultTableViewStart = async () => {
         return
     }
     try {
-        const res = await http.post('/EVE/industry/getPlanCalculateResultTableView',
-            {
-                plan_name: selectedPlan.value,
-                operate_type: "start"
-            }
-        )
+        const planInfo = getSelectedPlanInfo()
+        if (!planInfo) {
+            ElMessage.error("无法获取计划信息")
+            return
+        }
+        
+        const requestData: any = {
+            plan_name: planInfo.plan_name,
+            operate_type: "start"
+        }
+        // 如果是管理员模式且计划属于其他用户，传递 user_name
+        if (haveAdminRole.value && planInfo.user_name !== authStore.user?.username) {
+            requestData.user_name = planInfo.user_name
+        }
+        
+        const res = await http.post('/EVE/industry/getPlanCalculateResultTableView', requestData)
         
         // 检查 HTTP 响应状态
         if (!res.ok) {
-            ElMessage.error(`请求失败: HTTP ${res.status}`)
+            try {
+                const errorData = await res.json()
+                ElMessage.error(errorData.message || `请求失败: HTTP ${res.status}`)
+            } catch {
+                ElMessage.error(`请求失败: HTTP ${res.status}`)
+            }
             return
         }
         
@@ -170,20 +347,42 @@ const getPlanCalculateResultTableViewStatus = async (showCompletedMessage: boole
         return
     }
     try {
-        const res = await http.post('/EVE/industry/getPlanCalculateResultTableView',
-            {
-                plan_name: selectedPlan.value,
-                operate_type: "status"
-            }
-        )
+        const planInfo = getSelectedPlanInfo()
+        if (!planInfo) {
+            return
+        }
+        
+        const requestData: any = {
+            plan_name: planInfo.plan_name,
+            operate_type: "status"
+        }
+        // 如果是管理员模式且计划属于其他用户，传递 user_name
+        if (haveAdminRole.value && planInfo.user_name !== authStore.user?.username) {
+            requestData.user_name = planInfo.user_name
+        }
+        
+        const res = await http.post('/EVE/industry/getPlanCalculateResultTableView', requestData)
         
         if (!res.ok) {
+            // 如果有后端返回的message，显示它；否则静默失败（避免轮询时频繁报错）
+            try {
+                const errorData = await res.json()
+                if (errorData.message) {
+                    ElMessage.error(errorData.message)
+                }
+            } catch {
+                // 无法解析响应体，静默失败
+            }
             return
         }
         
         const data = await res.json()
         
         if (data.status !== 200) {
+            // 如果有后端返回的message，显示它；否则静默失败（避免轮询时频繁报错）
+            if (data.message) {
+                ElMessage.error(data.message)
+            }
             return
         }
         
@@ -237,16 +436,30 @@ const getPlanCalculateResultTableViewResult = async (showMessage: boolean = true
         return
     }
     try {
-        const res = await http.post('/EVE/industry/getPlanCalculateResultTableView',
-            {
-                plan_name: selectedPlan.value,
-                operate_type: "result"
-            }
-        )
+        const planInfo = getSelectedPlanInfo()
+        if (!planInfo) {
+            return
+        }
+        
+        const requestData: any = {
+            plan_name: planInfo.plan_name,
+            operate_type: "result"
+        }
+        // 如果是管理员模式且计划属于其他用户，传递 user_name
+        if (haveAdminRole.value && planInfo.user_name !== authStore.user?.username) {
+            requestData.user_name = planInfo.user_name
+        }
+        
+        const res = await http.post('/EVE/industry/getPlanCalculateResultTableView', requestData)
         
         // 检查 HTTP 响应状态
         if (!res.ok) {
-            ElMessage.error(`请求失败: HTTP ${res.status}`)
+            try {
+                const errorData = await res.json()
+                ElMessage.error(errorData.message || `请求失败: HTTP ${res.status}`)
+            } catch {
+                ElMessage.error(`请求失败: HTTP ${res.status}`)
+            }
             return
         }
         
@@ -451,7 +664,7 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
                         <el-select
                             v-model="selectedPlan"
                             :options="planList"
-                            :props="{value:'plan_name', label:'plan_name'}"
+                            :props="haveAdminRole ? {value: 'plan_key', label: 'plan_display_name'} : {value:'plan_name', label:'plan_name'}"
                             placeholder="请选择计划"
                             style="width: 100%"
                             clearable

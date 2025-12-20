@@ -25,7 +25,7 @@ Neo4j 模型管理器 - 负责创建索引和管理模型
 """
 from typing import List, Type, Dict, Any, TYPE_CHECKING
 from .neo4j_models import NodeModel
-from .connect_manager import neo4j_manager
+from .connect_manager import get_neo4j_manager as neo4j_manager
 from ..log import logger
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ class Neo4jModelManager:
     
     async def create_indexes(self):
         """创建所有模型的索引"""
-        async with neo4j_manager.get_transaction() as tx:
+        async with neo4j_manager().get_transaction() as tx:
             for model_class in self.registered_models:
                 await self._create_model_indexes(tx, model_class)
     
@@ -112,7 +112,7 @@ class Neo4jModelManager:
     
     async def drop_all_constraints(self):
         """删除所有约束（谨慎使用）"""
-        async with neo4j_manager.get_session() as session:
+        async with neo4j_manager().get_session() as session:
             query = "SHOW CONSTRAINTS"
             result = await session.run(query)
             
@@ -120,7 +120,7 @@ class Neo4jModelManager:
             async for record in result:
                 constraints.append(record["name"])
             
-            async with neo4j_manager.get_transaction() as tx:
+            async with neo4j_manager().get_transaction() as tx:
                 for constraint_name in constraints:
                     try:
                         await tx.run(f"DROP CONSTRAINT {constraint_name} IF EXISTS")
@@ -130,7 +130,7 @@ class Neo4jModelManager:
     
     async def drop_all_indexes(self):
         """删除所有索引（谨慎使用）"""
-        async with neo4j_manager.get_session() as session:
+        async with neo4j_manager().get_session() as session:
             query = "SHOW INDEXES"
             result = await session.run(query)
             
@@ -138,7 +138,7 @@ class Neo4jModelManager:
             async for record in result:
                 indexes.append(record["name"])
             
-            async with neo4j_manager.get_transaction() as tx:
+            async with neo4j_manager().get_transaction() as tx:
                 for index_name in indexes:
                     try:
                         await tx.run(f"DROP INDEX {index_name} IF EXISTS")
@@ -153,7 +153,7 @@ class Neo4jModelManager:
         # 从 RelationshipType 获取索引定义
         relationship_indexes = RelationshipType.get_indexes()
         
-        async with neo4j_manager.get_transaction() as tx:
+        async with neo4j_manager().get_transaction() as tx:
             for rel_type, indexes in relationship_indexes.items():
                 await self._create_relationship_indexes(tx, rel_type, indexes)
     

@@ -9,8 +9,8 @@ from aiocache import cached
 from aiocache.serializers import PickleSerializer
 import traceback
 
+from src_v2.model.EVE.sde.sde_builder.database_manager import get_sde_database_manager as sde_database_manager
 from .sde_builder import (
-    SDEDatabaseManager,
     InvTypes,
     InvGroups,
     InvCategories,
@@ -22,10 +22,9 @@ from .sde_builder import (
     TypeMaterials,
 )
 from src_v2.core.log import logger
-from src_v2.core.database.connect_manager import neo4j_manager
+from src_v2.core.database.connect_manager import get_neo4j_manager as neo4j_manager
 
 # 数据库管理器单例
-_db_manager: Optional[SDEDatabaseManager] = None
 class LockManager():
     def __init__(self):
         self.init_lock = asyncio.Lock()
@@ -61,43 +60,18 @@ _en_category_name_list: Optional[List[str]] = None
 _zh_category_name_list: Optional[List[str]] = None
 
 
-async def get_db_manager(subprocess=False) -> SDEDatabaseManager:
+async def get_db_manager():
     """获取数据库管理器单例
     
     Args:
         subprocess: 是否为子进程模式，子进程模式下使用更小的连接池
     """
-    global _db_manager
-    if _db_manager is None:
-        async with lock_manager.init_lock:
-            if _db_manager is None:  # 双重检查
-                _db_manager = SDEDatabaseManager()
-                await _db_manager.init(subprocess=subprocess)
-    return _db_manager
+    return sde_database_manager()
 
 
 class SdeUtils:
     _market_tree = None
     item_map_dict = dict()
-
-    @classmethod
-    async def init_database(cls, subprocess=False):
-        """初始化 SDE 数据库连接
-        
-        Args:
-            subprocess: 是否为子进程模式，子进程模式下使用更小的连接池
-        """
-        await get_db_manager(subprocess=subprocess)
-        logger.info("SDE 数据库连接已初始化")
-
-    @classmethod
-    async def close_database(cls):
-        """关闭 SDE 数据库连接"""
-        global _db_manager
-        if _db_manager:
-            await _db_manager.close()
-            _db_manager = None
-            logger.info("SDE 数据库连接已关闭")
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())
@@ -367,10 +341,14 @@ class SdeUtils:
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())
-    async def get_groupname_by_id(invtpye_id: int, zh: bool = False) -> Optional[str]:
+    async def get_groupname_by_id(invtpye_id: int, zh: bool = False, pdm = None) -> Optional[str]:
         """根据 typeID 获取组名称"""
         try:
-            async with (await get_db_manager()).get_readonly_session() as session:
+            if pdm:
+                m = pdm
+            else:
+                m = await get_db_manager()
+            async with m.get_readonly_session() as session:
                 group_name_field = InvGroups.groupName_zh if zh else InvGroups.groupName_en
                 stmt = (
                     select(group_name_field)
@@ -381,7 +359,8 @@ class SdeUtils:
                 result = await session.execute(stmt)
                 return result.scalar()
         except Exception as e:
-            traceback.print_exc()
+            task = asyncio.current_task()
+            traceback.print_stack(task)
             logger.warning(f"获取 type_id={invtpye_id} 的组名称时出错: {e}")
             return None
 
@@ -443,10 +422,14 @@ class SdeUtils:
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())
-    async def get_metaname_by_typeid(typeid: int, zh: bool = False) -> Optional[str]:
+    async def get_metaname_by_typeid(typeid: int, zh: bool = False, pdm = None) -> Optional[str]:
         """根据 typeID 获取 meta 名称"""
         try:
-            async with (await get_db_manager()).get_readonly_session() as session:
+            if pdm:
+                m = pdm
+            else:
+                m = await get_db_manager()
+            async with m.get_readonly_session() as session:
                 name_field = MetaGroups.nameID_zh if zh else MetaGroups.nameID_en
                 stmt = (
                     select(name_field)
@@ -492,10 +475,14 @@ class SdeUtils:
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())
-    async def get_name_by_id(type_id: int, zh: bool = False) -> Optional[str]:
+    async def get_name_by_id(type_id: int, zh: bool = False, pdm = None) -> Optional[str]:
         """根据 typeID 获取物品名称"""
         try:
-            async with (await get_db_manager()).get_readonly_session() as session:
+            if pdm:
+                m = pdm
+            else:
+                m = await get_db_manager()
+            async with m.get_readonly_session() as session:
                 name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
                 stmt = select(name_field).where(InvTypes.typeID == type_id)
                 result = await session.execute(stmt)
@@ -513,16 +500,20 @@ class SdeUtils:
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())
-    async def get_cn_name_by_id(type_id: int) -> Optional[str]:
+    async def get_cn_name_by_id(type_id: int, pdm = None) -> Optional[str]:
         """根据 typeID 获取中文名称（向后兼容方法）"""
-        return await SdeUtils.get_name_by_id(type_id, zh=True)
+        return await SdeUtils.get_name_by_id(type_id, zh=True, pdm=pdm)
 
     @classmethod
-    async def get_market_group_tree(cls):
+    async def get_market_group_tree(cls, sdm=None):
         """获取市场组树（NetworkX 图）"""
         if not cls._market_tree:
             g = nx.DiGraph()
-            async with (await get_db_manager()).get_readonly_session() as session:
+            if sdm:
+                m = sdm
+            else:
+                m = await get_db_manager()
+            async with m.get_readonly_session() as session:
                 stmt = select(MarketGroups.marketGroupID, MarketGroups.parentGroupID)
                 result = await session.execute(stmt)
                 for row in result:
@@ -564,14 +555,18 @@ class SdeUtils:
 
     @classmethod
     @cached(ttl=3600, serializer=PickleSerializer())
-    async def get_market_group_list(cls, type_id: int, zh: bool = False) -> List[str]:
+    async def get_market_group_list(cls, type_id: int, zh: bool = False, pdm = None) -> List[str]:
         """根据 typeID 获取市场组列表（从根到叶子）"""
         try:
             # 在打开数据库会话之前先获取市场组树，避免嵌套会话
             # 如果缓存已存在，不会创建新的数据库会话
-            market_tree = await cls.get_market_group_tree()
+            market_tree = await cls.get_market_group_tree(sdm=pdm)
             
-            async with (await get_db_manager()).get_readonly_session() as session:
+            if pdm:
+                m = pdm
+            else:
+                m = await get_db_manager()
+            async with m.get_readonly_session() as session:
                 # 获取物品信息和市场组ID
                 type_name_field = InvTypes.typeName_zh if zh else InvTypes.typeName_en
                 stmt = select(InvTypes.marketGroupID, type_name_field).where(InvTypes.typeID == type_id)
@@ -609,6 +604,8 @@ class SdeUtils:
                 market_group_list.reverse()
                 return market_group_list
         except Exception as e:
+            task = asyncio.current_task()
+            traceback.print_stack(task)
             logger.warning(f"获取 type_id={type_id} 的市场组列表时出错: {e}")
             return []
 
@@ -627,10 +624,14 @@ class SdeUtils:
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())
-    async def get_category_by_id(type_id: int, zh: bool = False) -> Optional[str]:
+    async def get_category_by_id(type_id: int, zh: bool = False, pdm = None) -> Optional[str]:
         """根据 typeID 获取类别名称"""
         try:
-            async with (await get_db_manager()).get_readonly_session() as session:
+            if pdm:
+                m = pdm
+            else:
+                m = await get_db_manager()
+            async with m.get_readonly_session() as session:
                 category_name_field = InvCategories.categoryName_zh if zh else InvCategories.categoryName_en
                 stmt = (
                     select(category_name_field)
@@ -647,10 +648,14 @@ class SdeUtils:
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())
-    async def get_system_info_by_id(system_id: int, zh: bool = False) -> Optional[dict]:
+    async def get_system_info_by_id(system_id: int, zh: bool = False, pdm = None) -> Optional[dict]:
         """根据 systemID 获取星系信息"""
         try:
-            async with (await get_db_manager()).get_readonly_session() as session:
+            if pdm:
+                m = pdm
+            else:
+                m = await get_db_manager()
+            async with m.get_readonly_session() as session:
                 system_name_field = MapSolarSystems.solarSystemName_zh if zh else MapSolarSystems.solarSystemName_en
                 region_name_field = MapRegions.regionName_zh if zh else MapRegions.regionName_en
                 
@@ -867,10 +872,14 @@ class SdeUtils:
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())
-    async def get_volume_by_type_id(type_id: int) -> float:
+    async def get_volume_by_type_id(type_id: int, sdm=None) -> float:
         """根据 typeID 获取体积"""
         try:
-            async with (await get_db_manager()).get_readonly_session() as session:
+            if sdm:
+                m = sdm
+            else:
+                m = await get_db_manager()
+            async with m.get_readonly_session() as session:
                 stmt = select(InvTypes.volume).where(InvTypes.typeID == type_id)
                 result = await session.execute(stmt)
                 volume = result.scalar()
@@ -880,6 +889,7 @@ class SdeUtils:
             return 0.0
 
     @staticmethod
+    @cached(ttl=3600, serializer=PickleSerializer())
     async def search_type_ids_by_criteria(search_type: str, keyword: str, max_results: int = 200) -> List[dict]:
         """
         根据搜索类型和关键字搜索type_id列表
@@ -958,7 +968,7 @@ class SdeUtils:
                 elif search_type == 'marketGroup':
                     # 通过marketGroup名称查询，使用neo4j
                     # 注意：marketGroup可能有父子关系，neo4j可以更好地处理层级关系
-                    async with neo4j_manager.get_session() as neo4j_session:
+                    async with neo4j_manager().get_session() as neo4j_session:
                         # 查询匹配的MarketGroup节点，然后找到所有连接的Type节点
                         # 关系方向：Type -[:EVE_MARKET_GROUP]-> MarketGroup
                         if is_zh:
@@ -1008,7 +1018,7 @@ class SdeUtils:
                 - ice_ore_ids: 冰矿的type_id列表
         """
         try:
-            async with neo4j_manager.get_session() as neo4j_session:
+            async with neo4j_manager().get_session() as neo4j_session:
                 # 查询标准矿石和卫星矿石
                 standard_and_moon_market_groups = ["标准矿石", "卫星矿石"]
                 query_standard_moon = """

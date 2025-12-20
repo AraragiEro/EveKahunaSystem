@@ -2,9 +2,10 @@
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { Cpu, TrendCharts, Money, ShoppingCart, DataAnalysis, Setting, ZoomIn, ArrowLeft, ArrowRight, Tools } from '@element-plus/icons-vue'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import mainViewImage from '@/assets/landing-page-mainView.png'
 import githubIconWhite from '@/assets/github-mark-white.svg'
+import aifadianLogo from '@/assets/横版-黑底-透明背景.png'
 import industryPlanImage from '@/assets/landing-page-工业规划.png'
 import marketAnalysisImage from '@/assets/landing-page-市场与利润分析.png'
 import costCalculationImage from '@/assets/landing-page-成本计算.png'
@@ -24,6 +25,21 @@ const GITHUB_REPO_URL = 'https://github.com/AraragiEro/EveKahunaSystem.git'
 // 打开 GitHub 仓库
 const openGitHub = () => {
   window.open(GITHUB_REPO_URL, '_blank')
+}
+
+// 捐赠链接（从环境变量读取）
+const donateLink = computed(() => import.meta.env.VITE_DONATE_LINK as string | undefined)
+const showDonateButton = computed(() => !!donateLink.value)
+
+// 社交群号
+const QQGroupNumber = computed(() => import.meta.env.VITE_QQ_GROUP as string | undefined)
+const showQQGroupButton = computed(() => !!QQGroupNumber.value)
+
+// 打开捐赠链接
+const openDonate = () => {
+  if (donateLink.value) {
+    window.open(donateLink.value, '_blank')
+  }
 }
 
 // 图片预览状态
@@ -225,14 +241,6 @@ const pricingPlans = [
             </el-button>
             <el-button
               size="large"
-              @click="goToLogin"
-              class="hero-button secondary"
-              v-if="!authStore.isAuthenticated"
-            >
-              登录账号
-            </el-button>
-            <el-button
-              size="large"
               @click="openGitHub"
               class="hero-button github-button"
               title="打开 GitHub 仓库"
@@ -240,9 +248,21 @@ const pricingPlans = [
               <img :src="githubIconWhite" alt="GitHub" class="github-icon" />
               GitHub
             </el-button>
+            <el-button
+              v-if="showDonateButton"
+              size="large"
+              @click="openDonate"
+              class="hero-button donate-button"
+              title="支持作者"
+            >
+              <img :src="aifadianLogo" alt="爱发电" class="donate-icon" />
+            </el-button>
           </div>
           <div class="hero-tagline">
             <span>🥰 爱来自 凛冬联盟群 紫竹梅重工</span>
+          </div>
+          <div class="hero-tagline" v-if="showQQGroupButton">
+            <span>邀请码获取请加入QQ交流群：{{ QQGroupNumber }}</span>
           </div>
         </div>
         <div class="hero-image-wrapper">
@@ -549,6 +569,27 @@ const pricingPlans = [
 .hero-button.github-button:hover {
   background: rgba(255, 255, 255, 0.25);
   border-color: rgba(255, 255, 255, 0.5);
+}
+
+.hero-button.donate-button {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: white;
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero-button.donate-button:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.donate-icon {
+  height: 80px;
+  width: auto;
+  object-fit: contain;
 }
 
 .github-icon {

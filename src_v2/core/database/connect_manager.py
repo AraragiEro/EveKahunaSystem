@@ -930,6 +930,12 @@ class PostgreDatabaseManager():
             except Exception as e:
                 logger.warning(f"关闭数据库会话时出错: {e}")
 
+    @property
+    def session_maker(self):
+        if not self._session_maker:
+            raise RuntimeError("数据库未初始化，请先调用 init() 方法")
+        return self._session_maker
+
     async def close(self):
         """关闭数据库连接"""
         if self.engine:
@@ -1203,6 +1209,37 @@ class Neo4jDatabaseManager():
         """清理所有索引（兼容旧方法名）"""
         return await self.clean_all_indexes()
 
-neo4j_manager = Neo4jDatabaseManager()
-postgres_manager = PostgreDatabaseManager()
-redis_manager = RedisDatabaseManager()
+# neo4j_manager = Neo4jDatabaseManager()
+# postgres_manager = PostgreDatabaseManager()
+# redis_manager = RedisDatabaseManager()
+
+_neo4j_manager = None
+_postgres_manager = None
+_redis_manager = None
+
+def get_neo4j_manager():
+    global _neo4j_manager
+    if _neo4j_manager is None:
+        _neo4j_manager = Neo4jDatabaseManager()
+    return _neo4j_manager
+
+def get_postgres_manager():
+    global _postgres_manager
+    if _postgres_manager is None:
+        _postgres_manager = PostgreDatabaseManager()
+    return _postgres_manager
+
+def get_redis_manager():
+    global _redis_manager
+    if _redis_manager is None:
+        _redis_manager = RedisDatabaseManager()
+    return _redis_manager
+
+def get_new_neo4j_manager():
+    return Neo4jDatabaseManager()
+
+def get_new_postgres_manager():
+    return PostgreDatabaseManager()
+
+def get_new_redis_manager():
+    return RedisDatabaseManager()

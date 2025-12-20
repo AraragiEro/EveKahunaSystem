@@ -12,18 +12,38 @@ export function setupAuthGuards(router: Router): void {
     // 支持动态路径匹配：/storage/:sid
     const isPublicPage = publicPages.includes(to.path) || to.path.startsWith('/storage/')
     
-    // 如果已经登录，访问登录页时跳转到首页
-    if (to.path === '/login' && authStore.isAuthenticated) {
-      next('/home')
+    // 如果访问登录页，检查是否已经登录（验证 token 有效性）
+    if (to.path === '/login') {
+      // 如果有 token，验证其有效性
+      if (authStore.token) {
+        const isAuthValid = await authStore.checkAuth()
+        if (isAuthValid) {
+          // token 有效，已登录，重定向到首页
+          next('/home')
+          return
+        }
+        // token 无效，checkAuth 已自动清除状态，允许访问登录页
+      }
+      // 没有 token，允许访问登录页
+      next()
       return
     }
     
     // 如果不是公开页面，检查认证状态（默认所有页面都需要认证）
     if (!isPublicPage) {
       // 如果已经有 token 和 user，并且是刚刚登录（从登录页跳转过来）
-      // 直接通过，因为登录接口已经验证了用户身份，不需要再次验证
-      // 检查 user 和 token 而不仅仅是 isAuthenticated，确保即使响应式更新延迟也能正确识别
+      // 仍然需要调用 checkAuth 获取完整的用户信息（包括完整的 roles）
+      // 因为登录接口可能返回不完整的用户数据（如 omega 用户缺少 alpha 角色）
       if ((authStore.user && authStore.token) && from.path === '/login') {
+        // 清除登录时设置的缓存，强制调用 checkAuth 获取完整的用户信息
+        // 因为登录接口返回的数据可能不完整（如 omega 用户缺少 alpha 角色）
+        authStore.clearAuthCache()
+        // 调用 checkAuth 获取完整的用户信息
+        const isAuthValid = await authStore.checkAuth()
+        if (!isAuthValid) {
+          next('/login')
+          return
+        }
         next()
         return
       }

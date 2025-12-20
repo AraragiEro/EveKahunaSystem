@@ -1,11 +1,82 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { http } from '@/http'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Share, Setting, Delete, View, Plus } from '@element-plus/icons-vue'
+import { Share, Setting, Delete, View, Plus, Loading } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
 import DefaultView from './assetViewComponent/defaultView.vue'
 import SellView from './assetViewComponent/sellView.vue'
 import WatchView from './assetViewComponent/watchView.vue'
+import StatisticsView from './assetViewComponent/statisticsView.vue'
+
+const authStore = useAuthStore()
+
+// ============== 资产视图缓存 ==============
+// 缓存数据结构
+interface AssetViewCacheData {
+    data: any  // 视图数据（对象或数组）
+    view_type: string  // 视图类型
+    config: any  // 视图配置
+    expireTime: number  // 过期时间戳
+}
+
+// 缓存键前缀
+const ASSET_VIEW_CACHE_PREFIX = 'asset_view_data_'
+// 缓存有效期：15分钟（900,000毫秒）
+const CACHE_EXPIRE_TIME = 15 * 60 * 1000
+
+// 计算15分钟后的过期时间戳
+const getCacheExpireTime = (): number => {
+    return Date.now() + CACHE_EXPIRE_TIME
+}
+
+// 检查缓存是否有效
+const isCacheValid = (cacheData: AssetViewCacheData | null): boolean => {
+    if (!cacheData) {
+        return false
+    }
+    const now = Date.now()
+    return cacheData.expireTime > now
+}
+
+// 保存视图数据到 localStorage
+const saveAssetViewCache = (sid: string, data: any, view_type: string, config: any) => {
+    try {
+        const cacheData: AssetViewCacheData = {
+            data,
+            view_type,
+            config,
+            expireTime: getCacheExpireTime()
+        }
+        const key = `${ASSET_VIEW_CACHE_PREFIX}${sid}`
+        localStorage.setItem(key, JSON.stringify(cacheData))
+        console.log(`资产视图缓存已保存: ${key}`)
+    } catch (error) {
+        console.error(`保存资产视图缓存失败 ${sid}:`, error)
+    }
+}
+
+// 从 localStorage 加载视图数据
+const loadAssetViewCache = (sid: string): AssetViewCacheData | null => {
+    try {
+        const key = `${ASSET_VIEW_CACHE_PREFIX}${sid}`
+        const data = localStorage.getItem(key)
+        if (data) {
+            const cacheData = JSON.parse(data) as AssetViewCacheData
+            if (isCacheValid(cacheData)) {
+                console.log(`从缓存加载资产视图: ${key}`)
+                return cacheData
+            } else {
+                // 缓存已过期，删除
+                localStorage.removeItem(key)
+                console.log(`资产视图缓存已过期，已删除: ${key}`)
+            }
+        }
+    } catch (error) {
+        console.error(`加载资产视图缓存失败 ${sid}:`, error)
+    }
+    return null
+}
 
 // ============== 资产视图组件映射 ==============
 // 未来添加新组件时，只需在此处添加映射关系即可
@@ -13,16 +84,59 @@ const viewComponentMap: Record<string, any> = {
     'default': DefaultView,
     'sell': SellView,
     'watch': WatchView,
+    'statistics': StatisticsView,
     // 未来可以轻松添加更多组件类型，例如：
     // 'buy': BuyView,
     // 'manufacture': ManufactureView,
     // 'research': ResearchView,
 }
 
+// ============== 管理员功能 ==============
+const haveAdminRole = computed(() => {
+    return authStore.user?.roles.includes('admin') || false
+})
+
+const selectedUserName = ref<string>('')
+const userList = ref<Array<{ userName: string }>>([])
+const userListLoading = ref(false)
+
+const fetchUserList = async () => {
+    if (!haveAdminRole.value) {
+        return
+    }
+    userListLoading.value = true
+    try {
+        const res = await http.get('/permission/users')
+        const data = await res.json()
+        if (data.status !== 200) {
+            ElMessage.error(data.message || '获取用户列表失败')
+            return
+        }
+        userList.value = data.data || []
+    } catch (error) {
+        ElMessage.error('获取用户列表失败')
+    } finally {
+        userListLoading.value = false
+    }
+}
+
+// 监听用户选择变化，重新加载资产视图列表
+watch(selectedUserName, () => {
+    getAssetViewList()
+})
+
 const assetViewList = ref<any[]>([])
 const getAssetViewList = async () => {
-    const res = await http.get('/EVE/asset/getAssetViewList')
+    const params: any = {}
+    if (haveAdminRole.value && selectedUserName.value) {
+        params.user_name = selectedUserName.value
+    }
+    const res = await http.get('/EVE/asset/getAssetViewList', params)
     const data = await res.json()
+    if (data.status !== 200) {
+        ElMessage.error(data.message || '获取资产视图列表失败')
+        return
+    }
     assetViewList.value = data.data
 }
 
@@ -30,10 +144,83 @@ const assetViewDialogVisible = ref(false)
 const assetViewDialogLoading = ref(false)
 const assetView = ref<any[]>([])
 const AssetViewDialogSid = ref('')
+const assetViewLastUpdateTime = ref<number>(Date.now())
+
+// 刷新资产视图数据（强制刷新，跳过缓存）
+const refreshAssetView = async () => {
+    if (!AssetViewDialogSid.value) return
+    
+    assetViewDialogLoading.value = true
+    
+    try {
+        // 强制刷新，从API获取数据
+        const res = await http.get('/EVE/asset/getAssetViewData', {
+            asset_view_sid: AssetViewDialogSid.value
+        })
+        const data = await res.json()
+        assetViewDialogLoading.value = false
+        
+        if (data.status !== 200) {
+            ElMessage.error(data.message)
+            return
+        }
+        
+        // 处理数据格式
+        let processedData: any
+        // 统计视图保持对象格式，其他视图转换为数组
+        if (data.view_type === 'statistics') {
+            processedData = data.data || {}
+            assetView.value = processedData
+        } else {
+            // 后端返回的是对象（字典），需要转换为数组
+            processedData = Object.values(data.data || {})
+            assetView.value = processedData
+        }
+        
+        AssetViewDialogType.value = data.view_type
+        AssetViewDialogConfig.value = data.config
+        
+        // 更新最后更新时间
+        assetViewLastUpdateTime.value = Date.now()
+        
+        // 保存到缓存
+        saveAssetViewCache(AssetViewDialogSid.value, processedData, data.view_type, data.config)
+        
+        ElMessage.success('刷新成功')
+    } catch (error) {
+        assetViewDialogLoading.value = false
+        ElMessage.error('刷新失败')
+    }
+}
+
 const handleViewAssetView = async (assetViewItem: any) => {
     assetViewDialogVisible.value = true
     assetViewDialogLoading.value = true
 
+    // 先尝试从缓存加载数据
+    const cachedData = loadAssetViewCache(assetViewItem.sid)
+    if (cachedData) {
+        // 缓存有效，直接使用缓存数据
+        assetViewDialogLoading.value = false
+        console.log("handleViewAssetView 使用缓存数据", cachedData)
+        // 统计视图保持对象格式，其他视图转换为数组
+        if (cachedData.view_type === 'statistics') {
+            assetView.value = cachedData.data || {}
+        } else {
+            // 如果缓存的数据已经是数组，直接使用；否则转换为数组
+            assetView.value = Array.isArray(cachedData.data) 
+                ? cachedData.data 
+                : Object.values(cachedData.data || {})
+        }
+        AssetViewDialogType.value = cachedData.view_type
+        AssetViewDialogConfig.value = cachedData.config
+        AssetViewDialogSid.value = assetViewItem.sid
+        // 更新最后更新时间（使用缓存时，使用当前时间）
+        assetViewLastUpdateTime.value = Date.now()
+        return
+    }
+
+    // 缓存无效或不存在，从API获取数据
     const res = await http.get('/EVE/asset/getAssetViewData', {
         asset_view_sid: assetViewItem.sid
     })
@@ -43,11 +230,29 @@ const handleViewAssetView = async (assetViewItem: any) => {
         ElMessage.error(data.message)
         return
     }
-    // 后端返回的是对象（字典），需要转换为数组
-    assetView.value = Object.values(data.data || {})
+    console.log("handleViewAssetView data", data)
+    
+    // 处理数据格式
+    let processedData: any
+    // 统计视图保持对象格式，其他视图转换为数组
+    if (data.view_type === 'statistics') {
+        processedData = data.data || {}
+        assetView.value = processedData
+    } else {
+        // 后端返回的是对象（字典），需要转换为数组
+        processedData = Object.values(data.data || {})
+        assetView.value = processedData
+    }
+    
     AssetViewDialogType.value = data.view_type
     AssetViewDialogConfig.value = data.config
     AssetViewDialogSid.value = assetViewItem.sid
+    
+    // 更新最后更新时间
+    assetViewLastUpdateTime.value = Date.now()
+    
+    // 保存到缓存
+    saveAssetViewCache(assetViewItem.sid, processedData, data.view_type, data.config)
 }
 
 // ============== 资产视图设置对话框 ==============
@@ -77,7 +282,8 @@ const assetViewSetForm = ref({
             filter_type: '',
             filter_value: ''
         }
-    ]
+    ],
+    asset_container_id_list: [] as Array<{container_id: number, owner_id: number}>
 })
 
 // ============== 过滤类型选项 ==============
@@ -196,6 +402,9 @@ const handleSetAssetView = (assetViewItem: any) => {
             filter_value: f.value || ''
         }))
     }
+    
+    // 设置容器ID列表
+    assetViewSetForm.value.asset_container_id_list = assetViewItem.asset_container_id_list || []
 }
 
 const saveAssetViewConfig = async () => {
@@ -207,14 +416,21 @@ const saveAssetViewConfig = async () => {
             value: group.filter_value
         }))
 
-    const res = await http.post('/EVE/asset/saveAssetViewConfig', {
+    const payload: any = {
         sid: assetViewSetForm.value.sid,
         tag: assetViewSetForm.value.tag,
         public: assetViewSetForm.value.public,
         filter: filters,
         view_type: assetViewSetForm.value.view_type,
         config: assetViewSetForm.value.config
-    })
+    }
+    
+    // 如果是管理员且选择了用户，传递 user_name 参数
+    if (haveAdminRole.value && selectedUserName.value) {
+        payload.user_name = selectedUserName.value
+    }
+
+    const res = await http.post('/EVE/asset/saveAssetViewConfig', payload)
     const data = await res.json()
     if (data.status !== 200) {
         ElMessage.error(data.message)
@@ -263,75 +479,145 @@ const handleDeleteAssetView = async (assetViewItem: any) => {
             }
         )
         
-        // 尝试调用删除 API（如果后端支持）
-        try {
-            const res = await http.delete('/EVE/asset/deleteAssetView', {
-                sid: assetViewItem.sid
-            })
-            const data = await res.json()
-            if (data.status !== 200) {
-                ElMessage.error(data.message || '删除失败')
-                return
-            }
-            ElMessage.success(data.message || '删除成功')
-            await getAssetViewList()
-        } catch (error: any) {
-            // 如果 API 不存在，提示用户
-            if (error?.message?.includes('404') || error?.message?.includes('Not Found')) {
-                ElMessage.warning('删除功能需要后端 API 支持，请联系管理员')
-            } else {
-                ElMessage.error('删除失败：' + (error?.message || '未知错误'))
-            }
+        const payload: any = {
+            sid: assetViewItem.sid
         }
-    } catch (error) {
-        // 用户取消删除
+        
+        // 如果是管理员且选择了用户，传递 user_name 参数
+        if (haveAdminRole.value && selectedUserName.value) {
+            payload.user_name = selectedUserName.value
+        }
+        
+        const res = await http.delete('/EVE/asset/deleteAssetView', payload)
+        const data = await res.json()
+        if (data.status !== 200) {
+            ElMessage.error(data.message || '删除失败')
+            return
+        }
+        ElMessage.success(data.message || '删除成功')
+        await getAssetViewList()
+    } catch (error: any) {
+        ElMessage.error('删除失败：' + (error?.message || '未知错误'))
     }
 }
 
 // ============== 增加监控 ==============
 const addMonitorDialogVisible = ref(false)
-const selectedContainerTag = ref('')
+const selectedContainers = ref<Array<{container_id: number, owner_id: number}>>([])
+const newViewTag = ref('')
+const containerPermissionList = ref<any[]>([])
+const containerPermissionLoading = ref(false)
 
 interface ContainerPermissionItem {
+    asset_container_id: number
+    asset_owner_id: number
+    structure_id: number
+    structure_name: string
+    system_id: number
+    system_name: string
+    owner_type: string
+    owner_name: string
     tag: string
 }
 
-const ContainerPermissionSuggestions = ref<ContainerPermissionItem[]>([])
-const StructureContainerPermissionCreateFilter = (queryString: string) => {
-    return (item: ContainerPermissionItem) => {
-        return item.tag.toLowerCase().indexOf(queryString.toLowerCase()) === 0
-    }
-}
-
-const fetchContainerPermissionSuggestions = async (queryString: string, cb: (suggestions: ContainerPermissionItem[]) => void) => {
-    const res = await http.post('/EVE/industry/getUserAllContainerPermission', {
+const fetchContainerPermissionList = async () => {
+    containerPermissionLoading.value = true
+    const payload: any = {
         force_refresh: false
-    })
-    const data = await res.json()
-    console.log("fetchContainerPermissionSuggestions data", data)
-    ContainerPermissionSuggestions.value = data.data
+    }
     
-    const results = queryString
-        ? ContainerPermissionSuggestions.value.filter(StructureContainerPermissionCreateFilter(queryString))
-        : ContainerPermissionSuggestions.value
-    cb(results)
-}
-
-const handleOpenAddMonitorDialog = () => {
-    addMonitorDialogVisible.value = true
-    selectedContainerTag.value = ''
-}
-
-const handleAddMonitor = async () => {
-    if (!selectedContainerTag.value) {
-        ElMessage.warning('请选择库存许可')
-        return
+    // 如果是管理员且选择了用户，传递 user_name 参数
+    if (haveAdminRole.value && selectedUserName.value) {
+        payload.user_name = selectedUserName.value
     }
     
     try {
-        const res = await http.post('/EVE/asset/createAssetView', {
-            container_tag: selectedContainerTag.value
-        })
+        const res = await http.post('/EVE/industry/getUserAllContainerPermission', payload)
+        const data = await res.json()
+        if (data.status !== 200) {
+            ElMessage.error(data.message || '获取容器许可列表失败')
+            containerPermissionList.value = []
+            return
+        }
+        // 使用数组替换确保响应式更新
+        containerPermissionList.value = Array.isArray(data.data) ? [...data.data] : []
+        console.log("fetchContainerPermissionList containerPermissionList", containerPermissionList.value)
+    } catch (error) {
+        ElMessage.error('获取容器许可列表失败')
+    } finally {
+        containerPermissionLoading.value = false
+    }
+}
+
+const handleOpenAddMonitorDialog = async () => {
+    selectedContainers.value = []
+    newViewTag.value = ''
+    // 在打开对话框前设置加载状态，确保用户立即看到加载提示
+    containerPermissionLoading.value = true
+    addMonitorDialogVisible.value = true
+    // 等待对话框渲染完成后再加载数据
+    await nextTick()
+    await fetchContainerPermissionList()
+    // 确保表格数据更新后清除选择状态
+    await nextTick()
+    if (containerTableRef.value) {
+        containerTableRef.value.clearSelection()
+    }
+}
+
+const handleSelectAll = () => {
+    containerPermissionList.value.forEach((row: any) => {
+        containerTableRef.value?.toggleRowSelection(row, true)
+    })
+}
+
+const handleUnselectAll = () => {
+    containerTableRef.value?.clearSelection()
+}
+
+const containerTableRef = ref()
+
+const handleTableSelectionChange = (selection: any[]) => {
+    selectedContainers.value = selection.map(item => ({
+        container_id: item.asset_container_id,
+        owner_id: item.asset_owner_id
+    }))
+}
+
+const handleToggleSelection = (containerId: number, ownerId: number) => {
+    const index = selectedContainers.value.findIndex(
+        item => item.container_id === containerId && item.owner_id === ownerId
+    )
+    if (index > -1) {
+        selectedContainers.value.splice(index, 1)
+    } else {
+        selectedContainers.value.push({ container_id: containerId, owner_id: ownerId })
+    }
+}
+
+const handleAddMonitor = async () => {
+    if (!newViewTag.value || newViewTag.value.trim() === '') {
+        ElMessage.warning('请输入标签')
+        return
+    }
+    
+    if (selectedContainers.value.length === 0) {
+        ElMessage.warning('请至少选择一个容器')
+        return
+    }
+    
+    const payload: any = {
+        container_list: selectedContainers.value,
+        tag: newViewTag.value.trim()
+    }
+    
+    // 如果是管理员且选择了用户，传递 user_name 参数
+    if (haveAdminRole.value && selectedUserName.value) {
+        payload.user_name = selectedUserName.value
+    }
+    
+    try {
+        const res = await http.post('/EVE/asset/createAssetView', payload)
         const data = await res.json()
         if (data.status !== 200) {
             ElMessage.error(data.message)
@@ -339,14 +625,172 @@ const handleAddMonitor = async () => {
         }
         ElMessage.success(data.message || '创建监控成功')
         addMonitorDialogVisible.value = false
-        selectedContainerTag.value = ''
+        selectedContainers.value = []
+        newViewTag.value = ''
         await getAssetViewList()
     } catch (error) {
         ElMessage.error('创建监控失败')
     }
 }
 
+// ============== 管理容器 ==============
+const manageContainerDialogVisible = ref(false)
+const manageContainerSelected = ref<Array<{container_id: number, owner_id: number}>>([])
+const manageContainerList = ref<any[]>([])
+const manageContainerLoading = ref(false)
+const manageContainerTableRef = ref()
+
+const isSettingManageContainerSelection = ref(false)
+
+const handleOpenManageContainerDialog = async () => {
+    // 先保存当前选中的容器列表
+    manageContainerSelected.value = assetViewSetForm.value.asset_container_id_list 
+        ? assetViewSetForm.value.asset_container_id_list.map(item => ({...item}))
+        : []
+    // 在打开对话框前设置加载状态，确保用户立即看到加载提示
+    manageContainerLoading.value = true
+    // 打开对话框
+    manageContainerDialogVisible.value = true
+    // 等待对话框渲染完成
+    await nextTick()
+    // 加载容器列表
+    await fetchManageContainerList()
+    // 等待表格数据更新和渲染完成
+    await nextTick()
+    // 设置选中状态
+    setManageContainerSelection()
+}
+
+const fetchManageContainerList = async () => {
+    manageContainerLoading.value = true
+    const payload: any = {
+        force_refresh: false
+    }
+    
+    // 如果是管理员且选择了用户，传递 user_name 参数
+    if (haveAdminRole.value && selectedUserName.value) {
+        payload.user_name = selectedUserName.value
+    }
+    
+    try {
+        const res = await http.post('/EVE/industry/getUserAllContainerPermission', payload)
+        const data = await res.json()
+        if (data.status !== 200) {
+            ElMessage.error(data.message || '获取容器许可列表失败')
+            return
+        }
+        // 使用数组替换确保响应式更新
+        manageContainerList.value = Array.isArray(data.data) ? [...data.data] : []
+    } catch (error) {
+        ElMessage.error('获取容器许可列表失败')
+    } finally {
+        manageContainerLoading.value = false
+    }
+}
+
+const setManageContainerSelection = async () => {
+    if (!manageContainerTableRef.value || !manageContainerList.value.length) return
+    
+    // 保存当前应该选中的容器列表（防止被清空）
+    const targetSelection = [...manageContainerSelected.value]
+    
+    isSettingManageContainerSelection.value = true
+    try {
+        // 先清除所有选择
+        manageContainerTableRef.value.clearSelection()
+        // 等待清除操作完成
+        await nextTick()
+        
+        // 设置选中状态
+        manageContainerList.value.forEach((row: any) => {
+            const isSelected = targetSelection.some(
+                item => item.container_id === row.asset_container_id && item.owner_id === row.asset_owner_id
+            )
+            if (isSelected) {
+                manageContainerTableRef.value?.toggleRowSelection(row, true)
+            }
+        })
+        
+        // 等待选择操作完成
+        await nextTick()
+        // 恢复 manageContainerSelected（防止被 clearSelection 触发的事件清空）
+        manageContainerSelected.value = targetSelection
+        // 再等待一个 tick 确保状态同步
+        await nextTick()
+        isSettingManageContainerSelection.value = false
+    } catch (error) {
+        isSettingManageContainerSelection.value = false
+        console.error('设置管理容器选中状态失败:', error)
+    }
+}
+
+const handleManageContainerSelectionChange = (selection: any[]) => {
+    // 如果正在设置选中状态，忽略选择变化事件
+    if (isSettingManageContainerSelection.value) {
+        return
+    }
+    manageContainerSelected.value = selection.map(item => ({
+        container_id: item.asset_container_id,
+        owner_id: item.asset_owner_id
+    }))
+}
+
+const handleManageContainerSelectAll = () => {
+    manageContainerList.value.forEach((row: any) => {
+        manageContainerTableRef.value?.toggleRowSelection(row, true)
+    })
+}
+
+const handleManageContainerUnselectAll = () => {
+    manageContainerTableRef.value?.clearSelection()
+}
+
+const handleSaveManageContainer = async () => {
+    const payload: any = {
+        sid: assetViewSetForm.value.sid,
+        container_list: manageContainerSelected.value
+    }
+    
+    // 如果是管理员且选择了用户，传递 user_name 参数
+    if (haveAdminRole.value && selectedUserName.value) {
+        payload.user_name = selectedUserName.value
+    }
+    
+    try {
+        const res = await http.post('/EVE/asset/saveAssetViewConfig', payload)
+        const data = await res.json()
+        if (data.status !== 200) {
+            ElMessage.error(data.message)
+            return
+        }
+        ElMessage.success('容器列表更新成功')
+        manageContainerDialogVisible.value = false
+        assetViewSetForm.value.asset_container_id_list = manageContainerSelected.value.map(item => ({...item}))
+        await getAssetViewList()
+    } catch (error) {
+        ElMessage.error('更新容器列表失败')
+    }
+}
+
+// 监听对话框关闭，确保加载状态被重置
+watch(addMonitorDialogVisible, (newVal) => {
+    if (!newVal) {
+        // 对话框关闭时重置加载状态
+        containerPermissionLoading.value = false
+    }
+})
+
+watch(manageContainerDialogVisible, (newVal) => {
+    if (!newVal) {
+        // 对话框关闭时重置加载状态
+        manageContainerLoading.value = false
+    }
+})
+
 onMounted(async () => {
+    if (haveAdminRole.value) {
+        await fetchUserList()
+    }
     await getAssetViewList()
 })
 
@@ -355,6 +799,27 @@ onMounted(async () => {
 
 <template>
     <div class="asset-view-container">
+        <!-- 管理员用户选择器 -->
+        <div v-if="haveAdminRole" class="admin-user-selector">
+            <el-form-item label="选择用户" style="margin-bottom: 16px;">
+                <el-select
+                    v-model="selectedUserName"
+                    placeholder="选择用户（留空显示当前用户）"
+                    filterable
+                    clearable
+                    :loading="userListLoading"
+                    style="width: 300px;"
+                >
+                    <el-option
+                        v-for="user in userList"
+                        :key="user.userName"
+                        :label="user.userName"
+                        :value="user.userName"
+                    />
+                </el-select>
+            </el-form-item>
+        </div>
+        
         <div class="asset-view-grid">
             <!-- 增加监控卡片 -->
             <el-card class="add-monitor-card" shadow="hover" @click="handleOpenAddMonitorDialog">
@@ -438,6 +903,8 @@ onMounted(async () => {
             :sid="AssetViewDialogSid"
             :view_type="AssetViewDialogType"
             :config="AssetViewDialogConfig"
+            :last-update-time="assetViewLastUpdateTime"
+            @refresh="refreshAssetView"
         />
     </el-dialog>
 
@@ -451,6 +918,7 @@ onMounted(async () => {
                     <el-option label="默认" value="default" />
                     <el-option label="销售" value="sell" />
                     <el-option label="监控" value="watch" />
+                    <el-option label="统计" value="statistics" />
                 </el-select>
             </el-form-item>
 
@@ -469,6 +937,13 @@ onMounted(async () => {
             <el-form-item label="是否公开">
                 <el-switch v-model="assetViewSetForm.public" />
                 <span class="form-hint">公开后可通过链接访问</span>
+            </el-form-item>
+
+            <el-form-item label="管理容器">
+                <el-button @click="handleOpenManageContainerDialog" type="primary" plain>
+                    管理容器
+                </el-button>
+                <span class="form-hint">修改监控的容器列表</span>
             </el-form-item>
 
             <el-divider content-position="left">过滤条件</el-divider>
@@ -528,16 +1003,52 @@ onMounted(async () => {
         </el-form>
     </el-dialog>
 
-    <el-dialog v-model="addMonitorDialogVisible" title="增加监控" width="500px" class="add-monitor-dialog">
-        <el-form label-width="120px" class="add-monitor-form">
-            <el-form-item label="选择库存许可">
-                <el-autocomplete
-                    v-model="selectedContainerTag"
-                    :fetch-suggestions="fetchContainerPermissionSuggestions"
-                    value-key="tag"
-                    placeholder="请选择库存许可"
+    <el-dialog v-model="addMonitorDialogVisible" title="增加监控" width="1000px" class="add-monitor-dialog">
+        <el-form label-width="120px" class="add-monitor-form" :model="{ tag: newViewTag }">
+            <el-form-item label="标签" required>
+                <el-input 
+                    v-model="newViewTag" 
+                    placeholder="请输入标签（必填）" 
                     style="width: 100%"
                 />
+            </el-form-item>
+            <el-form-item label="选择容器">
+                <div class="container-selector">
+                    <div class="selector-actions">
+                        <el-button size="small" @click="handleSelectAll">全选</el-button>
+                        <el-button size="small" @click="handleUnselectAll">反选</el-button>
+                        <span class="selected-count">已选择 {{ selectedContainers.length }} 个容器</span>
+                    </div>
+                    <div v-if="containerPermissionLoading" class="loading-tip">
+                        <el-icon class="is-loading"><Loading /></el-icon>
+                        <span>正在加载容器列表...</span>
+                    </div>
+                    <el-table
+                        ref="containerTableRef"
+                        :key="`container-table-${addMonitorDialogVisible}`"
+                        :data="containerPermissionList"
+                        :loading="containerPermissionLoading"
+                        :row-key="(row: any) => `${row.asset_container_id}-${row.asset_owner_id}`"
+                        max-height="400px"
+                        @selection-change="handleTableSelectionChange"
+                    >
+                        <el-table-column 
+                            type="selection" 
+                            :reserve-selection="true" 
+                            width="55"
+                            :selectable="(row: any) => true"
+                        />
+                        <el-table-column prop="tag" label="标签" width="120" />
+                        <el-table-column prop="structure_name" label="结构名称" width="200" />
+                        <el-table-column prop="system_name" label="星系" width="150" />
+                        <el-table-column prop="owner_name" label="所有者" width="150" />
+                        <el-table-column prop="owner_type" label="类型" width="100">
+                            <template #default="scope">
+                                <span>{{ scope.row.owner_type === 'character' ? '角色' : '公司' }}</span>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </div>
             </el-form-item>
             <div class="dialog-actions">
                 <el-button @click="addMonitorDialogVisible = false">取消</el-button>
@@ -545,12 +1056,64 @@ onMounted(async () => {
             </div>
         </el-form>
     </el-dialog>
+
+    <el-dialog v-model="manageContainerDialogVisible" title="管理容器" width="800px" class="manage-container-dialog">
+        <div class="container-selector">
+            <div class="selector-actions">
+                <el-button size="small" @click="handleManageContainerSelectAll">全选</el-button>
+                <el-button size="small" @click="handleManageContainerUnselectAll">反选</el-button>
+                <span class="selected-count">已选择 {{ manageContainerSelected.length }} 个容器</span>
+            </div>
+            <div v-if="manageContainerLoading" class="loading-tip">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>正在加载容器列表...</span>
+            </div>
+            <el-table
+                ref="manageContainerTableRef"
+                :key="`manage-container-table-${manageContainerDialogVisible}`"
+                :data="manageContainerList"
+                :loading="manageContainerLoading"
+                :row-key="(row: any) => `${row.asset_container_id}-${row.asset_owner_id}`"
+                max-height="400px"
+                @selection-change="handleManageContainerSelectionChange"
+            >
+                <el-table-column 
+                    type="selection" 
+                    :reserve-selection="true" 
+                    width="55"
+                    :selectable="(row: any) => true"
+                />
+                <el-table-column prop="tag" label="标签" width="120" />
+                <el-table-column prop="structure_name" label="结构名称" width="200" />
+                <el-table-column prop="system_name" label="星系" width="150" />
+                <el-table-column prop="owner_name" label="所有者" width="150" />
+                <el-table-column prop="owner_type" label="类型" width="100">
+                    <template #default="scope">
+                        <span>{{ scope.row.owner_type === 'character' ? '角色' : '公司' }}</span>
+                    </template>
+                </el-table-column>
+            </el-table>
+        </div>
+        <div class="dialog-actions">
+            <el-button @click="manageContainerDialogVisible = false">取消</el-button>
+            <el-button @click="handleSaveManageContainer" type="primary">保存</el-button>
+        </div>
+    </el-dialog>
 </template>
 
 <style scoped>
 /* 主容器 */
 .asset-view-container {
     padding: 20px;
+}
+
+/* 管理员用户选择器 */
+.admin-user-selector {
+    margin-bottom: 20px;
+    padding: 16px;
+    background-color: #f5f7fa;
+    border-radius: 4px;
+    border: 1px solid #e4e7ed;
 }
 
 /* 网格布局 */
@@ -726,6 +1289,40 @@ onMounted(async () => {
     margin-top: 20px;
     padding-top: 20px;
     border-top: 1px solid #e4e7ed;
+}
+
+.container-selector {
+    width: 100%;
+}
+
+.selector-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.selected-count {
+    margin-left: auto;
+    font-size: 14px;
+    color: #606266;
+}
+
+.loading-tip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background-color: #f5f7fa;
+    border-radius: 4px;
+    color: #606266;
+    font-size: 14px;
+}
+
+.loading-tip .el-icon {
+    font-size: 16px;
+    color: #409eff;
 }
 
 /* 响应式设计 */

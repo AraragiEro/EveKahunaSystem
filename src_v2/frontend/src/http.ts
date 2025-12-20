@@ -127,6 +127,13 @@ class HttpService {
     })
   }
 
+  async patch(endpoint: string, data?: any) {
+    return this.request(endpoint, {
+      method: 'PATCH',
+      body: data !== undefined ? JSON.stringify(data) : undefined
+    })
+  }
+
   async delete(endpoint: string, data?: any) {
     return this.request(endpoint, {
       method: 'DELETE',

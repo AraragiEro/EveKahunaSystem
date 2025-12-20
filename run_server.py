@@ -8,8 +8,6 @@ from pathlib import Path
 from hypercorn.config import Config
 from hypercorn.asyncio import serve
 from src_v2.backend.app import get_app, serve_vue
-from src_v2.core import init_database
-from src_v2.model.EVE.eveesi import init_esi_manager
 from src_v2.core.permission.permission_manager import permission_manager
 from src_v2.core.user.user_manager import UserManager
 from src_v2.core.config.config import config
@@ -37,7 +35,10 @@ def parse_args():
 
 async def cleanup_resources():
     """清理所有资源"""
-    from src_v2.core.database.connect_manager import postgres_manager, redis_manager, neo4j_manager
+    from src_v2.core.database.connect_manager import get_postgres_manager as postgres_manager
+    from src_v2.core.database.connect_manager import get_redis_manager as rdm
+    from src_v2.core.database.connect_manager import get_neo4j_manager as neo4j_manager
+    from src_v2.model.EVE.sde.sde_builder.database_manager import get_sde_database_manager as sde_database_manager
     from src_v2.model.EVE.eveesi import shutdown_esi_manager
     
     try:
@@ -48,7 +49,7 @@ async def cleanup_resources():
     
     try:
         # 关闭 Neo4j 连接
-        await neo4j_manager.close()
+        await neo4j_manager().close()
     except Exception as e:
         # 如果 Python 正在关闭，忽略 ImportError
         if "sys.meta_path is None" not in str(e) and "shutting down" not in str(e).lower():
@@ -56,21 +57,20 @@ async def cleanup_resources():
     
     try:
         # 关闭 PostgreSQL 连接
-        await postgres_manager.close()
+        await postgres_manager().close()
     except Exception as e:
         print(f"[清理] PostgreSQL 连接关闭时出错: {e}")
     
     try:
         # 关闭 SDE 数据库连接
-        from src_v2.model.EVE.sde.utils import SdeUtils
-        await SdeUtils.close_database()
+        await sde_database_manager().close()
     except Exception as e:
         print(f"[清理] SDE 数据库连接关闭时出错: {e}")
     
     try:
         # 关闭 Redis 连接（如果有 close 方法）
-        if hasattr(redis_manager, 'close'):
-            await redis_manager.close()
+        if hasattr(rdm(), 'close'):
+            await rdm().close()
     except Exception as e:
         print(f"[清理] Redis 连接关闭时出错: {e}")
 
@@ -130,11 +130,18 @@ async def main():
     setup_signal_handlers()
 
     # 初始化数据库和基础服务
-    await init_database()
-    from src_v2.model.EVE.sde.utils import SdeUtils
-    await SdeUtils.init_database()
-    await init_esi_manager()
+    from src_v2.core.database.connect_manager import get_postgres_manager as postgres_manager
+    from src_v2.core.database.connect_manager import get_redis_manager as redis_manager
+    from src_v2.core.database.connect_manager import get_neo4j_manager as neo4j_manager
+    from src_v2.model.EVE.sde.sde_builder.database_manager import get_sde_database_manager as sde_database_manager
+    await sde_database_manager().init()
+    await postgres_manager().init()
+    await redis_manager().init()
+    await neo4j_manager().init()
     await permission_manager.init_base_roles()
+
+    from src_v2.model.EVE.eveesi import init_esi_manager
+    await init_esi_manager()
 
     # 检查并创建默认管理员账号
     try:
@@ -171,8 +178,6 @@ async def main():
         logger.error(f"创建管理员账号时发生错误: {e}", exc_info=True)
         # 不中断启动流程，只记录错误
 
-    from src_v2.core.database.connect_manager import redis_manager
-    # await redis_manager.r.flushall()
 
     # 仅在版本为企业版且模块存在时注册
     from src_v2.core.edition import is_enterprise
@@ -193,6 +198,14 @@ async def main():
         logger.info("Jita 订单刷新定时器已启动")
     except Exception as e:
         logger.error(f"启动 Jita 订单刷新定时器时发生错误: {e}", exc_info=True)
+
+    # 启动jita基础成本刷新定时器
+    try:
+        from src_v2.enterprise.model.market_view_cost_refresh_timer import MarketViewCostRefreshTimer
+        MarketViewCostRefreshTimer().start()
+        logger.info("Jita 基础成本刷新定时器已启动")
+    except Exception as e:
+        logger.error(f"启动 Jita 基础成本刷新定时器时发生错误: {e}", exc_info=True)
 
     # 初始化 Quart App
     app = get_app()

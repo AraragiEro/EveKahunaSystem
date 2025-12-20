@@ -77,7 +77,7 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
     <el-table
         :data="materialData"
         :key="`material-table-${selectedPlan || 'default'}`"
-        row-key="type_id"
+        row-key="row_id"
         expand-on-click-node="false"
         default-expand-all
         border
@@ -87,13 +87,16 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
         style="font-size: 16px;"
     >
         <el-table-column label="类型" prop="layer_id" width="110">
+        </el-table-column>
+        <el-table-column label="图标" prop="type_id" width="70">
             <template #default="{ row }">
                 <img 
                     v-if="row?.type_id"
                     :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" 
                     alt="类型" 
                     width="40" 
-                    height="40" 
+                    height="40"
+                    style="border-radius: 4px;" 
                 />
             </template>
         </el-table-column>

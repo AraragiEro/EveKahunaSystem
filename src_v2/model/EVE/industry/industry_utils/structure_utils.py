@@ -2,9 +2,9 @@
 import json
 
 # 本地导入 - 核心工具
-from src_v2.core.database.connect_manager import redis_manager as rdm
-from src_v2.core.database.neo4j_utils import Neo4jAssetUtils as NAU
 
+from src_v2.core.database.neo4j_utils import Neo4jAssetUtils as NAU
+from src_v2.core.database.connect_manager import get_redis_manager as rdm
 # 本地导入 - EVE 模块
 from src_v2.model.EVE.sde import SdeUtils
 
@@ -18,7 +18,7 @@ async def get_structure_list(user_id: str):
     Returns:
         List[dict]: 结构列表
     """
-    cache_str = await rdm.r.get(f'structure_suggestions:{user_id}:structure_list')
+    cache_str = await rdm().r.get(f'structure_suggestions:{user_id}:structure_list')
     if cache_str:
         return json.loads(cache_str)
 
@@ -29,7 +29,7 @@ async def get_structure_list(user_id: str):
             "structure_name": structure["structure_name"],
         } for structure in structure_list
     ]
-    await rdm.r.set(f'structure_suggestions:{user_id}:structure_list', json.dumps(res), ex=30)
+    await rdm().r.set(f'structure_suggestions:{user_id}:structure_list', json.dumps(res), ex=30)
     return res
 
 

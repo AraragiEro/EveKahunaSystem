@@ -36,13 +36,13 @@ class SDEDatabaseManager:
         # 根据是否为子进程调整连接池大小
         # 子进程通常只需要少量连接，避免多进程时连接数过多
         if subprocess:
-            pool_size = 4  # 子进程使用较小的连接池
-            max_overflow = 5  # 子进程允许少量溢出
+            pool_size = 2  # 子进程使用较小的连接池
+            max_overflow = 4  # 子进程允许少量溢出
             self.semaphore = asyncio.Semaphore(5)  # 子进程使用较小的信号量
         else:
             pool_size = 20  # 主进程使用正常大小的连接池
             max_overflow = 80  # 主进程允许更多溢出
-            self.semaphore = asyncio.Semaphore(80)  # 主进程使用正常大小的信号量
+            self.semaphore = asyncio.Semaphore(40)  # 主进程使用正常大小的信号量
         
         # 创建异步引擎
         self.engine = create_async_engine(
@@ -266,3 +266,15 @@ class SDEDatabaseManager:
             await self.engine.dispose()
             logger.info("SDE PostgreSQL 数据库连接已关闭")
 
+sde_database_manager = SDEDatabaseManager()
+
+_sde_database_manager = None
+
+def get_sde_database_manager():
+    global _sde_database_manager
+    if _sde_database_manager is None:
+        _sde_database_manager = SDEDatabaseManager()
+    return _sde_database_manager
+
+def get_new_sde_database_manager():
+    return SDEDatabaseManager()

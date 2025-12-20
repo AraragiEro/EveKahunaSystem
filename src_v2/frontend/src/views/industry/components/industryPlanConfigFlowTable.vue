@@ -1,41 +1,48 @@
 <template>
   <div class="table-container">
     <el-scrollbar class="table-scrollbar">
-    <table class="card-table" >
-      <thead>
-        <tr class="table-header">
-          <th>配置类型</th>
-          <th>配置描述</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody class="industry-plan-config-flow-table">
-        <tr v-for="item in list" :key="item.config_id" class="card-row cursor-move">
-          <td class="config-type-name">{{ configTypeMap[item.config_type] }}</td>
-          <td class="config-description">
-            <el-tooltip
-              :content="formatConfigValue(item.config_type, item.config_value)"
-              placement="top"
-              effect="dark"
-              :popper-options="{ modifiers: [{ name: 'offset', options: { offset: [0, 8] } }] }"
-            >
-              <div class="config-description-text">
-                {{ formatConfigValue(item.config_type, item.config_value) }}
-              </div>
-            </el-tooltip>
-          </td>
-          <td class="action-cell">
-            <el-button type="primary" plain @click="handleModifyConfigFlow(item)">
-              修改
-            </el-button>
-            <el-button type="primary" plain @click="handleDeleteConfigFlowConfig(item)">
-              删除
-            </el-button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </el-scrollbar>
+      <table class="card-table" :class="{ 'compact-mode': cardStyleMode === 'compact' }">
+        <thead>
+          <tr class="table-header">
+            <th>配置类型</th>
+            <th>配置描述</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody class="industry-plan-config-flow-table">
+          <tr v-for="item in list" :key="item.config_id" class="card-row cursor-move"
+            :class="{ 'compact-mode': cardStyleMode === 'compact' }">
+            <td class="config-type-name">
+              <el-tag :size="cardStyleMode === 'compact' ? 'small' : undefined"
+                :color="configTypeColorMap[item.config_type]" type="light">
+                {{ configTypeMap[item.config_type] }}
+              </el-tag>
+            </td>
+            <td class="config-description">
+              <el-tooltip :content="formatConfigValue(item.config_type, item.config_value)" placement="top"
+                effect="dark" :popper-options="{ modifiers: [{ name: 'offset', options: { offset: [0, 8] } }] }">
+                <div class="config-description-text" v-if="item.config_tag">
+                  {{ item.config_tag }}
+                </div>
+                <div class="config-description-text" v-else>
+                  {{ formatConfigValue(item.config_type, item.config_value) }}
+                </div>
+              </el-tooltip>
+            </td>
+            <td class="action-cell">
+              <el-button type="primary" plain :size="cardStyleMode === 'compact' ? 'small' : undefined"
+                @click="handleModifyConfigFlow(item)">
+                修改
+              </el-button>
+              <el-button type="primary" plain :size="cardStyleMode === 'compact' ? 'small' : undefined"
+                @click="handleDeleteConfigFlowConfig(item)">
+                删除
+              </el-button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </el-scrollbar>
   </div>
 </template>
 
@@ -45,18 +52,23 @@ import { http } from '@/http'
 import { ElMessage } from 'element-plus'
 
 interface PlanConfigObject {
-    "config_id": number,
-    "config_index_id": number,
-    "config_type": string,
-    "config_value": object
+  "config_id": number,
+  "config_tag"?: string,
+  "config_index_id": number,
+  "config_type": string,
+  "config_value": object
 }
 interface Props {
   list: PlanConfigObject[]
+  cardStyleMode?: 'normal' | 'compact'
 }
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  cardStyleMode: 'normal'
+})
 
 const emit = defineEmits<{
   'modify-config-flow': [item: PlanConfigObject]
+  'delete-config-flow': [item: PlanConfigObject]
 }>()
 
 const handleModifyConfigFlow = (item: PlanConfigObject) => {
@@ -73,11 +85,7 @@ const configTypeMap = ref<{ [key: string]: string }>({
 })
 
 const handleDeleteConfigFlowConfig = async (item: PlanConfigObject) => {
-  const index = props.list.findIndex(config => config.config_id === item.config_id)
-  if (index !== -1) {
-    // 直接修改 props.list 来删除元素
-    props.list.splice(index, 1)
-  }
+  emit('delete-config-flow', item)
 }
 
 const formatConfigValue = (type: string, value: any) => {
@@ -91,7 +99,7 @@ const formatConfigValue = (type: string, value: any) => {
       return String(value)
     }
   }
-  
+
   // 使用 parsedValue 而不是 value
   if (type === 'StructureRigConfig') {
     return `建筑: ${parsedValue.structure_name || 'N/A'}, 时间效率等级: ${parsedValue.time_eff_level ?? 0}, 材料效率等级: ${parsedValue.mater_eff_level ?? 0}`
@@ -114,10 +122,18 @@ const formatConfigValue = (type: string, value: any) => {
     const keywords = keywordGroups.map((kg: any) => `${kg.keyword}(${kg.keyword_type})`).join(', ') || 'N/A'
     return `作业类型: ${keywords}, 判断类型: ${parsedValue.judge_type}, 最大数量: ${parsedValue.max_count}, 最大时间: ${parsedValue.max_time_day}天${parsedValue.max_time_date}`
   }
-  
+
   return JSON.stringify(parsedValue)
 }
 
+const configTypeColorMap = ref<{ [key: string]: string }>({
+  "StructureRigConfig": "#9fcfff",
+  "StructureAssignConf": "#baff97",
+  "MaterialTagConf": "#f7d095",
+  "DefaultBlueprintConf": "#ffbaba",
+  "LoadAssetConf": "#ffe3e3",
+  "MaxJobSplitCountConf": "#cacdd3"
+})
 
 </script>
 
@@ -138,10 +154,15 @@ const formatConfigValue = (type: string, value: any) => {
 
 .card-table {
   width: 100%;
-  /*  table-layout: fixed; 使用固定布局，更好地控制列宽 */
+  table-layout: fixed;
+  /* 使用固定布局，更好地控制列宽 */
   border-collapse: separate;
-  border-spacing: 0 12px;
+  border-spacing: 0 6px;
   background: transparent;
+}
+
+.card-table.compact-mode {
+  border-spacing: 0;
 }
 
 .table-header {
@@ -156,6 +177,20 @@ const formatConfigValue = (type: string, value: any) => {
   color: #606266;
   border: none;
   background: transparent;
+}
+
+.table-header th:first-child {
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
+}
+
+.table-header th:nth-child(2) {
+  /* 中间列不设置宽度，自动填充剩余空间 */
+}
+
+.table-header th:last-child {
+  width: 120px;
 }
 
 .industry-plan-config-flow-table {
@@ -185,6 +220,12 @@ const formatConfigValue = (type: string, value: any) => {
   vertical-align: middle;
 }
 
+.card-row.compact-mode td {
+  padding: 1px 8px;
+  height: calc(1em + 2px);
+  line-height: 1em;
+}
+
 .card-row:first-child td:first-child {
   border-top-left-radius: 12px;
 }
@@ -205,16 +246,26 @@ const formatConfigValue = (type: string, value: any) => {
   font-size: 15px;
   font-weight: 500;
   color: #303133;
-  min-width: 80px;
-  width: 120px;
+  width: 110px;
+  /* 固定第一列宽度 */
+  min-width: 110px;
+  max-width: 110px;
+}
+
+.compact-mode .config-type-name {
+  font-size: 14px;
 }
 
 .config-description {
   font-size: 14px;
   color: #606266;
   position: relative;
-  max-width: 70px; /* 配合表格布局，让列可以自适应 */
+  /* 中间列自动填充剩余空间，不设置宽度 */
   overflow: hidden;
+}
+
+.compact-mode .config-description {
+  font-size: 13px;
 }
 
 .config-description-text {
@@ -225,12 +276,16 @@ const formatConfigValue = (type: string, value: any) => {
   display: block;
   width: 100%;
   cursor: help;
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
   /* 单行显示，超出部分用省略号，完整内容通过 tooltip 显示 */
 }
 
 .action-cell {
-  width: 180px;
-  min-width: 180px;
+  width: 110px;
+  min-width: 110px;
+  max-width: 110px;
   text-align: right;
   white-space: nowrap;
 }
@@ -246,6 +301,19 @@ const formatConfigValue = (type: string, value: any) => {
 
 .action-cell .el-button:hover {
   transform: scale(1.05);
+}
+
+.compact-mode .action-cell {
+  width: auto;
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.compact-mode .action-cell .el-button {
+  padding: 4px;
+  min-height: auto;
+  margin-left: 0;
 }
 
 /* 拖拽时的视觉反馈 */
@@ -275,8 +343,9 @@ const formatConfigValue = (type: string, value: any) => {
 
   .config-type-name {
     font-size: 14px;
-    min-width: 80px;
-    width: 120px;
+    width: 110px;
+    min-width: 110px;
+    max-width: 110px;
   }
 
   .config-description {
@@ -295,6 +364,18 @@ const formatConfigValue = (type: string, value: any) => {
   .table-header th {
     padding: 10px 12px;
     font-size: 13px;
+  }
+
+  .table-header th:first-child {
+    width: 110px;
+    min-width: 110px;
+    max-width: 110px;
+  }
+
+  .table-header th:last-child {
+    width: 110px;
+    min-width: 110px;
+    max-width: 110px;
   }
 }
 

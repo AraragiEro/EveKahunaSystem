@@ -61,8 +61,10 @@ async def signup():
     except ValueError as e:
         return jsonify({"status": 400, "message": str(e)}), 400
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"注册失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "注册失败"}), 500
 
@@ -124,8 +126,10 @@ async def login():
             "user": user_data
         })
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"登录失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "登录失败，请联系管理员"}), 500
 
@@ -168,8 +172,10 @@ async def get_current_user():
 
         return jsonify(response_data)
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取当前用户信息失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取当前用户信息失败"}), 500
 
@@ -181,8 +187,10 @@ async def logout():
         # 在实际应用中，可以将token加入黑名单
         return jsonify({"status": 200, "message": "登出成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"登出失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "登出失败"}), 500
 
@@ -205,7 +213,9 @@ async def delete_account():
 
         return jsonify({"status": 200, "message": "注销成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"注销账号失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "注销账号失败"}), 500

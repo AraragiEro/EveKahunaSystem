@@ -112,6 +112,9 @@
             size="large"
           />
         </el-form-item>
+        <div class="register-link" v-if="showQQGroupButton">
+          <span>邀请码获取请加入QQ交流群：{{ QQGroupNumber }}</span>
+        </div>
       </el-form>
       
       <template #footer>
@@ -131,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, onMounted, nextTick, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
@@ -145,6 +148,10 @@ const passwordInputRef = ref<HTMLElement>()
 
 const showRegisterDialog = ref(false)
 const isRegistering = ref(false)
+
+// 社交群号
+const QQGroupNumber = computed(() => import.meta.env.VITE_QQ_GROUP as string | undefined)
+const showQQGroupButton = computed(() => !!QQGroupNumber.value)
 
 const loginForm = reactive({
   username: '',
@@ -283,10 +290,16 @@ const handleDialogClose = () => {
   registerForm.inviteCode = ''
 }
 
-onMounted(() => {
-  // 如果已经登录，直接跳转
-  if (authStore.isAuthenticated) {
-    router.push('/')
+onMounted(async () => {
+  // 如果有 token，验证其有效性
+  if (authStore.token) {
+    const isAuthValid = await authStore.checkAuth()
+    if (isAuthValid) {
+      // token 有效，已登录，重定向到首页
+      router.push('/home')
+      return
+    }
+    // token 无效，checkAuth 已自动清除状态，继续显示登录表单
   }
   
   // 自动聚焦到用户名输入框

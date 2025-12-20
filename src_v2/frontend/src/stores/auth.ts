@@ -207,6 +207,15 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
   }
 
+  /**
+   * clearAuthCache: 清除认证缓存，强制下次 checkAuth 时重新请求后端。
+   * 用于登录后需要获取完整用户信息的场景。
+   */
+  const clearAuthCache = () => {
+    lastAuthCheckAtMs.value = null
+    lastAuthCheckResult.value = false
+  }
+
   // -------------------- 返回 Store 的所有属性和方法 --------------------
   // 这样在组件中 useAuthStore() 就能访问这些状态和方法
   return {
@@ -224,6 +233,7 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     logout,
     checkAuth,
-    clearError
+    clearError,
+    clearAuthCache
   }
 })

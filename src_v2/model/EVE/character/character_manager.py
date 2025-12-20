@@ -12,7 +12,7 @@ from ..eveesi.eveutils import parse_iso_datetime
 
 # import logger
 from src_v2.core.log import logger
-from src_v2.core.database.connect_manager import redis_manager
+from src_v2.core.database.connect_manager import get_redis_manager as rdm
 
 #import Exception
 from src_v2.core.utils import KahunaException, SingletonMeta
@@ -163,7 +163,7 @@ class CharacterManager(metaclass=SingletonMeta):
         return None
 
     async def refresh_all_public_characters_info_of_corporation(self, access_token, corporation_id: int):
-        last_refresh_time = await redis_manager.redis.get(f"forever:ref_corp_chac_pub_info_corpid_{corporation_id}")
+        last_refresh_time = await rdm().redis.get(f"forever:ref_corp_chac_pub_info_corpid_{corporation_id}")
         if last_refresh_time:
             if last_refresh_time == "true":
                 return
@@ -196,7 +196,7 @@ class CharacterManager(metaclass=SingletonMeta):
                 character_db_obj.title = character_info['title'] if 'title' in character_info else None
                 await EvePublicCharacterInfoDBUtils.merge(character_db_obj)
             else:
-                await EvePublicCharacterInfoDBUtils.save_obj(M_EvePublicCharacterInfo(
+                await EvePublicCharacterInfoDBUtils.merge(M_EvePublicCharacterInfo(
                     character_id=character_info['character_id'],
                     alliance_id=character_info['alliance_id'] if 'alliance_id' in character_info else None,
                     birthday=parse_iso_datetime(character_info['birthday']).replace(tzinfo=None),
@@ -211,7 +211,7 @@ class CharacterManager(metaclass=SingletonMeta):
                     title=character_info['title'] if 'title' in character_info else None,
                 ))
 
-        await redis_manager.redis.set(f"forever:ref_corp_chac_pub_info_corpid_{corporation_id}", "true", ex=60 * 60 * 24)
+        await rdm().redis.set(f"forever:ref_corp_chac_pub_info_corpid_{corporation_id}", "true", ex=60 * 60 * 24)
 
     async def get_public_character_info_by_character_id(self, character_id: int):
         character_db_obj = await EvePublicCharacterInfoDBUtils.select_public_character_info_by_character_id(character_id)
@@ -231,5 +231,5 @@ class CharacterManager(metaclass=SingletonMeta):
                 security_status=character_info['security_status'] if 'security_status' in character_info else None,
                 title=character_info['title'] if 'title' in character_info else None,
             )
-            await EvePublicCharacterInfoDBUtils.save_obj(character_db_obj)
+            await EvePublicCharacterInfoDBUtils.merge(character_db_obj)
         return character_db_obj

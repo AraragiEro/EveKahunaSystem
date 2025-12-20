@@ -29,8 +29,10 @@ async def get_hourly_statistics():
             "data": statistics
         })
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取每小时统计失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取每小时统计失败"}), 500
 
@@ -51,8 +53,10 @@ async def get_duration_statistics():
             "data": statistics
         })
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取完成时间区间统计失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取完成时间区间统计失败"}), 500
 

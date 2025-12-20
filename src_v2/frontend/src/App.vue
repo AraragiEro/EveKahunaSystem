@@ -8,6 +8,7 @@ import smallSideBar from './components/sideBar/smallSideBar.vue'
 import HelpDrawer from './components/HelpDrawer.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import githubIcon from '@/assets/github-mark.svg'
+import aifadianLogo from '@/assets/横版-白底-透明背景.png'
 
 const router = useRouter()
 const route = useRoute()
@@ -21,6 +22,17 @@ const GITHUB_REPO_URL = 'https://github.com/AraragiEro/EveKahunaSystem.git'
 // 打开 GitHub 仓库
 const openGitHub = () => {
   window.open(GITHUB_REPO_URL, '_blank')
+}
+
+// 捐赠链接（从环境变量读取）
+const donateLink = computed(() => import.meta.env.VITE_DONATE_LINK as string | undefined)
+const showDonateButton = computed(() => !!donateLink.value)
+
+// 打开捐赠链接
+const openDonate = () => {
+  if (donateLink.value) {
+    window.open(donateLink.value, '_blank')
+  }
 }
 
 // 全局快捷键支持（F1 打开文档）
@@ -46,7 +58,7 @@ const isPublicPage = computed(() => publicPages.includes(route.name as string))
 const menuItems = computed(() => {
   const items: { id: number; icon: string; label: string; active: boolean; route: string }[] = []
   let id_index = 1
-  
+
   // 首页始终显示
   items.push({ id: id_index++, icon: 'House', label: '首页', active: router.currentRoute.value.path === '/home' || router.currentRoute.value.path === '/', route: '/home' })
 
@@ -60,25 +72,26 @@ const menuItems = computed(() => {
   // 企业版专用菜单项
   if (isEnterprise) {
     if (userRoles.includes('vip_omega')) {
-      items.push({ 
-        id: id_index++, 
-        icon: 'PieChart', 
-        label: '市场分析', 
-        active: router.currentRoute.value.path.startsWith('/market'), 
-        route: '/market' 
+      items.push({
+        id: id_index++,
+        icon: 'PieChart',
+        label: '市场分析',
+        active: router.currentRoute.value.path.startsWith('/market'),
+        route: '/market'
       })
     }
   }
-  
+
   if (userRoles.includes('user')) {
     items.push({ id: id_index++, icon: 'Opportunity', label: '实用工具', active: router.currentRoute.value.path === '/utils', route: '/utils' })
+    items.push({ id: id_index++, icon: 'ChatLineRound', label: '留言板', active: router.currentRoute.value.path === '/messageBoard', route: '/messageBoard' })
     items.push({ id: id_index++, icon: 'Setting', label: '设置', active: router.currentRoute.value.path.startsWith('/setting'), route: '/setting' })
   }
 
   if (userRoles.includes('admin')) {
     items.push({ id: id_index++, icon: 'Cpu', label: '管理员', active: router.currentRoute.value.path.startsWith('/admin'), route: '/admin' })
   }
-  
+
   return items
 })
 
@@ -109,7 +122,7 @@ const subscriptionEndDate = computed(() => {
 // 检查是否过期
 const isExpired = (endDateStr: string | null | undefined): boolean => {
   if (!endDateStr) return true
-  
+
   try {
     const endDate = new Date(endDateStr)
     const now = new Date(currentTime.value)
@@ -122,20 +135,20 @@ const isExpired = (endDateStr: string | null | undefined): boolean => {
 // 计算剩余时间文本
 const getRemainingTimeText = (endDateStr: string | null | undefined): string => {
   if (!endDateStr) return ''
-  
+
   try {
     const endDate = new Date(endDateStr)
     const now = new Date(currentTime.value)
     const diff = endDate.getTime() - now.getTime()
-    
+
     if (diff <= 0) {
       return ''
     }
-    
+
     const days = Math.floor(diff / (1000 * 60 * 60 * 24))
     const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-    
+
     if (days > 0) {
       return `剩余${days}天${hours}小时`
     } else if (hours > 0) {
@@ -151,18 +164,18 @@ const getRemainingTimeText = (endDateStr: string | null | undefined): string => 
 // 获取剩余时间标签类型（颜色）
 const getRemainingTimeTagType = (endDateStr: string | null | undefined): string => {
   if (!endDateStr) return 'info'
-  
+
   try {
     const endDate = new Date(endDateStr)
     const now = new Date(currentTime.value)
     const diff = endDate.getTime() - now.getTime()
-    
+
     if (diff <= 0) {
       return 'danger'
     }
-    
+
     const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-    
+
     if (days < 1) {
       return 'danger' // 少于1天显示危险色
     } else if (days < 7) {
@@ -198,7 +211,7 @@ onUnmounted(() => {
   <div class="kahuna-container">
     <!-- 公开页面（登录页、403页面等）不显示主布局 -->
     <router-view v-if="isPublicPage" />
-    
+
     <!-- 主应用布局 - 确保用户信息已加载 -->
     <el-container v-else-if="authStore.isAuthenticated">
       <!-- 左侧窄侧边菜单 -->
@@ -209,68 +222,50 @@ onUnmounted(() => {
         <el-header class="main-header">
           <div class="header-content">
             <div class="header-title">
-              <h2>Kahuna-System V1.3.0</h2>
-              <el-tag 
-                :type="isEnterprise ? 'success' : 'info'" 
-                size="small" 
-                class="edition-tag"
-              >
+              <h2>Kahuna-System V1.5.0</h2>
+              <el-tag :type="isEnterprise ? 'success' : 'info'" size="small" class="edition-tag">
                 {{ isEnterprise ? '紫竹梅特供版' : '社区版' }}
               </el-tag>
-              <el-tag 
-                v-if="hasAlphaSubscription && !hasOmegaSubscription"
-                type="warning" 
-                size="small" 
-                class="edition-tag"
-              >
+              <el-tag v-if="hasAlphaSubscription && !hasOmegaSubscription" type="warning" size="small"
+                class="edition-tag">
                 Alpha订阅
               </el-tag>
-              <el-tag 
+              <el-tag
                 v-if="hasAlphaSubscription && !hasOmegaSubscription && subscriptionEndDate && !isExpired(subscriptionEndDate)"
-                :type="getRemainingTimeTagType(subscriptionEndDate)"
-                size="small" 
-                class="edition-tag"
-              >
+                :type="getRemainingTimeTagType(subscriptionEndDate)" size="small" class="edition-tag">
                 {{ getRemainingTimeText(subscriptionEndDate) }}
               </el-tag>
-              <el-tag 
-                v-if="hasOmegaSubscription"
-                type="danger" 
-                size="small" 
-                class="edition-tag"
-              >
+              <el-tag v-if="hasOmegaSubscription" type="danger" size="small" class="edition-tag">
                 Omega订阅
               </el-tag>
-              <el-tag 
-                v-if="hasOmegaSubscription && subscriptionEndDate && !isExpired(subscriptionEndDate)"
-                :type="getRemainingTimeTagType(subscriptionEndDate)"
-                size="small" 
-                class="edition-tag"
-              >
+              <el-tag v-if="hasOmegaSubscription && subscriptionEndDate && !isExpired(subscriptionEndDate)"
+                :type="getRemainingTimeTagType(subscriptionEndDate)" size="small" class="edition-tag">
                 {{ getRemainingTimeText(subscriptionEndDate) }}
               </el-tag>
             </div>
+
             <div class="header-actions">
+
+              <!-- 捐赠按钮 -->
+              <el-button v-if="showDonateButton" @click="openDonate" title="支持作者"
+                class="header-action-btn donate-button">
+                <img :src="aifadianLogo" alt="爱发电" class="donate-icon" />
+              </el-button>
+
               <!-- GitHub 按钮 -->
-              <el-button
-                @click="openGitHub"
-                title="打开 GitHub 仓库"
-                class="header-action-btn github-btn"
-              >
+              <el-button @click="openGitHub" title="打开 GitHub 仓库" class="header-action-btn github-btn">
                 <img :src="githubIcon" alt="GitHub" class="github-icon" />
                 <span class="btn-label">仓库</span>
               </el-button>
-              
+
               <!-- 文档按钮 -->
-              <el-button
-                @click="helpStore.openHelp"
-                title="打开使用说明 (F1)"
-                class="header-action-btn"
-              >
-                <el-icon><Document /></el-icon>
+              <el-button @click="helpStore.openHelp" title="打开使用说明 (F1)" class="header-action-btn">
+                <el-icon>
+                  <Document />
+                </el-icon>
                 <span class="btn-label">指南</span>
               </el-button>
-              
+
               <!-- 用户信息和退出按钮 -->
               <div class="user-info">
                 <el-dropdown @command="handleLogout">
@@ -279,7 +274,9 @@ onUnmounted(() => {
                       {{ authStore.user?.username?.charAt(0)?.toUpperCase() }}
                     </el-avatar>
                     <span class="username">{{ authStore.user?.username }}</span>
-                    <el-icon><ArrowDown /></el-icon>
+                    <el-icon>
+                      <ArrowDown />
+                    </el-icon>
                   </span>
                   <template #dropdown>
                     <el-dropdown-menu>
@@ -291,19 +288,19 @@ onUnmounted(() => {
             </div>
           </div>
         </el-header>
-        
+
         <el-main class="main-content">
           <div class="main-content-inner">
             <router-view />
           </div>
         </el-main>
-        
+
         <el-footer class="main-footer">
           <span>© 2025 Kahuna Kahuna-System. 紫竹梅重工.</span>
         </el-footer>
       </el-container>
     </el-container>
-    
+
     <!-- 全局文档 Drawer -->
     <HelpDrawer />
   </div>
@@ -431,25 +428,25 @@ onUnmounted(() => {
   .sidebar {
     width: 60px !important;
   }
-  
+
   .menu-item {
     width: 50px;
     height: 50px;
   }
-  
+
   .main-header {
     padding: 0 16px;
     height: 56px;
   }
-  
+
   .header-content h2 {
     font-size: 18px;
   }
-  
+
   .main-content {
     padding: 16px;
   }
-  
+
   .main-footer {
     height: 48px;
     font-size: 12px;
@@ -527,6 +524,14 @@ onUnmounted(() => {
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
+}
+
+.donate-icon {
+  height: 50px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+  flex-shrink: 0;
 }
 
 .header-action-btn :deep(.el-icon) {

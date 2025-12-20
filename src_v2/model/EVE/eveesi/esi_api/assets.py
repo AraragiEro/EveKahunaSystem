@@ -4,7 +4,7 @@ from ..esi_req_manager import esi_request
 from ..eveutils import get_request_async, OUT_PAGE_ERROR
 from src_v2.core.utils import tqdm_manager
 
-from src_v2.core.database.connect_manager import redis_manager as rdm
+from src_v2.core.database.connect_manager import get_redis_manager as rdm
 
 # Get corporation asset locations
 # esi-assets.read_corporation_assets.v1
@@ -36,14 +36,14 @@ async def corporations_corporation_assets(access_token, corporation_id: int, pag
         if page != 1:
             await tqdm_manager.update_mission(f'corporations_corporation_assets_{corporation_id}')
             if status_key:
-                total_page = await rdm.r.hget(status_key, "total_page")
-                await rdm.r.hset(status_key, "step_progress", page / int(total_page or 0))
+                total_page = await rdm().r.hget(status_key, "total_page")
+                await rdm().r.hset(status_key, "step_progress", page / int(total_page or 0))
         return data
 
     await tqdm_manager.add_mission(f'corporations_corporation_assets_{corporation_id}', pages)
     if status_key:
-        await rdm.r.hset(status_key, "total_page", pages)
-        await rdm.r.hset(status_key, "step_progress", 0)
+        await rdm().r.hset(status_key, "total_page", pages)
+        await rdm().r.hset(status_key, "step_progress", 0)
     tasks = []
     data = [data]
     for p in range(2, pages + 1):
@@ -76,13 +76,13 @@ async def characters_character_assets(access_token, character_id: int, page: int
         if page != 1:
             await tqdm_manager.update_mission(f'characters_character_assets_{character_id}')
             if status_key:
-                total_page = await rdm.r.hget(status_key, "total_page")
-                await rdm.r.hset(status_key, "step_progress", page / int(total_page or 0))
+                total_page = await rdm().r.hget(status_key, "total_page")
+                await rdm().r.hset(status_key, "step_progress", page / int(total_page or 0))
         return data
 
     if status_key:
-        await rdm.r.hset(status_key, "total_page", pages)
-        await rdm.r.hset(status_key, "step_progress", 0)
+        await rdm().r.hset(status_key, "total_page", pages)
+        await rdm().r.hset(status_key, "step_progress", 0)
     await tqdm_manager.add_mission(f'characters_character_assets_{character_id}', pages)
     tasks = []
     data = [data]

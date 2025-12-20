@@ -55,10 +55,10 @@ def role_required(req_roles: list[str], res_code = 403, message: str = '权限�
             # 获取用户直接拥有的角色
             direct_roles = await permission_manager.get_user_roles(user_id)
             
-            # 获取所有角色（直接角色 + 所有子角色）
+            # 获取所有角色（直接角色 + 所有父角色）
             all_roles = set(direct_roles)
             for role in direct_roles:
-                # 递归获取该角色的所有子角色
+                # 递归获取该角色的所有父角色（子角色继承父角色的权限）
                 descendant_roles = await permission_manager.get_all_descendant_roles(role)
                 all_roles.update(descendant_roles)
             

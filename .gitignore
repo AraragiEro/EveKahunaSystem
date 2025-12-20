@@ -4,11 +4,11 @@
 tmp
 *.zip
 *.sqlite
-*.png
 *.db-wal
 config.ini
 *.sql
 **/*.pyc
+download_resource/img/**
 
 # IDE and editor files
 .cursor/

@@ -3,7 +3,7 @@ import asyncio
 from typing import Dict, List
 
 # 本地导入 - 核心工具
-from src_v2.core.database.connect_manager import neo4j_manager
+from src_v2.core.database.connect_manager import get_neo4j_manager as neo4j_manager
 from src_v2.core.database.neo4j_utils import Neo4jIndustryUtils as NIU
 from src_v2.core.utils import tqdm_manager
 
@@ -26,7 +26,7 @@ async def get_market_tree(node) -> List[Dict]:
     Returns:
         List[Dict]: 节点字典列表
     """
-    async with neo4j_manager.get_session() as session:
+    async with neo4j_manager().get_session() as session:
         if node == "root":
             query = """
             match (a:MarketGroup)
@@ -91,7 +91,7 @@ class MarketTree():
         
         # 先创建所有节点
         async def create_market_group_node_with_semaphore(market_group: MarketGroups):
-            async with neo4j_manager.semaphore:
+            async with neo4j_manager().semaphore:
                 cn_name = await SdeUtils.get_market_group_name_by_groupid(market_group.marketGroupID, zh=True)
                 await NIU.merge_node(
                     "MarketGroup",
@@ -118,7 +118,7 @@ class MarketTree():
 
         # 再创建所有关系
         async def link_market_group_to_market_group_with_semaphore(market_group: MarketGroups):
-            async with neo4j_manager.semaphore:
+            async with neo4j_manager().semaphore:
                 cn_name = await SdeUtils.get_market_group_name_by_groupid(market_group.marketGroupID, zh=True)
                 await NIU.link_node(
                     "MarketGroup",
@@ -157,7 +157,7 @@ class MarketTree():
             await NIU.delete_label_node("Type")
 
         async def link_type_to_market_group_with_semaphore(type: InvTypes):
-            async with neo4j_manager.semaphore:
+            async with neo4j_manager().semaphore:
                 cn_name = await SdeUtils.get_cn_name_by_id(type.typeID)
                 meta_group_name = await SdeUtils.get_metaname_by_metaid(type.typeID)
                 category_name = await SdeUtils.get_category_by_id(type.typeID)

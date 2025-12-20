@@ -36,8 +36,10 @@ async def generate_invite_code():
             }
         })
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"生成邀请码失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "生成邀请码失败"}), 500
 
@@ -84,8 +86,10 @@ async def get_invite_code_list():
         
         return jsonify({"status": 200, "data": formatted_codes})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取邀请码列表失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取邀请码列表失败"}), 500
 
@@ -118,8 +122,10 @@ async def get_invite_code_users(invite_code: str):
         
         return jsonify({"status": 200, "data": formatted_users})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取邀请码用户列表失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取邀请码用户列表失败"}), 500
 
@@ -149,8 +155,10 @@ async def validate_invite_code():
         
         return jsonify({"status": 200, "data": result})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"校验邀请码失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "校验邀请码失败"}), 500
 

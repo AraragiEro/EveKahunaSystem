@@ -1,54 +1,9 @@
 # docker-compose.yml
 # NAPCAT_UID=$(id -u) NAPCAT_GID=$(id -g) docker-compose -f ./compose/astrbot.yml up -d
 services:
-  napcat:
-    environment:
-      - NAPCAT_UID=${NAPCAT_UID:-1000}
-      - NAPCAT_GID=${NAPCAT_GID:-1000}
-      - MODE=astrbot
-      - TZ='Asia/Shanghai'
-    ports:
-      - 6099:6099
-    container_name: napcat
-    restart: always
-    image: mlikiowa/napcat-docker:latest
-    volumes:
-      - ./data:/AstrBot/data
-      - ./napcat:/app/napcat
-      - ./ntqq:/app/.config/QQ
-    networks:
-      - astrbot_network
-    mac_address: "02:42:ac:11:00:02"
-  astrbot:
-    image: soulter/astrbot:latest
-    container_name: astrbot
-    restart: always
-    ports:
-      - "6185:6185"
-      - "6195:6195"
-      - "6199:6199"
-    volumes:
-      - ./data:/AstrBot/data
-      - ./napcat:/app/napcat
-      - ./ntqq:/app/.config/QQ
-    networks:
-      - astrbot_network
-    environment:
-      - TZ='Asia/Shanghai'
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=6201
-      - POSTGRES_DB=kahunabot
-      - POSTGRES_USER=kahunabot
-      - POSTGRES_PASSWORD=kahunabot
-      - REDIS_HOST=redis
-      - REDIS_PORT=6202
-    depends_on:
-      - postgres
-      - redis
-
   postgres:
     image: postgres:16-alpine
-    container_name: postgres
+    container_name: kahunaSystemPostgreDatabase
     restart: always
     ports:
       - "6201:5432"
@@ -67,9 +22,30 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: kahunaSystemSdeDatabase
+    restart: always
+    ports:
+      - "6202:5432"
+    environment:
+      - POSTGRES_DB=sde
+      - POSTGRES_USER=kahunabot
+      - POSTGRES_PASSWORD=kahunabot
+      - TZ='Asia/Shanghai'
+    volumes:
+      - ./sde_data:/var/lib/postgresql/data
+    networks:
+      - astrbot_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kahunabot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   redis:
     image: redis:7-alpine
-    container_name: redis
+    container_name: KahunaSystemRedis
     restart: always
     ports:
       - "6202:6379"
@@ -84,6 +60,28 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
+      retries: 5
+
+  neo4j:
+    image: neo4j:2025.10.1
+    container_name: KahunaSystemNeo4j
+    restart: always
+    ports:
+      - "7687:7687"  # Bolt协议
+      - "7474:7474"  # HTTP
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/var/lib/neo4j/plugins
+      - neo4j_conf:/var/lib/neo4j/conf
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
       retries: 5
 
 networks:

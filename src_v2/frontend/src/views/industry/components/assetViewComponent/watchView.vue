@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { Setting, DocumentCopy } from '@element-plus/icons-vue'
+import { Setting, DocumentCopy, Refresh } from '@element-plus/icons-vue'
 import { http } from '@/http'
 import { ElMessage } from 'element-plus'
 
@@ -23,10 +23,53 @@ interface Props {
                 quantity: number
             }
         }
-    }
+    },
+    lastUpdateTime?: number | string | Date
 }
 
 const props = defineProps<Props>()
+
+const emit = defineEmits<{
+    refresh: []
+}>()
+
+// 计算 lastUpdateTime，如果没有传入则返回 undefined（formatTime 会处理）
+const lastUpdateTime = computed(() => {
+    return props.lastUpdateTime
+})
+
+// 格式化时间
+const formatTime = (time?: number | string | Date): string => {
+    if (!time) return '未知'
+    
+    let date: Date
+    if (typeof time === 'number') {
+        // 如果是时间戳（毫秒），直接使用；如果是秒级时间戳，转换为毫秒
+        date = time > 1e12 ? new Date(time) : new Date(time * 1000)
+    } else if (typeof time === 'string') {
+        date = new Date(time)
+    } else {
+        date = time
+    }
+    
+    if (isNaN(date.getTime())) {
+        return '未知'
+    }
+    
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+}
+
+// 处理刷新
+const handleRefresh = () => {
+    emit('refresh')
+}
 
 const AssetViewSort = computed(() => {
     return props.assetView.sort((a, b) => {
@@ -155,6 +198,9 @@ const handleSetSingleTargetLine = async () => {
 
     setSingleTargetLineDialogVisible.value = false
     currentAsset.value = null
+    
+    // 触发刷新，让父组件重新获取数据以更新配置
+    emit('refresh')
 }
 
 const handleSetAllTargetLine = async () => {
@@ -184,6 +230,9 @@ const handleSetAllTargetLine = async () => {
     ElMessage.success(data.message || '保存成功')
 
     setAllTargetLineDialogVisible.value = false
+    
+    // 触发刷新，让父组件重新获取数据以更新配置
+    emit('refresh')
 }
 
 // 计算进度百分比
@@ -297,46 +346,63 @@ const copyAllPurchaseList = async () => {
         <div v-else class="watch-view-container">
             <!-- 顶部操作区域 -->
             <div class="action-bar">
-                <el-button 
-                    type="primary" 
-                    :icon="Setting" 
-                    @click="setAllTargetLine"
-                    class="set-all-button"
-                >
-                    设置全体目标线
-                </el-button>
-                <el-button 
-                    type="success" 
-                    :icon="DocumentCopy" 
-                    @click="copyAllPurchaseList"
-                    class="copy-all-button"
-                >
-                    复制采购清单
-                </el-button>
-                <div class="round-percentage-input">
-                    <span class="input-label">取整百分比:</span>
-                    <el-input-number 
-                        v-model="roundPercentage" 
-                        :min="1" 
-                        :max="100" 
-                        :step="5"
-                        :precision="0"
-                        size="default"
-                        class="percentage-input"
-                    />
-                    <span class="input-suffix">%</span>
+                <div class="action-bar-left">
+                    <el-button 
+                        type="primary" 
+                        :icon="Setting" 
+                        @click="setAllTargetLine"
+                        class="set-all-button"
+                    >
+                        设置全体目标线
+                    </el-button>
+                    <el-button 
+                        type="success" 
+                        :icon="DocumentCopy" 
+                        @click="copyAllPurchaseList"
+                        class="copy-all-button"
+                    >
+                        复制采购清单
+                    </el-button>
+                    <div class="round-percentage-input">
+                        <span class="input-label">取整百分比:</span>
+                        <el-input-number 
+                            v-model="roundPercentage" 
+                            :min="1" 
+                            :max="100" 
+                            :step="5"
+                            :precision="0"
+                            size="default"
+                            class="percentage-input"
+                        />
+                        <span class="input-suffix">%</span>
+                    </div>
+                    <div class="round-digit-input">
+                        <span class="input-label">位数取整:</span>
+                        <el-input-number 
+                            v-model="roundDigit" 
+                            :min="1" 
+                            :step="1"
+                            :precision="0"
+                            size="default"
+                            class="digit-input"
+                            :controls-position="'right'"
+                        />
+                    </div>
                 </div>
-                <div class="round-digit-input">
-                    <span class="input-label">位数取整:</span>
-                    <el-input-number 
-                        v-model="roundDigit" 
-                        :min="1" 
-                        :step="1"
-                        :precision="0"
-                        size="default"
-                        class="digit-input"
-                        :controls-position="'right'"
-                    />
+                <div class="action-bar-right">
+                    <div class="last-update-time">
+                        <span class="time-label">上次获取时间：</span>
+                        <span class="time-value">{{ formatTime(lastUpdateTime) }}</span>
+                    </div>
+                    <el-button 
+                        type="primary" 
+                        :icon="Refresh"
+                        @click="handleRefresh"
+                        :loading="loading"
+                        class="refresh-button"
+                    >
+                        立即刷新
+                    </el-button>
                 </div>
             </div>
         
@@ -461,9 +527,28 @@ const copyAllPurchaseList = async () => {
 
 /* 顶部操作栏 */
 .action-bar {
-    padding: 0 8px;
+    padding: 16px;
     display: flex;
-    justify-content: flex-start;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    border-radius: 8px;
+}
+
+.action-bar-left {
+    display: flex;
+    gap: 12px;
+    flex: 1;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.action-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
 }
 
 .set-all-button {
@@ -527,6 +612,37 @@ const copyAllPurchaseList = async () => {
     font-size: 14px;
     color: #909399;
     white-space: nowrap;
+}
+
+.last-update-time {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #606266;
+}
+
+.time-label {
+    font-weight: 500;
+    color: #909399;
+}
+
+.time-value {
+    font-weight: 600;
+    color: #303133;
+}
+
+.refresh-button {
+    font-size: 14px;
+    padding: 10px 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+    transition: all 0.3s ease;
+}
+
+.refresh-button:hover {
+    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    transform: translateY(-1px);
 }
 
 /* 资产网格 */
@@ -679,8 +795,29 @@ const copyAllPurchaseList = async () => {
 /* 响应式设计 */
 @media (max-width: 768px) {
     .action-bar {
-        flex-wrap: wrap;
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .action-bar-left {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .action-bar-right {
+        width: 100%;
+        flex-direction: column;
+        align-items: stretch;
         gap: 12px;
+    }
+    
+    .last-update-time {
+        justify-content: center;
+        width: 100%;
+    }
+    
+    .refresh-button {
+        width: 100%;
     }
 
     .round-percentage-input,

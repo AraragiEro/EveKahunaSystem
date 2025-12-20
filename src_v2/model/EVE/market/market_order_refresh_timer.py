@@ -1,6 +1,6 @@
 import asyncio
 
-from src_v2.core.database.connect_manager import redis_manager as rdm
+from src_v2.core.database.connect_manager import get_redis_manager
 from src_v2.model.EVE.market.market_manager import MarketManager
 from src_v2.core.log import logger
 from src_v2.core.utils import SingletonMeta
@@ -48,7 +48,7 @@ class MarketOrderRefreshTimer(metaclass=SingletonMeta):
         while self._running:
             try:
                 # 检查 Redis flag
-                flag_exists = await rdm.r.exists(self.REDIS_FLAG_KEY)
+                flag_exists = await get_redis_manager().r.exists(self.REDIS_FLAG_KEY)
                 
                 if not flag_exists:
                     logger.info("检测到 market_update_flag:jita 不存在，开始执行任务")

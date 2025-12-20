@@ -1,16 +1,16 @@
 from sqlalchemy import (
+    ARRAY,
+    UUID,
+    BigInteger,
+    Boolean,
     Column,
+    DateTime,
+    Float,
+    ForeignKey,
     Integer,
     String,
     Text,
-    DateTime,
-    Float,
-    Boolean,
-    ForeignKey,
     UniqueConstraint,
-    BigInteger,
-    UUID,
-    ARRAY,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
@@ -184,8 +184,9 @@ class EveAssetView(PostgreModel):
     __tablename__ = 'eve_asset_view'
     sid = Column(Text, primary_key=True)
     user_name = Column(Text, index=True)
-    asset_owner_id = Column(BigInteger)
-    asset_container_id = Column(BigInteger, index=True)
+    asset_owner_id = Column(BigInteger)  # 废弃，保留但不再使用
+    asset_container_id = Column(BigInteger, index=True)  # 废弃，保留但不再使用
+    asset_container_id_list = Column(ARRAY(JSONB))  # 新字段，存储 {container_id, owner_id} 组合
     structure_id = Column(BigInteger)
     system_id = Column(Integer)
     tag = Column(Text)
@@ -214,6 +215,33 @@ class EveIndustryPlanProduct(PostgreModel):
     quantity = Column(Integer)
 all_model.append(EveIndustryPlanProduct)
 
+"""
+planproductdata重构
+product_data数据结构：
+[
+    {
+        "type": str, # "group" | "product"
+        # product属性
+        "type_id": int, # product_type_id
+        "quantity": int, # product_quantity
+        # group属性
+        "name": str, # group_name
+        "products": [
+            {
+                ... # product的属性
+            }
+        ]
+    }
+]
+"""
+class EveIndustryPlanProductJSONB(PostgreModel):
+    __tablename__ = 'eve_industry_plan_product_jsonb'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(Text, index=True)
+    plan_name = Column(Text, index=True)
+    product_data = Column(JSONB)
+all_model.append(EveIndustryPlanProductJSONB)
+
 # 工业计划配置流 配置库
 class EveIndustryPlanConfigFlowConfig(PostgreModel):
     __tablename__ = 'eve_industry_plan_config_flow_config'
@@ -221,6 +249,7 @@ class EveIndustryPlanConfigFlowConfig(PostgreModel):
     user_name = Column(Text, index=True)
     config_type = Column(Text)
     config_value = Column(JSONB)
+    config_tag = Column(Text)
 all_model.append(EveIndustryPlanConfigFlowConfig)
 
 class EveIndustryPlanConfigFlow(PostgreModel):
@@ -275,8 +304,64 @@ class EnterpriseMarket(PostgreModel):
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
     product_type_ids = Column(ARRAY(Integer))
-    container_id_list = Column(ARRAY(BigInteger))
+    container_id_list = Column(ARRAY(BigInteger))  # 废弃，保留但不再使用
+    asset_pull_permission = Column(ARRAY(JSONB))  # 新字段，存储 {container_id, owner_id} 组合
 all_model.append(EnterpriseMarket)
+
+
+class MessageCard(PostgreModel):
+    """
+    留言卡片表
+    """
+    __tablename__ = 'message_card'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # 创建人用户名（关联 user.user_name）
+    author_user_name = Column(Text, ForeignKey("user.user_name"), index=True, nullable=False)
+    # 类型：bug / feat / chat
+    type = Column(Text, nullable=False, index=True)
+    # 状态：created / in_progress / closed
+    status = Column(Text, nullable=False, index=True)
+    # 标题与正文
+    title = Column(Text, nullable=False)
+    content = Column(Text, nullable=False)
+    # 创建与更新时间
+    created_at = Column(DateTime, nullable=False, index=True)
+    updated_at = Column(DateTime)
+    # 最近回复时间与最近回复人（可为空）
+    last_reply_at = Column(DateTime, index=True)
+    last_reply_user_name = Column(Text, ForeignKey("user.user_name"))
+    # 关闭信息
+    auto_closed = Column(Boolean, default=False, server_default='false')
+    closed_at = Column(DateTime)
+    closed_by = Column(Text, ForeignKey("user.user_name"))
+    close_reason = Column(Text)
+    # 隐藏状态（管理员可隐藏，只有发布者可见）
+    is_hidden = Column(Boolean, default=False, server_default='false')
+
+
+all_model.append(MessageCard)
+
+
+class MessageReply(PostgreModel):
+    """
+    留言回复表
+    """
+    __tablename__ = 'message_reply'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    card_id = Column(Integer, ForeignKey("message_card.id"), nullable=False, index=True)
+    author_user_name = Column(Text, ForeignKey("user.user_name"), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, index=True)
+    updated_at = Column(DateTime)
+    is_deleted = Column(Boolean, default=False, server_default='false')
+    # 隐藏状态（管理员可隐藏，只有发布者可见）
+    is_hidden = Column(Boolean, default=False, server_default='false')
+
+
+all_model.append(MessageReply)
+
 
 class EveMarketRegionHistoryStatistic(PostgreModel):
     __tablename__ = 'eve_market_region_history_statistic'
@@ -298,7 +383,7 @@ all_model.append(EveMarketRegionHistoryStatistic)
 class EveMarketRegionOrders(PostgreModel):
     __tablename__ = 'eve_market_region_orders'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    order_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    order_id = Column(BigInteger, nullable=False, index=True)
     type_id = Column(BigInteger, nullable=False, index=True)
     region_id = Column(BigInteger, index=True)
     system_id = Column(BigInteger, index=True)

@@ -33,8 +33,10 @@ async def get_all_roles():
             })
         return jsonify({"status": 200, "data": roles})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取所有角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取所有角色失败"}), 500
 
@@ -66,8 +68,10 @@ async def create_role():
             }
         })
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"创建角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "创建角色失败"}), 500
 
@@ -89,8 +93,10 @@ async def delete_role():
         
         return jsonify({"status": 200, "message": "角色删除成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"删除角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "删除角色失败"}), 500
 
@@ -111,8 +117,10 @@ async def get_all_permissions():
             })
         return jsonify({"status": 200, "data": permissions})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取所有权限失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取所有权限失败"}), 500
 
@@ -144,8 +152,10 @@ async def create_permission():
             }
         })
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"创建权限失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "创建权限失败"}), 500
 
@@ -159,8 +169,10 @@ async def get_permission_usage(permission_name: str):
         usage_info = await permission_manager.get_permission_usage(permission_name)
         return jsonify({"status": 200, "data": usage_info})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取权限使用情况失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取权限使用情况失败"}), 500
 
@@ -182,8 +194,10 @@ async def delete_permission():
         
         return jsonify({"status": 200, "message": "权限删除成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"删除权限失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "删除权限失败"}), 500
 
@@ -207,8 +221,10 @@ async def get_role_hierarchy(role_name: str):
             }
         })
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取角色层级关系失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取角色层级关系失败"}), 500
 
@@ -238,8 +254,10 @@ async def add_role_hierarchy():
         
         return jsonify({"status": 200, "message": "角色层级关系添加成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"添加角色层级关系失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "添加角色层级关系失败"}), 500
 
@@ -260,8 +278,10 @@ async def delete_role_hierarchy():
         
         return jsonify({"status": 200, "message": "角色层级关系删除成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"删除角色层级关系失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "删除角色层级关系失败"}), 500
 
@@ -277,8 +297,10 @@ async def get_user_roles(user_name: str):
         roles = await permission_manager.get_user_roles(user_name)
         return jsonify({"status": 200, "data": roles})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取用户角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取用户角色失败"}), 500
 
@@ -300,8 +322,10 @@ async def add_role_to_user():
         
         return jsonify({"status": 200, "message": "用户角色添加成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"添加用户角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "添加用户角色失败"}), 500
 
@@ -323,8 +347,10 @@ async def remove_role_from_user():
         
         return jsonify({"status": 200, "message": "用户角色移除成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"移除用户角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "移除用户角色失败"}), 500
 
@@ -343,8 +369,10 @@ async def get_all_users():
             })
         return jsonify({"status": 200, "data": users})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取所有用户失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取所有用户失败"}), 500
 
@@ -360,8 +388,10 @@ async def get_role_permissions(role_name: str):
         permissions = await permission_manager.get_role_permissions(role_name)
         return jsonify({"status": 200, "data": permissions})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取角色权限失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取角色权限失败"}), 500
 
@@ -383,8 +413,10 @@ async def add_permission_to_role():
         
         return jsonify({"status": 200, "message": "角色权限添加成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"添加角色权限失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "添加角色权限失败"}), 500
 
@@ -406,8 +438,10 @@ async def remove_permission_from_role():
         
         return jsonify({"status": 200, "message": "角色权限移除成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"移除角色权限失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "移除角色权限失败"}), 500
 

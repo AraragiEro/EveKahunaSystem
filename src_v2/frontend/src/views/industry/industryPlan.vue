@@ -1,25 +1,52 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowRight } from '@element-plus/icons-vue'
+import { ArrowRight, QuestionFilled, Close, Setting } from '@element-plus/icons-vue'
 import { http } from '@/http'
 import { VueDraggable } from 'vue-draggable-plus'
 import IndustryPlanPlanTable from './components/industryPlanPlanTable.vue'
 import IndustryPlanConfigFlow from './components/industryPlanConfigFlow.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useEdition } from '@/composables/useEdition'
 
 const authStore = useAuthStore()
+const { isEnterprise } = useEdition()
 const haveAlphaRole = computed(() => {
-    return authStore.user?.roles.includes('vip_alpha') || false
+  return authStore.user?.roles.includes('vip_alpha') || false
+})
+const haveAdminRole = computed(() => {
+  return authStore.user?.roles.includes('admin') || false
+})
+const haveOmegaRole = computed(() => {
+  return authStore.user?.roles.includes('vip_omega') || false
 })
 
 interface PlanProductTableData {
   "row_id": number,
-  "index_id": number,
-  "product_type_id": number,
+  "type_id": number,
   "quantity": number,
   "type_name": string,
   "type_name_zh": string
+  "type": 'group' | 'product'
+  "name": string
+  "products": PlanProductTableData[]
+  "active"?: boolean
+}
+
+// 扁平化数据结构
+interface PlanRow {
+  row_id: number
+  type: 'group' | 'product'
+  group_id?: string | null        // product 所属的 group name，null 表示不在组内
+  order: number                    // 全局顺序
+  // product 属性
+  type_id?: number
+  quantity?: number
+  type_name?: string
+  type_name_zh?: string
+  active?: boolean                 // product 是否启动
+  // group 属性
+  name?: string                    // group 名称
 }
 
 interface PlanSettings {
@@ -27,6 +54,7 @@ interface PlanSettings {
   considerate_asset: boolean,
   considerate_running_job: boolean,
   split_to_jobs: boolean,
+  full_split: boolean,
   considerate_bp_relation: boolean,
   full_use_bp_cp: boolean,
   work_type: string
@@ -37,10 +65,28 @@ interface PlanTableData {
   "plan_name": string,
   "user_name": string,
   "plan_settings": PlanSettings,
-  "products": PlanProductTableData[]
+  "products": PlanProductTableData[],
+  "plan_key"?: string,
+  "plan_display_name"?: string
+}
+
+interface SearchResult {
+  type_id: number
+  type_name_zh: string
+}
+
+interface TypeItem {
+  value: string
+}
+
+interface AuxiliaryCondition {
+  id: number
+  searchType: string
+  keyword: string
 }
 
 const marketRootTree = ref([])
+const originalMarketRootTree = ref([]) // 保存原始市场树数据，用于恢复
 // 从 localStorage 恢复之前选择的计划
 const STORAGE_KEY = 'industry_plan_selected_plan'
 const selectedPlan = ref<string | null>(localStorage.getItem(STORAGE_KEY) || null)
@@ -49,7 +95,48 @@ const getMarketRootTree = async () => {
     node: 'root'
   })
   const data = await res.json()
+  if (data.status !== 200) {
+    ElMessage.error(data.message || '获取市场树失败')
+    return
+  }
   marketRootTree.value = data.data
+  originalMarketRootTree.value = JSON.parse(JSON.stringify(data.data)) // 深拷贝保存原始数据
+}
+
+// 搜索市场类型
+const searchMarketTypes = async () => {
+  const keyword = searchKeyword.value.trim()
+
+  // 如果关键词为空，恢复显示原始市场树
+  if (!keyword) {
+    // 如果有原始数据，则恢复；否则重新加载
+    if (originalMarketRootTree.value.length > 0) {
+      marketRootTree.value = JSON.parse(JSON.stringify(originalMarketRootTree.value))
+    } else {
+      // 如果原始数据还没有加载，重新获取
+      await getMarketRootTree()
+    }
+    return
+  }
+
+  try {
+    const res = await http.post('/EVE/industry/searchMarketTypes', {
+      keyword: keyword
+    })
+    const data = await res.json()
+
+    if (data.status === 200) {
+      marketRootTree.value = data.data || []
+      if (marketRootTree.value.length === 0) {
+        ElMessage.info('未找到匹配的结果')
+      }
+    } else {
+      ElMessage.error(data.message || '搜索失败')
+    }
+  } catch (e) {
+    ElMessage.error('搜索失败，请稍后重试')
+    console.error('搜索市场类型失败:', e)
+  }
 }
 
 // 懒加载子节点数据
@@ -60,6 +147,11 @@ const loadChildTree = async (row: any, treeNode: any, resolve: (data: any[]) => 
     })
     const data = await res.json()
     console.log("loadChildTree", data)
+    if (data.status !== 200) {
+      ElMessage.error(data.message || '加载子节点失败')
+      resolve([])
+      return
+    }
     // 调用 resolve 返回子节点数据
     resolve(data.data || [])
   } catch (error) {
@@ -72,31 +164,71 @@ const getPlanTableData = async () => {
   console.log("getPlanTableData")
   const res = await http.post('/EVE/industry/getPlanTableData')
   const data = await res.json()
-  IndustryPlanTableData.value = data.data
-  
+  if (data.status !== 200) {
+    ElMessage.error(data.message || '获取计划列表失败')
+    return
+  }
+
+  // 如果是管理员模式，为每个计划添加 plan_key 和 plan_display_name
+  if (haveAdminRole.value) {
+    IndustryPlanTableData.value = data.data.map((plan: PlanTableData) => ({
+      ...plan,
+      plan_key: `${plan.user_name}:${plan.plan_name}`,
+      plan_display_name: `${plan.user_name}:${plan.plan_name}`
+    }))
+  } else {
+    IndustryPlanTableData.value = data.data
+  }
+
   // 如果从 localStorage 恢复了计划，但计划列表中不存在，则清除
   if (selectedPlan.value) {
-    const planExists = IndustryPlanTableData.value.some(item => item.plan_name === selectedPlan.value)
+    let planExists = false
+    if (haveAdminRole.value) {
+      // 管理员模式：查找 plan_key 匹配的计划
+      planExists = IndustryPlanTableData.value.some((item: any) => {
+        const planKey = item.plan_key || `${item.user_name}:${item.plan_name}`
+        return planKey === selectedPlan.value
+      })
+    } else {
+      // 普通模式：只有 plan_name
+      planExists = IndustryPlanTableData.value.some(item => item.plan_name === selectedPlan.value)
+    }
+
     if (!planExists) {
       selectedPlan.value = null
       localStorage.removeItem(STORAGE_KEY)
       currentPlanProducts.value = []
+      flatPlanProducts.value = []
       console.log("selectedPlan not found", selectedPlan.value)
       return
     }
-    
+
     // 加载计划数据
-    currentPlanProducts.value = IndustryPlanTableData.value.find(item => item.plan_name == selectedPlan.value)?.products || []
-    current_plan_settings.value = IndustryPlanTableData.value.find(item => item.plan_name == selectedPlan.value)?.plan_settings || {
-      name: '',
-      considerate_asset: false,
-      considerate_running_job: false,
-      split_to_jobs: false,
-      considerate_bp_relation: false,
-      full_use_bp_cp: false,
-      work_type: 'whole'
+    let plan: PlanTableData | undefined
+    if (haveAdminRole.value) {
+      plan = IndustryPlanTableData.value.find((item: any) => {
+        const planKey = item.plan_key || `${item.user_name}:${item.plan_name}`
+        return planKey === selectedPlan.value
+      }) as PlanTableData | undefined
+    } else {
+      plan = IndustryPlanTableData.value.find(item => item.plan_name == selectedPlan.value)
     }
-    current_plan_settings.value.name = selectedPlan.value
+
+    if (plan) {
+      flatPlanProducts.value = flattenProducts(plan.products || [])
+      currentPlanProducts.value = plan.products || []
+      current_plan_settings.value = plan.plan_settings || {
+        name: '',
+        considerate_asset: false,
+        considerate_running_job: false,
+        split_to_jobs: false,
+        full_split: false,
+        considerate_bp_relation: false,
+        full_use_bp_cp: false,
+        work_type: 'whole'
+      }
+      current_plan_settings.value.name = plan.plan_name
+    }
   } else {
     currentPlanProducts.value = []
   }
@@ -110,6 +242,7 @@ const planForm = ref({
   considerate_asset: false,
   considerate_running_job: false,
   split_to_jobs: false,
+  full_split: false,
   considerate_bp_relation: false,
   work_type: 'whole' // 'whole' 按整体考虑, 'in_order' 按顺序安排工作
 })
@@ -121,6 +254,7 @@ const openCreatePlanDialog = () => {
     considerate_asset: false,
     considerate_running_job: false,
     split_to_jobs: false,
+    full_split: false,
     considerate_bp_relation: false,
     work_type: 'whole'
   }
@@ -134,17 +268,17 @@ const handleConfirm = async () => {
     considerate_asset: planForm.value.considerate_asset,
     considerate_running_job: planForm.value.considerate_running_job,
     split_to_jobs: planForm.value.split_to_jobs,
+    full_split: planForm.value.full_split,
     considerate_bp_relation: planForm.value.considerate_bp_relation,
     work_type: planForm.value.work_type
   })
   const data = await res.json()
-  const code = res.status
-  if (code === 200) {
-    ElMessage.success("创建成功")
-    await getPlanTableData()
-  } else {
-    ElMessage.error(data.message)
+  if (data.status !== 200) {
+    ElMessage.error(data.message || '创建计划失败')
+    return
   }
+  ElMessage.success("创建成功")
+  await getPlanTableData()
   dialogVisible.value = false
 }
 
@@ -171,32 +305,44 @@ const addPlanDialogForm = ref({
   plan_list: [] as PlanTableData[],
 
   add_plan_loading: false,
-  
+
   plan_name: '',
   type_id: '',
-  quantity: 1
+  quantity: 1,
+  group_name: null as string | null
 })
 // 右键菜单相关
 const contextMenuRow = ref<any>(null)
 const contextMenuVisible = ref(false)
 const contextMenuStyle = ref({ left: '0px', top: '0px' })
 
+// 添加到自选市场清单相关
+interface Market {
+  id: number
+  tag: string
+  product_type_ids: number[]
+}
+const addToMarketDialogVisible = ref(false)
+const marketList = ref<Market[]>([])
+const selectedMarketId = ref<number | null>(null)
+const addToMarketLoading = ref(false)
+
 const handleRowContextMenu = (row: any, column: any, event: MouseEvent) => {
   // 只处理有 can_add_plan 属性的行
   if (!('can_add_plan' in row)) {
     return
   }
-  
+
   event.preventDefault()
   event.stopPropagation()
-  
+
   contextMenuRow.value = row
   contextMenuStyle.value = {
     left: event.clientX + 'px',
     top: event.clientY + 'px'
   }
   contextMenuVisible.value = true
-  
+
   // 添加点击外部关闭菜单的事件监听（使用 nextTick 确保菜单已渲染）
   nextTick(() => {
     document.addEventListener('click', handleClickOutside, { once: true })
@@ -216,12 +362,47 @@ const handleAddPlan = (command: string) => {
   console.log("handleAddPlan", command)
   addPlanDialogVisible.value = true
   addPlanDialogForm.value.type_id = command
+  addPlanDialogForm.value.group_name = null // 重置组选择
 
   addPlanDialogForm.value.get_plan_loading = true
   getPlanTableData()
   addPlanDialogForm.value.plan_list = IndustryPlanTableData.value
   addPlanDialogForm.value.get_plan_loading = false
 }
+
+// 获取当前选中计划的组列表（用于添加产品弹窗）
+const getSelectedPlanForAdd = computed(() => {
+  if (!addPlanDialogForm.value.plan_name) return undefined
+
+  let plan: PlanTableData | undefined
+  if (haveAdminRole.value) {
+    const planKey = addPlanDialogForm.value.plan_name
+    plan = IndustryPlanTableData.value.find((item: any) => {
+      const key = item.plan_key || `${item.user_name}:${item.plan_name}`
+      return key === planKey || item.plan_name === planKey
+    }) as PlanTableData | undefined
+  } else {
+    plan = IndustryPlanTableData.value.find(item => item.plan_name === addPlanDialogForm.value.plan_name)
+  }
+  return plan
+})
+
+// 获取当前选中计划的组列表（用于批量添加弹窗）
+const getSelectedPlanForBatchAdd = computed(() => {
+  if (!batchAddConfirmForm.value.plan_name) return undefined
+
+  let plan: PlanTableData | undefined
+  if (haveAdminRole.value) {
+    const planKey = batchAddConfirmForm.value.plan_name
+    plan = IndustryPlanTableData.value.find((item: any) => {
+      const key = item.plan_key || `${item.user_name}:${item.plan_name}`
+      return key === planKey || item.plan_name === planKey
+    }) as PlanTableData | undefined
+  } else {
+    plan = IndustryPlanTableData.value.find(item => item.plan_name === batchAddConfirmForm.value.plan_name)
+  }
+  return plan
+})
 
 const ItemInfoDialogVisible = ref(false)
 const ItemInfoDialogLoading = ref(false)
@@ -258,7 +439,7 @@ const getMarketGroupList = (marketGroupStr: string): string[] => {
 const copyToClipboard = async (text: string | number, label?: string) => {
   const textStr = String(text || '').trim()
   if (!textStr || textStr === '—' || textStr === '') return
-  
+
   try {
     await navigator.clipboard.writeText(textStr)
     ElMessage.success({
@@ -301,13 +482,13 @@ const handleItemInfo = async () => {
     type_id: contextMenuRow.value.type_id
   })
   const data = await res.json()
-  if (res.status !== 200) {
+  if (data.status !== 200) {
     ItemInfoDialogLoading.value = false
     ItemInfoDialogVisible.value = false
-    ElMessage.error(data.message)
+    ElMessage.error(data.message || '获取物品信息失败')
     return
   }
-  
+
   ItemInfoDialogLoading.value = false
   ItemData.value.type_id = data.data.type_id
   ItemData.value.type_name = data.data.type_name
@@ -316,6 +497,105 @@ const handleItemInfo = async () => {
   ItemData.value.group = data.data.group
   ItemData.value.category = data.data.category
   ItemData.value.market_group_list = data.data.market_group_list
+}
+
+// 打开添加到自选市场清单对话框
+const handleAddToMarket = async () => {
+  if (!contextMenuRow.value?.type_id) {
+    ElMessage.warning('无法获取物品信息')
+    return
+  }
+
+  addToMarketLoading.value = true
+  addToMarketDialogVisible.value = true
+  selectedMarketId.value = null
+
+  try {
+    const res = await http.get('/enterprise/market/list')
+    const data = await res.json()
+    if (data.status !== 200) {
+      ElMessage.error(data.message || '获取自选市场列表失败')
+      addToMarketDialogVisible.value = false
+      return
+    }
+    marketList.value = data.data || []
+    if (marketList.value.length === 0) {
+      ElMessage.warning('暂无自选市场清单，请先创建')
+      addToMarketDialogVisible.value = false
+    }
+  } catch (e) {
+    ElMessage.error('获取自选市场列表失败')
+    addToMarketDialogVisible.value = false
+  } finally {
+    addToMarketLoading.value = false
+  }
+}
+
+// 确认添加到自选市场清单
+const handleAddToMarketConfirm = async () => {
+  if (!selectedMarketId.value) {
+    ElMessage.warning('请选择自选市场清单')
+    return
+  }
+
+  if (!contextMenuRow.value?.type_id) {
+    ElMessage.error('无法获取物品信息')
+    return
+  }
+
+  addToMarketLoading.value = true
+
+  try {
+    // 获取当前市场的现有 product_type_ids
+    const currentMarket = marketList.value.find(m => m.id === selectedMarketId.value)
+    if (!currentMarket) {
+      ElMessage.error('找不到选定的自选市场')
+      addToMarketLoading.value = false
+      return
+    }
+
+    // 获取现有的 type_ids 列表
+    const existingTypeIds = currentMarket.product_type_ids || []
+    const newTypeId = contextMenuRow.value.type_id
+
+    // 检查是否已存在
+    if (existingTypeIds.includes(newTypeId)) {
+      ElMessage.warning('该物品已存在于自选市场清单中')
+      addToMarketLoading.value = false
+      return
+    }
+
+    // 合并并去重
+    const mergedTypeIds = [...existingTypeIds, newTypeId]
+
+    // 检查是否超过限制（根据市场设置的模式决定，这里使用粗略模式的限制2000）
+    if (mergedTypeIds.length > 2000) {
+      ElMessage.error('添加后物品数量超过2000个，无法添加')
+      addToMarketLoading.value = false
+      return
+    }
+
+    // 调用 API 更新自选市场
+    const res = await http.post('/enterprise/market/update', {
+      market_id: selectedMarketId.value,
+      product_type_ids: mergedTypeIds
+    })
+    const data = await res.json()
+
+    if (data.status !== 200) {
+      ElMessage.error(data.message || '添加到自选市场清单失败')
+      addToMarketLoading.value = false
+      return
+    }
+
+    ElMessage.success('成功添加到自选市场清单')
+    addToMarketDialogVisible.value = false
+    selectedMarketId.value = null
+  } catch (e) {
+    ElMessage.error('添加到自选市场清单失败')
+  } finally {
+    addToMarketLoading.value = false
+  }
 }
 
 const handleContextMenuSelect = (index: string) => {
@@ -329,8 +609,38 @@ const handleContextMenuSelect = (index: string) => {
       handleItemInfo()
       console.log('查看信息', contextMenuRow.value)
     }
+  } else if (index === 'addToMarket') {
+    if (contextMenuRow.value?.type_id) {
+      handleAddToMarket()
+    }
   }
   contextMenuVisible.value = false
+}
+
+// 获取当前选中计划的完整信息（包含user_name）
+const getSelectedPlanInfo = () => {
+  if (!selectedPlan.value) return null
+
+  // 如果是管理员模式，selectedPlan 是 plan_key 格式 "user_name:plan_name"
+  if (haveAdminRole.value) {
+    // 从 planList 中查找匹配的计划
+    const plan = IndustryPlanTableData.value.find((p: any) => {
+      const key = p.plan_key || `${p.user_name}:${p.plan_name}`
+      return key === selectedPlan.value
+    })
+    if (plan) {
+      return { user_name: plan.user_name, plan_name: plan.plan_name }
+    }
+    // 如果找不到，尝试直接解析 selectedPlan（向后兼容）
+    if (selectedPlan.value.includes(':')) {
+      const [user_name, plan_name] = selectedPlan.value.split(':', 2)
+      return { user_name, plan_name }
+    }
+  }
+
+  // 普通模式，只有 plan_name
+  const plan = IndustryPlanTableData.value.find(item => item.plan_name === selectedPlan.value)
+  return plan ? { user_name: plan.user_name, plan_name: plan.plan_name } : null
 }
 
 const handleAddPlanConfirm = async () => {
@@ -340,22 +650,240 @@ const handleAddPlanConfirm = async () => {
     addPlanDialogForm.value.add_plan_loading = false
     return
   }
-  const res = await http.post('/EVE/industry/addPlanProduct', {
-    plan_name: addPlanDialogForm.value.plan_name,
-    type_id: addPlanDialogForm.value.type_id,
-    quantity: addPlanDialogForm.value.quantity
-  })
-  const data = await res.json()
-  const code = res.status
-  if (code === 200) {
-    ElMessage.success("添加成功")
-    addPlanDialogVisible.value = false
-    addPlanDialogForm.value.add_plan_loading = false
-    getPlanTableData()
+
+  // 查找计划信息
+  let plan: PlanTableData | undefined
+  if (haveAdminRole.value) {
+    // 管理员模式：addPlanDialogForm.value.plan_name 可能是 plan_key 格式
+    const planKey = addPlanDialogForm.value.plan_name
+    plan = IndustryPlanTableData.value.find((item: any) => {
+      const key = item.plan_key || `${item.user_name}:${item.plan_name}`
+      return key === planKey || item.plan_name === planKey
+    }) as PlanTableData | undefined
+  } else {
+    plan = IndustryPlanTableData.value.find(item => item.plan_name === addPlanDialogForm.value.plan_name)
   }
+
+  if (!plan) {
+    ElMessage.error("无法找到计划信息")
+    addPlanDialogForm.value.add_plan_loading = false
+    return
+  }
+
+  // 获取当前计划的产品数据（嵌套结构）
+  let currentProducts = plan.products || []
+
+  // 从 contextMenuRow 获取产品名称信息（如果有）
+  const type_name = contextMenuRow.value?.type_name || contextMenuRow.value?.name || ''
+  const type_name_zh = contextMenuRow.value?.type_name_zh || ''
+
+  // 构建新产品项并添加到计划
+  const newProduct = {
+    type_id: parseInt(addPlanDialogForm.value.type_id),
+    quantity: addPlanDialogForm.value.quantity,
+    type_name: type_name,
+    type_name_zh: type_name_zh
+  }
+
+  // 使用辅助函数添加产品
+  const updatedProducts = addProductToPlan(currentProducts, newProduct, addPlanDialogForm.value.group_name)
+
+  // 构建请求数据
+  const requestData: any = {
+    plan_name: plan.plan_name,
+    products: updatedProducts
+  }
+  // 如果是管理员模式且计划属于其他用户，传递 user_name
+  if (haveAdminRole.value && plan.user_name !== authStore.user?.username) {
+    requestData.user_name = plan.user_name
+  }
+
+  const res = await http.post('/EVE/industry/savePlanProducts', requestData)
+  const data = await res.json()
+  if (data.status !== 200) {
+    ElMessage.error(data.message || '添加产品失败')
+    addPlanDialogForm.value.add_plan_loading = false
+    return
+  }
+  ElMessage.success("添加成功")
+  addPlanDialogVisible.value = false
+  addPlanDialogForm.value.add_plan_loading = false
+  // 重置表单
+  addPlanDialogForm.value.group_name = null
+  await getPlanTableData()
+}
+
+const handle_update_current_plan_products = (newList: PlanRow[]) => {
+  console.log("handle_update_current_plan_products", newList)
+  flatPlanProducts.value = newList
+  // 同步更新嵌套结构（用于保存）
+  currentPlanProducts.value = nestProducts(newList)
+  console.log("flatPlanProducts", flatPlanProducts.value)
+  console.log("currentPlanProducts", currentPlanProducts.value)
+  nextTick()
+}
+
+// 获取计划的组列表
+const getPlanGroups = (plan: PlanTableData | undefined): Array<{ name: string }> => {
+  if (!plan || !plan.products) return []
+  return plan.products
+    .filter(item => item.type === 'group')
+    .map(item => ({ name: item.name || '' }))
+    .filter(item => item.name) // 过滤空名称
+}
+
+// 添加产品到计划
+const addProductToPlan = (
+  products: PlanProductTableData[],
+  newProduct: { type_id: number, quantity: number, type_name?: string, type_name_zh?: string },
+  groupName: string | null
+): PlanProductTableData[] => {
+  const productItem: PlanProductTableData = {
+    row_id: 0, // 后端会生成
+    type: 'product',
+    type_id: newProduct.type_id,
+    quantity: newProduct.quantity,
+    type_name: newProduct.type_name || '',
+    type_name_zh: newProduct.type_name_zh || '',
+    name: '',
+    products: []
+  }
+
+  if (groupName) {
+    // 找到组并添加到组内
+    const group = products.find(item => item.type === 'group' && item.name === groupName)
+    if (group && group.products) {
+      group.products.push(productItem)
+    } else {
+      // 组不存在，作为独立产品添加
+      products.push(productItem)
+    }
+  } else {
+    // 作为独立产品添加到计划末尾
+    products.push(productItem)
+  }
+
+  return products
 }
 
 const currentPlanProducts = ref<PlanProductTableData[]>([])
+// 扁平化的产品列表（用于拖拽）
+const flatPlanProducts = ref<PlanRow[]>([])
+
+// 数据转换：嵌套 → 扁平化
+function flattenProducts(nested: PlanProductTableData[]): PlanRow[] {
+  const flat: PlanRow[] = []
+  let order = 0
+
+  for (const item of nested) {
+    if (item.type === 'group') {
+      flat.push({
+        row_id: item.row_id,
+        type: 'group',
+        name: item.name,
+        order: order++,
+        group_id: null
+      })
+
+      // 添加组内产品
+      if (item.products) {
+        for (const product of item.products) {
+          flat.push({
+            row_id: product.row_id,
+            type: 'product',
+            type_id: product.type_id,
+            quantity: product.quantity,
+            type_name: product.type_name,
+            type_name_zh: product.type_name_zh,
+            group_id: item.name,
+            order: order++,
+            active: product.active !== undefined ? product.active : true
+          })
+        }
+      }
+    } else {
+      flat.push({
+        row_id: item.row_id,
+        type: 'product',
+        type_id: item.type_id,
+        quantity: item.quantity,
+        type_name: item.type_name,
+        type_name_zh: item.type_name_zh,
+        group_id: null,
+        order: order++,
+        active: item.active !== undefined ? item.active : true
+      })
+    }
+  }
+
+  return flat
+}
+
+// 数据转换：扁平化 → 嵌套
+function nestProducts(flat: PlanRow[]): PlanProductTableData[] {
+  const nested: PlanProductTableData[] = []
+  const groups = new Map<string, PlanProductTableData>()
+
+  for (const row of flat) {
+    if (row.type === 'group') {
+      const group: PlanProductTableData = {
+        row_id: row.row_id,
+        type: 'group',
+        name: row.name || '',
+        type_id: 0,
+        quantity: 0,
+        type_name: '',
+        type_name_zh: '',
+        products: []
+      }
+      groups.set(row.name || '', group)
+      nested.push(group)
+    } else if (row.type === 'product') {
+      if (row.group_id != null && groups.has(row.group_id)) {
+        // 添加到组内
+        groups.get(row.group_id)!.products.push({
+          row_id: row.row_id,
+          type: 'product',
+          type_id: row.type_id || 0,
+          quantity: row.quantity || 0,
+          type_name: row.type_name || '',
+          type_name_zh: row.type_name_zh || '',
+          name: '',
+          products: [],
+          active: row.active !== undefined ? row.active : true
+        })
+      } else {
+        // 独立产品
+        nested.push({
+          row_id: row.row_id,
+          type: 'product',
+          type_id: row.type_id || 0,
+          quantity: row.quantity || 0,
+          type_name: row.type_name || '',
+          type_name_zh: row.type_name_zh || '',
+          name: '',
+          products: [],
+          active: row.active !== undefined ? row.active : true
+        })
+      }
+    }
+  }
+
+  return nested
+}
+
+// 卡片样式模式：'normal' | 'compact'
+const STORAGE_KEY_PLAN_CARD_STYLE = 'industry_plan_card_style_mode'
+const getInitialCardStyleMode = (): 'normal' | 'compact' => {
+  const saved = localStorage.getItem(STORAGE_KEY_PLAN_CARD_STYLE)
+  return (saved === 'compact' ? 'compact' : 'normal') as 'normal' | 'compact'
+}
+const cardStyleMode = ref<'normal' | 'compact'>(getInitialCardStyleMode())
+
+// 切换紧凑视图模式并保存
+watch(cardStyleMode, (newValue) => {
+  localStorage.setItem(STORAGE_KEY_PLAN_CARD_STYLE, newValue)
+})
 const handlePlanChange = (value: string) => {
   console.log("handlePlanChange", value)
   selectedPlan.value = value
@@ -365,32 +893,70 @@ const handlePlanChange = (value: string) => {
   } else {
     localStorage.removeItem(STORAGE_KEY)
   }
-  currentPlanProducts.value = IndustryPlanTableData.value.find(item => item.plan_name == value)?.products || []
-  current_plan_settings.value = IndustryPlanTableData.value.find(item => item.plan_name == value)?.plan_settings || {
-    name: '',
-    considerate_asset: false,
-    considerate_running_job: false,
-    split_to_jobs: false,
-    considerate_bp_relation: false,
-    full_use_bp_cp: false,
-    work_type: 'whole'
+
+  // 查找计划数据
+  let plan: PlanTableData | undefined
+  if (haveAdminRole.value) {
+    // 管理员模式：使用 plan_key 查找
+    plan = IndustryPlanTableData.value.find((item: any) => {
+      const planKey = item.plan_key || `${item.user_name}:${item.plan_name}`
+      return planKey === value
+    }) as PlanTableData | undefined
+  } else {
+    // 普通模式：使用 plan_name 查找
+    plan = IndustryPlanTableData.value.find(item => item.plan_name == value)
   }
-  current_plan_settings.value.name = value
+
+  if (plan) {
+    // 将嵌套结构转换为扁平结构
+    flatPlanProducts.value = flattenProducts(plan.products || [])
+    // 保留嵌套结构用于保存
+    currentPlanProducts.value = plan.products || []
+    current_plan_settings.value = plan.plan_settings || {
+      name: '',
+      considerate_asset: false,
+      considerate_running_job: false,
+      split_to_jobs: false,
+      full_split: false,
+      considerate_bp_relation: false,
+      full_use_bp_cp: false,
+      work_type: 'whole'
+    }
+    current_plan_settings.value.name = plan.plan_name
+  } else {
+    flatPlanProducts.value = []
+    currentPlanProducts.value = []
+  }
   console.log("current_plan_settings", current_plan_settings.value)
+
 }
 
 const saveCurrentPlan = async () => {
-  const res = await http.post('/EVE/industry/savePlanProducts', {
-    plan_name: selectedPlan.value,
-    products: currentPlanProducts.value
-  })
-  const data = await res.json()
-  const code = res.status
-  if (code === 200) {
-    ElMessage.success("保存成功")
-  } else {
-    ElMessage.error(data.message)
+  const planInfo = getSelectedPlanInfo()
+  if (!planInfo) {
+    ElMessage.error("无法获取计划信息")
+    return
   }
+
+  // 将扁平结构转换为嵌套结构用于保存
+  const nestedProducts = nestProducts(flatPlanProducts.value)
+
+  const requestData: any = {
+    plan_name: planInfo.plan_name,
+    products: nestedProducts
+  }
+  // 如果是管理员模式且计划属于其他用户，传递 user_name
+  if (haveAdminRole.value && planInfo.user_name !== authStore.user?.username) {
+    requestData.user_name = planInfo.user_name
+  }
+
+  const res = await http.post('/EVE/industry/savePlanProducts', requestData)
+  const data = await res.json()
+  if (data.status !== 200) {
+    ElMessage.error(data.message || '保存产品失败')
+    return
+  }
+  ElMessage.success("保存成功")
   getPlanTableData()
 }
 
@@ -400,6 +966,7 @@ const current_plan_settings = ref<PlanSettings>({
   considerate_asset: false,
   considerate_running_job: false,
   split_to_jobs: false,
+  full_split: false,
   considerate_bp_relation: false,
   full_use_bp_cp: false,
   work_type: 'whole'
@@ -421,19 +988,324 @@ const modifyPlanForm = ref({
   work_type: 'whole'
 })
 const handleConfirmModifyPlan = async () => {
-  const res = await http.post('/EVE/industry/modifyPlanSettings', {
-    plan_name: selectedPlan.value,
-    plan_settings: current_plan_settings.value
-  })
-  const data = await res.json()
-  const code = res.status
-  if (code === 200) {
-    ElMessage.success("修改成功")
-    modifyPlanDialogVisible.value = false
-    getPlanTableData()
-  } else {
-    ElMessage.error(data.message)
+  const planInfo = getSelectedPlanInfo()
+  if (!planInfo) {
+    ElMessage.error("无法获取计划信息")
+    return
   }
+
+  const requestData: any = {
+    plan_name: planInfo.plan_name,
+    plan_settings: current_plan_settings.value
+  }
+  // 如果是管理员模式且计划属于其他用户，传递 user_name
+  if (haveAdminRole.value && planInfo.user_name !== authStore.user?.username) {
+    requestData.user_name = planInfo.user_name
+  }
+
+  const res = await http.post('/EVE/industry/modifyPlanSettings', requestData)
+  const data = await res.json()
+  if (data.status !== 200) {
+    ElMessage.error(data.message || '修改计划设置失败')
+    return
+  }
+  ElMessage.success("修改成功")
+  modifyPlanDialogVisible.value = false
+  getPlanTableData()
+}
+
+// 批量添加相关
+const batchAddDialogVisible = ref(false)
+const batchAddConfirmDialogVisible = ref(false)
+const searchType = ref('group')
+const searchKeyword = ref('')
+const searchResults = ref<SearchResult[]>([])
+const selectedSearchResults = ref<SearchResult[]>([])
+const searchResultsTableRef = ref()
+const auxiliaryConditions = ref<AuxiliaryCondition[]>([])
+let auxiliaryConditionIdCounter = 0
+const searchLoading = ref(false)
+const batchAddConfirmForm = ref({
+  plan_name: '',
+  quantity: 1,
+  get_plan_loading: false,
+  group_name: null as string | null
+})
+const searchTypeOptions = [
+  { value: 'typename', label: '物品名称' },
+  { value: 'group', label: '物品组' },
+  { value: 'meta', label: 'meta等级' },
+  { value: 'marketGroup', label: '市场组' },
+  { value: 'category', label: '类别' }
+]
+
+// 打开批量添加搜索弹窗
+const openBatchAddDialog = () => {
+  searchType.value = 'group'
+  searchKeyword.value = ''
+  searchResults.value = []
+  auxiliaryConditions.value = []
+  batchAddDialogVisible.value = true
+}
+
+// 添加辅助条件组
+const addAuxiliaryGroup = () => {
+  auxiliaryConditions.value.push({
+    id: ++auxiliaryConditionIdCounter,
+    searchType: 'group',
+    keyword: ''
+  })
+}
+
+// 删除辅助条件组
+const removeAuxiliaryGroup = (id: number) => {
+  const index = auxiliaryConditions.value.findIndex(item => item.id === id)
+  if (index !== -1) {
+    auxiliaryConditions.value.splice(index, 1)
+  }
+}
+
+// 获取辅助条件的自动补全建议
+const fetchAuxiliarySuggestions = async (queryString: string, condition: AuxiliaryCondition, cb: (suggestions: TypeItem[]) => void): Promise<void> => {
+  if (condition.searchType === 'typename') {
+    // typename类型使用getTypeSuggestionsList API
+    try {
+      const res = await http.post('/EVE/industry/getTypeSuggestionsList', {
+        type_name: queryString
+      })
+      const data = await res.json()
+      const results = queryString ? (data.data || []).map((item: any) => ({ value: item.value || item.label || item })) : []
+      cb(results)
+    } catch (e) {
+      cb([])
+    }
+  } else {
+    // 其他类型使用getGroupSuggestions API
+    try {
+      const res = await http.post('/EVE/industry/getGroupSuggestions', {
+        assign_type: condition.searchType,
+        query: queryString
+      })
+      const data = await res.json()
+      const results = queryString ? (data.data || []).map((item: any) => ({ value: item.value || item.label || item })) : []
+      cb(results)
+    } catch (e) {
+      cb([])
+    }
+  }
+}
+
+// 为辅助条件创建类型化的获取建议函数
+const createAuxiliarySuggestionsFetcher = (condition: AuxiliaryCondition) => {
+  return (queryString: string, cb: (suggestions: TypeItem[]) => void) => {
+    fetchAuxiliarySuggestions(queryString, condition, cb)
+  }
+}
+
+// 获取自动补全建议
+const fetchSearchSuggestions = async (queryString: string, cb: (suggestions: TypeItem[]) => void) => {
+  if (searchType.value === 'typename') {
+    // typename类型使用getTypeSuggestionsList API
+    try {
+      const res = await http.post('/EVE/industry/getTypeSuggestionsList', {
+        type_name: queryString
+      })
+      const data = await res.json()
+      const results = queryString ? (data.data || []).map((item: any) => ({ value: item.value || item.label || item })) : []
+      cb(results)
+    } catch (e) {
+      cb([])
+    }
+  } else {
+    // 其他类型使用getGroupSuggestions API
+    try {
+      const res = await http.post('/EVE/industry/getGroupSuggestions', {
+        assign_type: searchType.value,
+        query: queryString
+      })
+      const data = await res.json()
+      const results = queryString ? (data.data || []).map((item: any) => ({ value: item.value || item.label || item })) : []
+      cb(results)
+    } catch (e) {
+      cb([])
+    }
+  }
+}
+
+// 执行搜索
+const handleBatchSearch = async () => {
+  if (!searchKeyword.value.trim()) {
+    ElMessage.warning('请输入搜索关键字')
+    return
+  }
+
+  searchLoading.value = true
+  try {
+    // 新搜索前清空选中状态
+    selectedSearchResults.value = []
+    if (searchResultsTableRef.value) {
+      searchResultsTableRef.value.clearSelection()
+    }
+
+    // 构建辅助条件数组，过滤掉空的关键字
+    const auxiliaryConditionsData = auxiliaryConditions.value
+      .filter(condition => condition.keyword.trim())
+      .map(condition => ({
+        search_type: condition.searchType,
+        keyword: condition.keyword.trim()
+      }))
+
+    const res = await http.post('/enterprise/market/search', {
+      search_type: searchType.value,
+      keyword: searchKeyword.value.trim(),
+      auxiliary_conditions: auxiliaryConditionsData,
+      have_bp_only: true
+    })
+    const data = await res.json()
+
+    if (data.status === 400 && data.count >= 2000) {
+      ElMessage.warning(data.message || '匹配结果超过2000个，请缩小搜索范围')
+      searchResults.value = data.data || []
+    } else if (data.status === 200) {
+      searchResults.value = data.data || []
+      if (searchResults.value.length === 0) {
+        ElMessage.info('未找到匹配的结果')
+      }
+    } else {
+      ElMessage.error(data.message || '搜索失败')
+      searchResults.value = []
+    }
+  } catch (e) {
+    ElMessage.error('搜索失败')
+    searchResults.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+// 处理搜索结果表格选中变化
+const handleSearchSelectionChange = (selection: SearchResult[]) => {
+  selectedSearchResults.value = selection
+}
+
+// 全选搜索结果
+const selectAllSearchResults = () => {
+  if (!searchResults.value.length || !searchResultsTableRef.value) return
+  searchResultsTableRef.value.clearSelection()
+  searchResults.value.forEach(row => {
+    searchResultsTableRef.value.toggleRowSelection(row, true)
+  })
+}
+
+// 全不选搜索结果
+const clearAllSearchResults = () => {
+  selectedSearchResults.value = []
+  if (searchResultsTableRef.value) {
+    searchResultsTableRef.value.clearSelection()
+  }
+}
+
+// 关闭批量搜索弹窗时清理选中状态
+const handleBatchAddDialogClose = () => {
+  selectedSearchResults.value = []
+  if (searchResultsTableRef.value) {
+    searchResultsTableRef.value.clearSelection()
+  }
+}
+
+// 打开批量添加确认弹窗
+const openBatchAddConfirmDialog = () => {
+  if (selectedSearchResults.value.length === 0) {
+    ElMessage.warning('请先选择至少一个物品')
+    return
+  }
+  batchAddConfirmForm.value.plan_name = ''
+  batchAddConfirmForm.value.quantity = 1
+  batchAddConfirmForm.value.group_name = null // 重置组选择
+  batchAddConfirmForm.value.get_plan_loading = true
+  getPlanTableData()
+  batchAddConfirmForm.value.get_plan_loading = false
+  batchAddConfirmDialogVisible.value = true
+}
+
+// 确认批量添加
+const handleBatchAddConfirm = async () => {
+  if (batchAddConfirmForm.value.plan_name === '') {
+    ElMessage.error("请选择计划")
+    return
+  }
+
+  if (batchAddConfirmForm.value.quantity <= 0) {
+    ElMessage.error("数量必须大于0")
+    return
+  }
+
+  // 查找计划信息
+  let plan: PlanTableData | undefined
+  if (haveAdminRole.value) {
+    // 管理员模式：batchAddConfirmForm.value.plan_name 可能是 plan_key 格式
+    const planKey = batchAddConfirmForm.value.plan_name
+    plan = IndustryPlanTableData.value.find((item: any) => {
+      const key = item.plan_key || `${item.user_name}:${item.plan_name}`
+      return key === planKey || item.plan_name === planKey
+    }) as PlanTableData | undefined
+  } else {
+    plan = IndustryPlanTableData.value.find(item => item.plan_name === batchAddConfirmForm.value.plan_name)
+  }
+
+  if (!plan) {
+    ElMessage.error("无法找到计划信息")
+    return
+  }
+
+  // 获取当前计划的产品数据（嵌套结构）
+  let currentProducts = plan.products || []
+
+  // 批量构建所有新产品项（只处理选中的结果）
+  for (const result of selectedSearchResults.value) {
+    const newProduct = {
+      type_id: result.type_id,
+      quantity: batchAddConfirmForm.value.quantity,
+      type_name: '', // SearchResult 接口中没有 type_name，只有 type_name_zh
+      type_name_zh: result.type_name_zh || ''
+    }
+    // 使用辅助函数添加产品
+    currentProducts = addProductToPlan(currentProducts, newProduct, batchAddConfirmForm.value.group_name)
+  }
+
+  // 构建请求数据
+  const requestData: any = {
+    plan_name: plan.plan_name,
+    products: currentProducts
+  }
+  // 如果是管理员模式且计划属于其他用户，传递 user_name
+  if (haveAdminRole.value && plan.user_name !== authStore.user?.username) {
+    requestData.user_name = plan.user_name
+  }
+
+  try {
+    const res = await http.post('/EVE/industry/savePlanProducts', requestData)
+    const data = await res.json()
+    if (data.status === 200) {
+      ElMessage.success(`成功添加 ${selectedSearchResults.value.length} 个产品到计划`)
+    } else {
+      ElMessage.error(data.message || '批量添加失败')
+      return
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '批量添加失败')
+    return
+  }
+
+  batchAddConfirmDialogVisible.value = false
+  batchAddDialogVisible.value = false
+  searchResults.value = []
+  searchKeyword.value = ''
+  auxiliaryConditions.value = []
+  selectedSearchResults.value = []
+  // 重置表单
+  batchAddConfirmForm.value.group_name = null
+  await getPlanTableData()
 }
 
 // 删除计划
@@ -450,15 +1322,19 @@ const cancelDeletePlan = () => {
 }
 
 const handleConfirmDeletePlan = async () => {
-  if (!selectedPlan.value) {
-    ElMessage.warning("请先选择要删除的计划")
+  const planInfo = getSelectedPlanInfo()
+  if (!planInfo) {
+    ElMessage.warning("无法获取计划信息")
     return
   }
 
   try {
     // 使用 ElMessageBox 进行二次确认
+    const displayName = haveAdminRole.value
+      ? `${planInfo.user_name}:${planInfo.plan_name}`
+      : planInfo.plan_name
     await ElMessageBox.confirm(
-      `确定要删除计划 "${selectedPlan.value}" 吗？此操作不可恢复！`,
+      `确定要删除计划 "${displayName}" 吗？此操作不可恢复！`,
       '删除计划',
       {
         confirmButtonText: '确定删除',
@@ -470,41 +1346,133 @@ const handleConfirmDeletePlan = async () => {
 
     // 执行删除
     const res = await http.post('/EVE/industry/deletePlan', {
-      plan_name: selectedPlan.value
+      plan_name: planInfo.plan_name
     })
     const data = await res.json()
-    const code = res.status
-
-    if (code === 200) {
-      ElMessage.success("删除成功")
-      deletePlanDialogVisible.value = false
-      
-      // 如果删除的是当前选中的计划，清除选中状态
-      const deletedPlanName = selectedPlan.value
-      selectedPlan.value = null
-      localStorage.removeItem(STORAGE_KEY)
-      currentPlanProducts.value = []
-      current_plan_settings.value = {
-        name: '',
-        considerate_asset: false,
-        considerate_running_job: false,
-        split_to_jobs: false,
-        considerate_bp_relation: false,
-        full_use_bp_cp: false,
-        work_type: 'whole'
-      }
-      
-      // 刷新计划列表
-      await getPlanTableData()
-    } else {
-      ElMessage.error(data.message || "删除失败")
+    if (data.status !== 200) {
+      ElMessage.error(data.message || '删除计划失败')
+      return
     }
+    ElMessage.success("删除成功")
+    deletePlanDialogVisible.value = false
+
+    // 如果删除的是当前选中的计划，清除选中状态
+    selectedPlan.value = null
+    localStorage.removeItem(STORAGE_KEY)
+    currentPlanProducts.value = []
+    flatPlanProducts.value = []
+    current_plan_settings.value = {
+      name: '',
+      considerate_asset: false,
+      considerate_running_job: false,
+      split_to_jobs: false,
+      full_split: false,
+      considerate_bp_relation: false,
+      full_use_bp_cp: false,
+      work_type: 'whole'
+    }
+
+    // 刷新计划列表
+    await getPlanTableData()
   } catch (error: any) {
     // 用户取消删除
     if (error === 'cancel' || error === 'close') {
       return
     }
     ElMessage.error(error.message || "删除失败")
+  }
+}
+
+// 添加分组
+const addGroup = async () => {
+  // 检查是否有选中的计划
+  const planInfo = getSelectedPlanInfo()
+  if (!planInfo) {
+    ElMessage.warning("请先选择一个计划")
+    return
+  }
+
+  try {
+    // 使用 ElMessageBox.prompt 弹出输入框
+    const { value: groupName } = await ElMessageBox.prompt(
+      '请输入分组名称（最多20个字符）',
+      '添加分组',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputPattern: /^.{1,20}$/,  // 1-20个字符
+        inputErrorMessage: '分组名称不能为空，且不能超过20个字符'
+      }
+    )
+
+    if (!groupName || !groupName.trim()) {
+      ElMessage.warning("分组名称不能为空")
+      return
+    }
+
+    const trimmedName = groupName.trim()
+
+    // 检查长度限制（去除空格后）
+    if (trimmedName.length > 20) {
+      ElMessage.warning("分组名称不能超过20个字符")
+      return
+    }
+
+    // 检查分组名称是否已存在（在嵌套结构中检查）
+    const existingGroup = currentPlanProducts.value.find(
+      item => item.type === 'group' && item.name === trimmedName
+    )
+    if (existingGroup) {
+      ElMessage.warning(`分组 "${trimmedName}" 已存在`)
+      return
+    }
+
+    // 获取当前的嵌套结构 products
+    const currentProducts = [...currentPlanProducts.value]
+
+    // 创建新的分组对象（嵌套结构格式）
+    const newGroup: PlanProductTableData = {
+      row_id: 0,  // 后端会生成
+      type: 'group',
+      name: trimmedName,
+      type_id: 0,
+      quantity: 0,
+      type_name: '',
+      type_name_zh: '',
+      products: []
+    }
+
+    // 添加到 products 末尾
+    currentProducts.push(newGroup)
+
+    // 准备请求数据
+    const requestData: any = {
+      plan_name: planInfo.plan_name,
+      products: currentProducts
+    }
+    // 如果是管理员模式且计划属于其他用户，传递 user_name
+    if (haveAdminRole.value && planInfo.user_name !== authStore.user?.username) {
+      requestData.user_name = planInfo.user_name
+    }
+
+    // 向后端请求保存分组
+    const res = await http.post('/EVE/industry/savePlanProducts', requestData)
+    const data = await res.json()
+    if (data.status !== 200) {
+      ElMessage.error(data.message || '添加分组失败')
+      return
+    }
+
+    // 从后端获取最新的计划数据
+    await getPlanTableData()
+
+    ElMessage.success(`分组 "${trimmedName}" 添加成功`)
+  } catch (error: any) {
+    // 用户取消操作时，ElMessageBox.prompt 会抛出错误
+    if (error !== 'cancel') {
+      console.error('添加分组失败:', error)
+      ElMessage.error('添加分组失败')
+    }
   }
 }
 
@@ -547,19 +1515,19 @@ const handleLeftResizeStart = (e: MouseEvent) => {
 
 const handleLeftResizeMove = (e: MouseEvent) => {
   if (!isResizingLeft.value) return
-  
+
   const container = document.querySelector('.industry-plan-main-container') as HTMLElement
   if (!container) return
-  
+
   const containerWidth = container.offsetWidth
   const deltaX = e.clientX - resizeStartX.value
   const deltaPercent = (deltaX / containerWidth) * 100
-  
+
   let newWidth = resizeStartLeftWidth.value + deltaPercent
-  
+
   // 限制最小和最大宽度
   newWidth = Math.max(15, Math.min(50, newWidth))
-  
+
   leftPanelWidth.value = newWidth
 }
 
@@ -582,19 +1550,19 @@ const handleRightResizeStart = (e: MouseEvent) => {
 
 const handleRightResizeMove = (e: MouseEvent) => {
   if (!isResizingRight.value) return
-  
+
   const rightContainer = document.querySelector('.industry-plan-right-container') as HTMLElement
   if (!rightContainer) return
-  
+
   const containerWidth = rightContainer.offsetWidth
   const deltaX = e.clientX - resizeStartX.value
   const deltaPercent = (deltaX / containerWidth) * 100
-  
+
   let newWidth = resizeStartRightWidth.value + deltaPercent
-  
+
   // 限制最小和最大宽度（相对于右侧容器）
   newWidth = Math.max(30, Math.min(70, newWidth))
-  
+
   rightSplitWidth.value = newWidth
 }
 
@@ -631,45 +1599,32 @@ onUnmounted(() => {
   <div class="industry-plan-main-container" :style="{ height: containerHeight }">
     <div class="industry-plan-layout">
       <!-- 左侧市场树区域 -->
-      <div 
-        class="market-root-tree-container" 
-        :style="{ width: `${leftPanelWidth}%` }"
-      >
+      <div class="market-root-tree-container" :style="{ width: `${leftPanelWidth}%` }">
         <el-scrollbar :height="`calc(${containerHeight} - 2vh)`">
-          <el-table
-            ref="marketRootTreeRef"
-            @row-click="handleRowClick"
-            @row-contextmenu="handleRowContextMenu"
-            class="market-root-tree-table"
-            :data="marketRootTree"
-            lazy
-            row-key="row_id"
-            :load="loadChildTree"
-          >
+          <el-table ref="marketRootTreeRef" @row-click="handleRowClick" @row-contextmenu="handleRowContextMenu"
+            class="market-root-tree-table" :data="marketRootTree" lazy row-key="row_id" :load="loadChildTree">
             <el-table-column prop="name" label="名称">
+              <template #header>
+                <el-input v-model="searchKeyword" placeholder="搜索名称" size="small" clearable
+                  @keyup.enter="searchMarketTypes" @blur="searchMarketTypes" @clear="searchMarketTypes" />
+              </template>
               <template #default="scope">
-                <span
-                  :style="!('can_add_plan' in scope.row) ? 'color: gray;' : ''"
-                >
+                <span :style="!('can_add_plan' in scope.row) ? 'color: gray;' : ''">
                   {{ scope.row.name }}
                 </span>
               </template>
             </el-table-column>
           </el-table>
-          
+
           <!-- 右键菜单 -->
-          <div
-            v-if="contextMenuVisible"
-            class="context-menu"
-            :style="contextMenuStyle"
-            @click.stop
-          >
+          <div v-if="contextMenuVisible" class="context-menu" :style="contextMenuStyle" @click.stop>
             <el-menu @select="handleContextMenuSelect">
-              <el-menu-item
-                v-if="contextMenuRow?.can_add_plan === true"
-                index="add"
-              >
+              <el-menu-item v-if="contextMenuRow?.can_add_plan === true" index="add">
                 添加到计划
+              </el-menu-item>
+              <el-menu-item v-if="isEnterprise && haveOmegaRole && contextMenuRow?.can_add_plan === true"
+                index="addToMarket">
+                添加到指定的自选市场清单
               </el-menu-item>
               <el-menu-item index="info">
                 信息
@@ -680,34 +1635,21 @@ onUnmounted(() => {
       </div>
 
       <!-- 左侧分割线 -->
-      <div 
-        class="resize-handle resize-handle-vertical"
-        @mousedown="handleLeftResizeStart"
-        :class="{ 'resizing': isResizingLeft }"
-      ></div>
+      <div class="resize-handle resize-handle-vertical" @mousedown="handleLeftResizeStart"
+        :class="{ 'resizing': isResizingLeft }"></div>
 
       <!-- 右侧计划管理区域 -->
-      <div 
-        class="industry-plan-right-container"
-        :style="{ width: `${100 - leftPanelWidth}%` }"
-      >
+      <div class="industry-plan-right-container" :style="{ width: `${100 - leftPanelWidth}%` }">
         <div class="industry-plan-right-layout">
           <!-- 产品列表区域 -->
-          <div 
-            class="industry-plan-table-product-list"
-            :style="{ width: `${rightSplitWidth}%` }"
-          >
+          <div class="industry-plan-table-product-list" :style="{ width: `${rightSplitWidth}%` }">
             <div class="plan-control-panel">
               <div class="plan-select-row">
                 <span class="plan-label">当前计划: </span>
-                <el-select
-                  placeholder="请选择计划"
-                  v-model="selectedPlan"
-                  class="plan-select"
+                <el-select placeholder="请选择计划" v-model="selectedPlan" class="plan-select"
                   :options="IndustryPlanTableData"
-                  :props="{value:'plan_name', label:'plan_name'}"
-                  @change="handlePlanChange"
-                />
+                  :props="haveAdminRole ? { value: 'plan_key', label: 'plan_display_name' } : { value: 'plan_name', label: 'plan_name' }"
+                  @change="handlePlanChange" />
               </div>
               <div class="plan-buttons-row">
                 <el-button size="small" @click="saveCurrentPlan">
@@ -725,32 +1667,30 @@ onUnmounted(() => {
                 <el-button size="small" @click="openModifyPlanDialog">
                   修改计划设置
                 </el-button>
+                <el-button size="small" @click="addGroup">
+                  添加分组
+                </el-button>
+                <el-button v-if="haveOmegaRole" size="small" @click="openBatchAddDialog">
+                  批量添加
+                </el-button>
+                <el-radio-group v-model="cardStyleMode" size="small" style="margin-left: 8px;">
+                  <el-radio-button label="normal">普通</el-radio-button>
+                  <el-radio-button label="compact">紧凑</el-radio-button>
+                </el-radio-group>
               </div>
             </div>
             <div class="product-table-wrapper">
-              <VueDraggable
-                v-model="currentPlanProducts"
-                target="tbody"
-                :animation="150"
-                style="height: 100%;"
-              >
-                <industry-plan-plan-table :list="currentPlanProducts" />
-              </VueDraggable>
+              <industry-plan-plan-table :list="flatPlanProducts" :card-style-mode="cardStyleMode"
+                @update:list="handle_update_current_plan_products" />
             </div>
           </div>
 
           <!-- 右侧分割线 -->
-          <div 
-            class="resize-handle resize-handle-vertical"
-            @mousedown="handleRightResizeStart"
-            :class="{ 'resizing': isResizingRight }"
-          ></div>
+          <div class="resize-handle resize-handle-vertical" @mousedown="handleRightResizeStart"
+            :class="{ 'resizing': isResizingRight }"></div>
 
           <!-- 配置流程区域 -->
-          <div 
-            class="industry-plan-table-config-flow"
-            :style="{ width: `${100 - rightSplitWidth}%` }"
-          >
+          <div class="industry-plan-table-config-flow" :style="{ width: `${100 - rightSplitWidth}%` }">
             <industry-plan-config-flow v-if="selectedPlan" :selected-plan="selectedPlan" />
           </div>
         </div>
@@ -759,33 +1699,30 @@ onUnmounted(() => {
   </div>
 
   <!-- 添加产品弹窗 -->
-  <el-dialog
-    v-model="addPlanDialogVisible"
-    title="添加产品"
-    width="500px"
-    :close-on-click-modal="false"
-  >
+  <el-dialog v-model="addPlanDialogVisible" title="添加产品" width="500px" :close-on-click-modal="false">
     <el-form :model="addPlanDialogForm" label-width="140px">
       <el-form-item label="计划名称">
-        <el-select
-          v-model="addPlanDialogForm.plan_name"
-          filterable
-          :loading="addPlanDialogForm.get_plan_loading"
-          placeholder="请选择计划"
-        >
-          <el-option 
-            v-for="item in addPlanDialogForm.plan_list"
-            :key="item.plan_name"
-            :label="item.plan_name"
-            :value="item.plan_name"
-          >
-            {{ item.plan_name }}
+        <el-select v-model="addPlanDialogForm.plan_name" filterable :loading="addPlanDialogForm.get_plan_loading"
+          placeholder="请选择计划" @change="addPlanDialogForm.group_name = null">
+          <el-option v-for="item in addPlanDialogForm.plan_list"
+            :key="haveAdminRole ? (item.plan_key || `${item.user_name}:${item.plan_name}`) : item.plan_name"
+            :label="haveAdminRole ? (item.plan_display_name || `${item.user_name}:${item.plan_name}`) : item.plan_name"
+            :value="haveAdminRole ? (item.plan_key || `${item.user_name}:${item.plan_name}`) : item.plan_name">
+            {{ haveAdminRole ? (item.plan_display_name || `${item.user_name}:${item.plan_name}`) : item.plan_name }}
           </el-option>
         </el-select>
       </el-form-item>
-    <el-form-item label="数量">
-      <el-input-number v-model="addPlanDialogForm.quantity" :min="0" :max="1000000" />
-    </el-form-item>
+      <el-form-item label="选择组（可选）">
+        <el-select v-model="addPlanDialogForm.group_name" placeholder="选择组，或选择'无'作为独立产品" clearable
+          :disabled="!addPlanDialogForm.plan_name" style="width: 100%">
+          <el-option label="无" :value="null" />
+          <el-option v-for="group in getPlanGroups(getSelectedPlanForAdd)" :key="group.name" :label="group.name"
+            :value="group.name" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="数量">
+        <el-input-number v-model="addPlanDialogForm.quantity" :min="0" :max="1000000" />
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="addPlanDialogVisible = false">取消</el-button>
@@ -794,119 +1731,77 @@ onUnmounted(() => {
   </el-dialog>
 
   <!-- 物品信息弹窗 -->
-   <el-dialog
-    v-model="ItemInfoDialogVisible"
-    :loading="ItemInfoDialogLoading"
-    title="物品信息"
-    width="600px"
-    :close-on-click-modal="false"
-    class="item-info-dialog"
-  >
+  <el-dialog v-model="ItemInfoDialogVisible" :loading="ItemInfoDialogLoading" title="物品信息" width="600px"
+    :close-on-click-modal="false" class="item-info-dialog">
     <div class="item-info-container">
       <!-- 物品标题区域 -->
       <div class="item-header">
         <div class="item-title-section">
-          <h3 
-            class="item-name-zh copyable" 
+          <h3 class="item-name-zh copyable"
             @click="copyToClipboard(ItemData.type_name_zh || ItemData.type_name, '中文名称')"
-            :title="ItemData.type_name_zh || ItemData.type_name ? '点击复制' : ''"
-          >
+            :title="ItemData.type_name_zh || ItemData.type_name ? '点击复制' : ''">
             {{ ItemData.type_name_zh || ItemData.type_name || '未知物品' }}
           </h3>
-          <p 
-            class="item-name-en copyable" 
-            @click="copyToClipboard(ItemData.type_name, '英文名称')"
-            :title="ItemData.type_name ? '点击复制' : ''"
-          >
+          <p class="item-name-en copyable" @click="copyToClipboard(ItemData.type_name, '英文名称')"
+            :title="ItemData.type_name ? '点击复制' : ''">
             {{ ItemData.type_name }}
           </p>
         </div>
-        <el-tag 
-          v-if="ItemData.type_id" 
-          type="info" 
-          class="item-id-tag copyable"
-          @click="copyToClipboard(String(ItemData.type_id), '物品ID')"
-          title="点击复制ID"
-        >
+        <el-tag v-if="ItemData.type_id" type="info" class="item-id-tag copyable"
+          @click="copyToClipboard(String(ItemData.type_id), '物品ID')" title="点击复制ID">
           ID: {{ ItemData.type_id }}
         </el-tag>
       </div>
 
       <!-- 详细信息区域 -->
-      <el-descriptions 
-        :column="1" 
-        border 
-        class="item-descriptions"
-        :label-style="{ width: '120px', fontWeight: '600', color: '#606266' }"
-        :content-style="{ color: '#303133' }"
-      >
+      <el-descriptions :column="1" border class="item-descriptions"
+        :label-style="{ width: '120px', fontWeight: '600', color: '#606266' }" :content-style="{ color: '#303133' }">
         <el-descriptions-item label="物品ID">
-          <span 
-            class="item-value copyable" 
-            @click="copyToClipboard(String(ItemData.type_id), '物品ID')"
-            :title="ItemData.type_id ? '点击复制' : ''"
-          >
+          <span class="item-value copyable" @click="copyToClipboard(String(ItemData.type_id), '物品ID')"
+            :title="ItemData.type_id ? '点击复制' : ''">
             {{ ItemData.type_id || '—' }}
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="物品名称">
-          <span 
-            class="item-value copyable" 
-            @click="copyToClipboard(ItemData.type_name, '物品名称')"
-            :title="ItemData.type_name ? '点击复制' : ''"
-          >
+          <span class="item-value copyable" @click="copyToClipboard(ItemData.type_name, '物品名称')"
+            :title="ItemData.type_name ? '点击复制' : ''">
             {{ ItemData.type_name || '—' }}
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="中文名称">
-          <span 
-            class="item-value highlight copyable" 
-            @click="copyToClipboard(ItemData.type_name_zh, '中文名称')"
-            :title="ItemData.type_name_zh ? '点击复制' : ''"
-          >
+          <span class="item-value highlight copyable" @click="copyToClipboard(ItemData.type_name_zh, '中文名称')"
+            :title="ItemData.type_name_zh ? '点击复制' : ''">
             {{ ItemData.type_name_zh || '—' }}
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="Meta等级">
-          <span 
-            v-if="ItemData.meta" 
+          <span v-if="ItemData.meta"
             :class="['meta-level', `meta-level-${getMetaLevelClass(ItemData.meta)}`, 'copyable']"
-            @click="copyToClipboard(ItemData.meta, 'Meta等级')"
-            title="点击复制"
-          >
+            @click="copyToClipboard(ItemData.meta, 'Meta等级')" title="点击复制">
             {{ ItemData.meta }}
           </span>
           <span v-else class="item-value">—</span>
         </el-descriptions-item>
         <el-descriptions-item label="物品组">
-          <span 
-            class="item-value copyable" 
-            @click="copyToClipboard(ItemData.group, '物品组')"
-            :title="ItemData.group ? '点击复制' : ''"
-          >
+          <span class="item-value copyable" @click="copyToClipboard(ItemData.group, '物品组')"
+            :title="ItemData.group ? '点击复制' : ''">
             {{ ItemData.group || '—' }}
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="类别">
-          <span 
-            class="item-value copyable" 
-            @click="copyToClipboard(ItemData.category, '类别')"
-            :title="ItemData.category ? '点击复制' : ''"
-          >
+          <span class="item-value copyable" @click="copyToClipboard(ItemData.category, '类别')"
+            :title="ItemData.category ? '点击复制' : ''">
             {{ ItemData.category || '—' }}
           </span>
         </el-descriptions-item>
         <el-descriptions-item label="市场组">
           <div v-if="ItemData.market_group_list" class="market-group-chain">
             <template v-for="(group, index) in getMarketGroupList(ItemData.market_group_list)" :key="index">
-              <span 
-                class="market-group-text copyable" 
-                @click="copyToClipboard(group, '市场组')"
-                title="点击复制此节点"
-              >
+              <span class="market-group-text copyable" @click="copyToClipboard(group, '市场组')" title="点击复制此节点">
                 {{ group }}
               </span>
-              <el-icon v-if="index < getMarketGroupList(ItemData.market_group_list).length - 1" class="market-group-separator">
+              <el-icon v-if="index < getMarketGroupList(ItemData.market_group_list).length - 1"
+                class="market-group-separator">
                 <ArrowRight />
               </el-icon>
             </template>
@@ -915,42 +1810,61 @@ onUnmounted(() => {
         </el-descriptions-item>
       </el-descriptions>
     </div>
-    
+
     <template #footer>
       <div class="dialog-footer">
         <el-button @click="cancelItemInfoDialog">关闭</el-button>
       </div>
     </template>
   </el-dialog>
-  
+
   <!-- 新建计划弹窗 -->
-  <el-dialog
-    v-model="dialogVisible"
-    title="新建计划"
-    width="500px"
-    :close-on-click-modal="false"
-  >
-    <el-form :model="planForm" label-width="140px">
+  <el-dialog v-model="dialogVisible" title="新建计划" width="500px" :close-on-click-modal="false">
+    <el-form :model="planForm" label-width="250px" label-position="left">
       <el-form-item label="计划名称">
         <el-input v-model="planForm.name" placeholder="请输入计划名称" />
       </el-form-item>
-      
+
       <el-form-item label="是否考虑库存">
         <el-switch v-model="planForm.considerate_asset" :disabled="!haveAlphaRole" />
       </el-form-item>
-      
+
       <el-form-item label="是否考虑运行中任务">
         <el-switch v-model="planForm.considerate_running_job" :disabled="!haveAlphaRole" />
       </el-form-item>
-      
-      <el-form-item label="是否按照习惯切分工作流">
+
+      <el-form-item>
+        <template #label>
+          <span>
+            是否按照习惯切分工作流
+            <el-tooltip content="比如将200流程反应拆分成4个50流程，开启后会根据配置自动拆分" placement="top">
+              <el-icon style="margin-left: 4px; cursor: help;">
+                <QuestionFilled />
+              </el-icon>
+            </el-tooltip>
+          </span>
+        </template>
         <el-switch v-model="planForm.split_to_jobs" />
       </el-form-item>
-      
-      <el-form-item label="是否考虑库存蓝图">
-        <el-switch v-model="planForm.considerate_bp_relation" :disabled="!haveAlphaRole"/>
+
+      <el-form-item>
+        <template #label>
+          <span>
+            是否严格按照最大数量切分工作流
+            <el-tooltip content="比如180流程会切分为3个50流程和1个30流程，打开此选项会强制补齐到4个50流程。" placement="top">
+              <el-icon style="margin-left: 4px; cursor: help;">
+                <QuestionFilled />
+              </el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <el-switch v-model="planForm.full_split" />
       </el-form-item>
-      
+
+      <el-form-item label="是否考虑库存蓝图">
+        <el-switch v-model="planForm.considerate_bp_relation" :disabled="!haveAlphaRole" />
+      </el-form-item>
+
       <el-form-item label="蓝图拷贝完全使用">
         <el-switch v-model="current_plan_settings.full_use_bp_cp" :disabled="!haveAlphaRole" />
       </el-form-item>
@@ -962,7 +1876,7 @@ onUnmounted(() => {
         </el-radio-group>
       </el-form-item>
     </el-form>
-    
+
     <template #footer>
       <span class="dialog-footer">
         <el-button @click="handleCancel">取消</el-button>
@@ -972,29 +1886,48 @@ onUnmounted(() => {
   </el-dialog>
 
   <!-- 修改计划弹窗 -->
-  <el-dialog
-    v-model="modifyPlanDialogVisible"
-    title="修改计划"
-    width="500px"
-    :close-on-click-modal="false"
-  >
-    <el-form :model="current_plan_settings" label-width="140px">
+  <el-dialog v-model="modifyPlanDialogVisible" title="修改计划" width="800px" :close-on-click-modal="false">
+    <el-form :model="current_plan_settings" label-width="250px" label-position="left">
       <el-form-item label="计划名称">
-        <el-input v-model="current_plan_settings.name" placeholder="请输入计划名称" disabled/>
+        <el-input v-model="current_plan_settings.name" placeholder="请输入计划名称" disabled />
       </el-form-item>
-      
+
       <el-form-item label="是否考虑库存">
         <el-switch v-model="current_plan_settings.considerate_asset" :disabled="!haveAlphaRole" />
       </el-form-item>
-      
+
       <el-form-item label="是否考虑运行中任务">
         <el-switch v-model="current_plan_settings.considerate_running_job" :disabled="!haveAlphaRole" />
       </el-form-item>
-      
-      <el-form-item label="是否按照习惯切分工作流">
+
+      <el-form-item>
+        <template #label>
+          <span>
+            是否按照习惯切分工作流
+            <el-tooltip content="比如将200流程反应拆分成4个50流程，开启后会根据配置自动拆分" placement="top">
+              <el-icon style="margin-left: 4px; cursor: help;">
+                <QuestionFilled />
+              </el-icon>
+            </el-tooltip>
+          </span>
+        </template>
         <el-switch v-model="current_plan_settings.split_to_jobs" />
       </el-form-item>
-      
+
+      <el-form-item label="是否严格按照最大数量切分工作流">
+        <template #label>
+          <span>
+            是否严格按照最大数量切分工作流
+            <el-tooltip content="比如180流程会切分为3个50流程和1个30流程，打开此选项会强制补齐到4个50流程。" placement="top">
+              <el-icon style="margin-left: 4px; cursor: help;">
+                <QuestionFilled />
+              </el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <el-switch v-model="current_plan_settings.full_split" />
+      </el-form-item>
+
       <el-form-item label="是否考虑库存蓝图">
         <el-switch v-model="current_plan_settings.considerate_bp_relation" :disabled="!haveAlphaRole" />
       </el-form-item>
@@ -1002,15 +1935,26 @@ onUnmounted(() => {
       <el-form-item label="蓝图拷贝完全使用">
         <el-switch v-model="current_plan_settings.full_use_bp_cp" :disabled="!haveAlphaRole" />
       </el-form-item>
-      
+
       <el-form-item label="工作安排方式">
+        <template #label>
+          <span>
+            工作安排方式
+            <el-tooltip content="比如产品a需要30流程组件a，产品b需要40流程组件a。假设最大切分数量为50，当按照整体考虑时，会进行合并再切分，变成50流程+20流程，按照顺序考虑时，不会进行合并。"
+              placement="top">
+              <el-icon style="margin-left: 4px; cursor: help;">
+                <QuestionFilled />
+              </el-icon>
+            </el-tooltip>
+          </span>
+        </template>
         <el-radio-group v-model="current_plan_settings.work_type">
           <el-radio label="whole">按整体考虑</el-radio>
           <el-radio label="in_order">按顺序安排工作</el-radio>
         </el-radio-group>
       </el-form-item>
     </el-form>
-    
+
     <template #footer>
       <span class="dialog-footer">
         <el-button @click="cancelModifyPlan">取消</el-button>
@@ -1019,21 +1963,155 @@ onUnmounted(() => {
     </template>
   </el-dialog>
 
+  <!-- 批量添加搜索弹窗 -->
+  <el-dialog v-model="batchAddDialogVisible" title="搜索物品" width="800px" :close-on-click-modal="false"
+    @close="handleBatchAddDialogClose">
+    <el-form :model="{ searchType, searchKeyword }" label-width="120px">
+      <el-form-item label="搜索类型">
+        <el-select v-model="searchType" placeholder="请选择搜索类型" style="width: 100%">
+          <el-option v-for="item in searchTypeOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="搜索关键字">
+        <el-autocomplete v-model="searchKeyword" :fetch-suggestions="fetchSearchSuggestions" value-key="value"
+          placeholder="请输入搜索关键字" style="width: 100%" @keyup.enter="handleBatchSearch" />
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" @click="handleBatchSearch" :loading="searchLoading">搜索</el-button>
+        <el-tooltip placement="right" :width="500" :raw-content="true">
+          <template #content>
+            <div style="line-height: 1.8;">
+              <div><strong>蓝图：</strong> 字面意思，针对某一张蓝图进行配置</div>
+              <div><strong>市场组：</strong>某个物品在市场树中的坐标链。</div>
+              <div style="margin-left: 20px;">以Ishtar举例，他的市场组是：Ships → Cruisers → Advanced Cruisers → Heavy Assault
+                Cruisers → Gallente → Ishtar</div>
+              <div style="margin-left: 20px;">如果我选择Cruisers进行筛选，会对所有的巡洋舰生效。如果我选择Heavy Assault
+                Cruisers进行筛选，会对所有的重型突击巡洋舰生效。</div>
+              <div style="margin-left: 20px;">市场组关键词可以对坐标链中出现了关键词的所有物品生效。如果使用Gallente，则会对所有盖伦特的舰船生效。</div>
+              <div style="margin-top: 10px;"><strong>meta等级、物品组、类别</strong> 是EVE物品所拥有的三种属性</div>
+              <div style="margin-left: 20px;">1. meta一般筛选物品的科技等级如T1 T2,势力，死亡空间等</div>
+              <div style="margin-left: 20px;">2. 物品组与类别多种多样，需要使用时随时使用信息功能查询</div>
+              <br>
+              <div>你可以在一个配置中添加多个关键词，关键词之间的关系是与，即必须同时满足。</div>
+              <div>举例：如果我选择meta=Tech II, marketGroup=Ships,则会对所有T2船生效。</div>
+              <div style="margin-top: 10px;"><strong>PS:</strong> 计划管理中的市场树，右键任意物品点击信息，即可查看物品的属性。建议多查看几个物品，利于理解筛选机制。
+              </div>
+            </div>
+          </template>
+          <el-button type="primary" :icon="Setting"
+            style="margin: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); font-weight: 600;">
+            如何使用关键词筛选？
+          </el-button>
+        </el-tooltip>
+      </el-form-item>
+    </el-form>
+
+    <!-- 辅助搜索条件区域 -->
+    <el-divider content-position="left">辅助搜索条件</el-divider>
+    <div class="auxiliary-conditions">
+      <el-button type="default" size="small" @click="addAuxiliaryGroup" style="margin-bottom: 15px">
+        增加组
+      </el-button>
+
+      <div v-for="condition in auxiliaryConditions" :key="condition.id" class="auxiliary-condition-group">
+        <div class="auxiliary-condition-header">
+          <span class="auxiliary-condition-title">条件组 #{{ condition.id }}</span>
+          <el-button type="danger" size="small" :icon="Close" circle @click="removeAuxiliaryGroup(condition.id)"
+            title="删除此条件组" />
+        </div>
+        <el-form :model="condition" label-width="120px" style="margin-top: 10px">
+          <el-row :gutter="10">
+            <el-col :span="12">
+              <el-form-item label="搜索类型">
+                <el-select v-model="condition.searchType" placeholder="请选择搜索类型" style="width: 100%">
+                  <el-option v-for="item in searchTypeOptions" :key="item.value" :label="item.label"
+                    :value="item.value" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="搜索关键字">
+                <el-autocomplete v-model="condition.keyword"
+                  :fetch-suggestions="createAuxiliarySuggestionsFetcher(condition)" value-key="value"
+                  placeholder="请输入搜索关键字" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-form>
+      </div>
+    </div>
+
+    <!-- 搜索结果展示 -->
+    <div v-if="searchResults.length > 0" class="search-results">
+      <div class="results-header">
+        <span>找到 {{ searchResults.length }} 个匹配结果</span>
+        <div class="results-actions">
+          <el-button size="small" type="primary" text @click="selectAllSearchResults">
+            全选
+          </el-button>
+          <el-button size="small" type="default" text @click="clearAllSearchResults">
+            全不选
+          </el-button>
+          <span class="selected-count" v-if="selectedSearchResults.length > 0">
+            已选择 {{ selectedSearchResults.length }} 个
+          </span>
+        </div>
+      </div>
+      <el-table ref="searchResultsTableRef" :data="searchResults" max-height="400px" stripe border
+        @selection-change="handleSearchSelectionChange">
+        <el-table-column type="selection" width="55" />
+        <el-table-column prop="type_id" label="Type ID" width="120" />
+        <el-table-column prop="type_name_zh" label="物品名称" />
+      </el-table>
+    </div>
+
+    <template #footer>
+      <el-button @click="batchAddDialogVisible = false">取消</el-button>
+      <el-button type="primary" @click="openBatchAddConfirmDialog" :disabled="selectedSearchResults.length === 0">
+        添加
+      </el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 批量添加确认弹窗 -->
+  <el-dialog v-model="batchAddConfirmDialogVisible" title="批量添加确认" width="500px" :close-on-click-modal="false">
+    <el-form :model="batchAddConfirmForm" label-width="140px">
+      <el-form-item label="计划名称">
+        <el-select v-model="batchAddConfirmForm.plan_name" filterable :loading="batchAddConfirmForm.get_plan_loading"
+          placeholder="请选择计划" style="width: 100%" @change="batchAddConfirmForm.group_name = null">
+          <el-option v-for="item in IndustryPlanTableData"
+            :key="haveAdminRole ? (item.plan_key || `${item.user_name}:${item.plan_name}`) : item.plan_name"
+            :label="haveAdminRole ? (item.plan_display_name || `${item.user_name}:${item.plan_name}`) : item.plan_name"
+            :value="haveAdminRole ? (item.plan_key || `${item.user_name}:${item.plan_name}`) : item.plan_name">
+            {{ haveAdminRole ? (item.plan_display_name || `${item.user_name}:${item.plan_name}`) : item.plan_name }}
+          </el-option>
+        </el-select>
+      </el-form-item>
+      <el-form-item label="选择组（可选）">
+        <el-select v-model="batchAddConfirmForm.group_name" placeholder="选择组，或选择'无'作为独立产品" clearable
+          :disabled="!batchAddConfirmForm.plan_name" style="width: 100%">
+          <el-option label="无" :value="null" />
+          <el-option v-for="group in getPlanGroups(getSelectedPlanForBatchAdd)" :key="group.name" :label="group.name"
+            :value="group.name" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="数量">
+        <el-input-number v-model="batchAddConfirmForm.quantity" :min="1" :max="1000000" style="width: 100%" />
+      </el-form-item>
+      <el-form-item>
+        <el-alert :title="`将添加 ${searchResults.length} 个产品到计划`" type="info" :closable="false" show-icon />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="batchAddConfirmDialogVisible = false">取消</el-button>
+      <el-button type="primary" @click="handleBatchAddConfirm">确认添加</el-button>
+    </template>
+  </el-dialog>
+
   <!-- 删除计划弹窗 -->
-  <el-dialog
-    v-model="deletePlanDialogVisible"
-    title="删除计划"
-    width="500px"
-    :close-on-click-modal="false"
-  >
+  <el-dialog v-model="deletePlanDialogVisible" title="删除计划" width="500px" :close-on-click-modal="false">
     <div style="padding: 20px 0;">
-      <el-alert
-        v-if="selectedPlan"
-        :title="`确定要删除计划 '${selectedPlan}' 吗？`"
-        type="warning"
-        :closable="false"
-        show-icon
-      >
+      <el-alert v-if="selectedPlan" :title="`确定要删除计划 '${selectedPlan}' 吗？`" type="warning" :closable="false" show-icon>
         <template #default>
           <div style="margin-top: 10px;">
             <p style="margin: 0; color: #e6a23c;">此操作将永久删除计划及其所有相关数据，包括：</p>
@@ -1047,26 +2125,42 @@ onUnmounted(() => {
           </div>
         </template>
       </el-alert>
-      <el-alert
-        v-else
-        title="请先选择要删除的计划"
-        type="info"
-        :closable="false"
-        show-icon
-      />
+      <el-alert v-else title="请先选择要删除的计划" type="info" :closable="false" show-icon />
     </div>
-    
+
     <template #footer>
       <span class="dialog-footer">
         <el-button @click="cancelDeletePlan">取消</el-button>
-        <el-button 
-          type="danger" 
-          @click="handleConfirmDeletePlan"
-          :disabled="!selectedPlan"
-        >
+        <el-button type="danger" @click="handleConfirmDeletePlan" :disabled="!selectedPlan">
           确定删除
         </el-button>
       </span>
+    </template>
+  </el-dialog>
+
+  <!-- 添加到自选市场清单弹窗 -->
+  <el-dialog v-model="addToMarketDialogVisible" title="添加到自选市场清单" width="500px" :close-on-click-modal="false">
+    <el-form :model="{ selectedMarketId }" label-width="140px">
+      <el-form-item label="选择自选市场">
+        <el-select v-model="selectedMarketId" filterable :loading="addToMarketLoading" placeholder="请选择自选市场清单"
+          style="width: 100%">
+          <el-option v-for="market in marketList" :key="market.id" :label="market.tag" :value="market.id">
+            {{ market.tag }}
+          </el-option>
+        </el-select>
+      </el-form-item>
+      <el-form-item v-if="contextMenuRow?.type_name_zh || contextMenuRow?.name">
+        <el-alert
+          :title="`将添加物品: ${contextMenuRow?.type_name_zh || contextMenuRow?.name || '未知物品'} (ID: ${contextMenuRow?.type_id || '未知'})`"
+          type="info" :closable="false" show-icon />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="addToMarketDialogVisible = false">取消</el-button>
+      <el-button type="primary" @click="handleAddToMarketConfirm" :loading="addToMarketLoading"
+        :disabled="!selectedMarketId">
+        确认添加
+      </el-button>
     </template>
   </el-dialog>
 </template>
@@ -1248,6 +2342,7 @@ onUnmounted(() => {
     opacity: 0;
     transform: translateY(-10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1466,55 +2561,108 @@ onUnmounted(() => {
   .plan-buttons-row {
     flex-direction: column;
   }
-  
+
   .plan-buttons-row .el-button {
     width: 100%;
   }
+}
+
+/* 批量添加相关样式 */
+.auxiliary-conditions {
+  margin-top: 20px;
+}
+
+.auxiliary-condition-group {
+  margin-bottom: 15px;
+  padding: 15px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background-color: #f5f7fa;
+  position: relative;
+}
+
+.auxiliary-condition-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.auxiliary-condition-title {
+  font-weight: 500;
+  color: #606266;
+  font-size: 14px;
+}
+
+.search-results {
+  margin-top: 20px;
+}
+
+.results-header {
+  margin-bottom: 10px;
+  font-weight: 500;
+  color: #606266;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.results-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.selected-count {
+  color: #409eff;
 }
 
 @media (max-width: 768px) {
   .industry-plan-layout {
     flex-direction: column;
   }
-  
+
   .market-root-tree-container {
     width: 100% !important;
     max-width: 100%;
     height: 200px;
     min-height: 200px;
   }
-  
+
   .resize-handle-vertical {
     width: 100%;
     height: 4px;
     cursor: row-resize;
     min-width: 0;
   }
-  
+
   .industry-plan-right-container {
     width: 100% !important;
     flex: 1;
   }
-  
+
   .industry-plan-right-layout {
     flex-direction: column;
   }
-  
+
   .industry-plan-table-product-list,
   .industry-plan-table-config-flow {
     width: 100% !important;
     max-width: 100%;
   }
-  
+
   .plan-control-panel {
     padding: 8px;
   }
-  
+
   .plan-select-row {
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .plan-select {
     width: 100%;
   }

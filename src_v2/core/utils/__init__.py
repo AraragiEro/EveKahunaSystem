@@ -9,8 +9,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from math import trunc
 
-from src_v2.core.database.connect_manager import redis_manager as rdm
-
 from tqdm.asyncio import tqdm
 
 from ..log import logger

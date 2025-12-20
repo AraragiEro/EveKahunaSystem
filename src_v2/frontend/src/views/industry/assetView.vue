@@ -3,8 +3,12 @@ import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { Setting, SuccessFilled, CircleCloseFilled, Plus, CloseBold, Delete, Refresh, VideoPlay } from '@element-plus/icons-vue'
 import { http } from '@/http'
 import { ElMessage } from 'element-plus';
+import { useAuthStore } from '@/stores/auth'
 import AssetViewIndustrypermision from './components/AssetViewIndustrypermision.vue'
 import AssetViewViewList from './components/AssetViewViewList.vue'
+
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.userRoles.includes('admin'))
 
 const form = ref({
   allow_personal_asset: false,
@@ -22,6 +26,7 @@ type Mission = {
   pull_status?: number
   step_name?: string
   is_indeterminate?: boolean
+  user_name?: string  // 任务创建者（管理员可见）
 }
 
 const missions = ref<Mission[]>([])
@@ -179,24 +184,6 @@ const handleCloseMission = async (row: Mission) => {
   }
 }
 
-const handleStartMission = async (row: Mission) => {
-  try {
-    const res = await http.post(`/EVE/asset/startAssetPullMission`, {
-      asset_owner_type: row.subject_type,
-      asset_owner_id: row.subject_id,
-      active: true
-    })
-    const data = await res.json()
-    if (data?.status !== 200) {
-      ElMessage.error(data?.message || '启动任务失败')
-      return
-    }
-    ElMessage.success('已启动任务')
-    fetchMissions()
-  } catch (e) {
-    ElMessage.error('启动任务失败')
-  }
-}
 
 // 获取任务标识
 const getMissionKey = (row: Mission): string => {
@@ -267,12 +254,26 @@ const pollPullStatus = async (row: Mission) => {
           m.subject_type === row.subject_type && m.subject_id === row.subject_id
         )
         if (mission) {
-          mission.pull_status = progressPercent
+          // 处理 is_indeterminate：支持字符串 '1'/'0'、布尔值 true/false
+          if (isIndeterminate !== undefined && isIndeterminate !== null) {
+            if (typeof isIndeterminate === 'string') {
+              mission.is_indeterminate = isIndeterminate === '1' || isIndeterminate === 'true'
+            } else {
+              mission.is_indeterminate = Boolean(isIndeterminate)
+            }
+          } else {
+            // 如果没有传入 is_indeterminate，默认为 false（显示具体进度）
+            mission.is_indeterminate = false
+          }
+          
+          // 如果是无限进度条，不更新百分比（保持为 0 或之前的值）
+          // 如果不是无限进度条，更新百分比
+          if (!mission.is_indeterminate) {
+            mission.pull_status = progressPercent
+          }
+          
           if (data.data.step_name) {
             mission.step_name = data.data.step_name
-          }
-          if (data.data.is_indeterminate) {
-            mission.is_indeterminate = isIndeterminate === '1' ? true : false
           }
         }
         
@@ -541,7 +542,7 @@ const formatBeijingTime = (timeStr: string | null | undefined): string => {
     const minute = parts.find(p => p.type === 'minute')?.value || ''
     const second = parts.find(p => p.type === 'second')?.value || ''
     return `${year}-${month}-${day} ${hour}:${minute}:${second}`
-  } catch (e) {
+  } catch {
     return timeStr // 如果出错，返回原始字符串
   }
 }
@@ -579,12 +580,12 @@ onUnmounted(() => {
   <el-tab-pane label="资产浏览">
     <AssetViewViewList />
   </el-tab-pane>
-  <el-tab-pane label="工业访问许可">
+  <el-tab-pane label="访问许可">
     <AssetViewIndustrypermision />
   </el-tab-pane>
   <el-tab-pane label="资产拉取状态">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-      <div style="font-weight: 600;">当前用户可见任务</div>
+      <div style="font-weight: 600;">{{ isAdmin ? '所有任务' : '当前用户可见任务' }}</div>
       <el-button type="primary" size="small" @click="fetchMissions">
         <el-icon style="margin-right:4px"><Refresh /></el-icon>
         刷新
@@ -602,12 +603,7 @@ onUnmounted(() => {
         </template>
       </el-table-column>
       <el-table-column label="主体名称" prop="subject_name" min-width="auto" />
-      <el-table-column label="是否启动" prop="is_active" width="74">
-        <template #default="{ row }">
-          <el-tag type="success" v-if="row.is_active">已启动</el-tag>
-          <el-tag type="default" v-else>未启动</el-tag>
-        </template>
-      </el-table-column>
+      <el-table-column v-if="isAdmin" label="创建者" prop="user_name" width="120" />
       <el-table-column label="上次拉取时间" prop="last_pull_time" width="190px">
         <template #default="{ row }">
           <span>{{ formatBeijingTime(row.last_pull_time) }}</span>
@@ -616,7 +612,12 @@ onUnmounted(() => {
       <el-table-column label="拉取状态" prop="pull_status" width="250px">
         <template #default="{ row }">
           <div>
-            <el-progress :percentage="row.pull_status ?? 0" :indeterminate="row.is_indeterminate === undefined"/>
+            <el-progress 
+              :percentage="row.is_indeterminate ? 50 : (row.pull_status ?? 0)" 
+              :indeterminate="row.is_indeterminate === true"
+              :striped="!row.is_indeterminate"
+              :striped-flow="!row.is_indeterminate"
+            />
             <div v-if="row.step_name" style="font-size: 12px; color: #909399; margin-top: 4px;">
               {{ row.step_name }}
             </div>
@@ -638,14 +639,6 @@ onUnmounted(() => {
               立刻拉取
             </el-button>
           </el-tooltip>
-          <el-button v-if="row.is_active" size="small" type="warning" plain :disabled="!row.is_active" @click="handleCloseMission(row)">
-            <el-icon style="margin-right:4px"><CloseBold /></el-icon>
-            关闭
-          </el-button>
-          <el-button v-else size="small" type="primary" plain @click="handleStartMission(row)">
-            <el-icon style="margin-right:4px"><VideoPlay /></el-icon>
-            启动
-          </el-button>
           <el-button size="small" type="danger" plain @click="handleDeleteMission(row)">
             <el-icon style="margin-right:4px"><Delete /></el-icon>
             删除

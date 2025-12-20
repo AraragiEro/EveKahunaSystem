@@ -2,6 +2,8 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
+import { useAuthStore } from '@/stores/auth'
+import { http } from '@/http'
 
 // 定义接口类型
 interface childMaterial {
@@ -26,6 +28,16 @@ interface topProduct {
 const props = defineProps<{
     PlanCalculateEIVCostTableView: any
 }>()
+
+// 权限检查
+const authStore = useAuthStore()
+const hasOmegaSubscription = computed(() => {
+    return authStore.user?.roles.includes('vip_omega') || false
+})
+
+// 产品价格数据
+const productPrices = ref<Record<number, { jita_buy_price: number; jita_sell_price: number }>>({})
+const loadingPrices = ref(false)
 
 // 数据预处理：将传入的数据标准化为topProduct数组
 const topProducts = computed<topProduct[]>(() => {
@@ -66,6 +78,9 @@ interface ProductCostSummary {
     children_cost: number
     eiv_cost: number
     percentage: number
+    product_num: number
+    expected_profit?: number
+    expected_profit_per_unit?: number
 }
 
 const productCostSummary = computed<ProductCostSummary[]>(() => {
@@ -107,9 +122,70 @@ const productCostSummary = computed<ProductCostSummary[]>(() => {
         })
     }
     
+    // 计算预期利润（仅omega用户）
+    if (hasOmegaSubscription.value) {
+        summaries.forEach(item => {
+            const priceData = productPrices.value[item.type_id]
+            if (priceData && priceData.jita_buy_price > 0) {
+                // 预期利润 = (jita_buy_price * product_num) - total_cost
+                const totalRevenue = priceData.jita_buy_price * item.product_num
+                item.expected_profit = totalRevenue - item.total_cost
+                // 单个产品预期利润
+                if (item.product_num > 0) {
+                    item.expected_profit_per_unit = item.expected_profit / item.product_num
+                } else {
+                    item.expected_profit_per_unit = 0
+                }
+            } else {
+                // 如果没有价格数据，设置为undefined（显示加载中）
+                item.expected_profit = undefined
+                item.expected_profit_per_unit = undefined
+            }
+        })
+    }
+    
     // 按总成本降序排序
     return summaries.sort((a, b) => b.total_cost - a.total_cost)
 })
+
+// 获取产品价格
+const fetchProductPrices = async () => {
+    if (!hasOmegaSubscription.value) {
+        return
+    }
+    
+    const products = topProducts.value
+    if (!products || products.length === 0) {
+        return
+    }
+    
+    // 提取所有产品的type_id
+    const typeIds = products.map(p => p.type_id).filter(id => id > 0)
+    if (typeIds.length === 0) {
+        return
+    }
+    
+    loadingPrices.value = true
+    try {
+        const res = await http.post('/enterprise/market/product_prices', {
+            type_ids: typeIds
+        })
+        
+        if (!res.ok) {
+            console.error('获取产品价格失败:', res.status)
+            return
+        }
+        
+        const data = await res.json()
+        if (data.status === 200 && data.data) {
+            productPrices.value = data.data
+        }
+    } catch (error) {
+        console.error('获取产品价格失败:', error)
+    } finally {
+        loadingPrices.value = false
+    }
+}
 
 // 维度2：children种类维度汇总
 interface CategoryCostSummary {
@@ -394,6 +470,10 @@ const updateCharts = async () => {
 // 监听数据变化
 watch(() => props.PlanCalculateEIVCostTableView, () => {
     updateCharts()
+    // 如果是omega用户，自动获取产品价格
+    if (hasOmegaSubscription.value) {
+        fetchProductPrices()
+    }
 }, { deep: true, immediate: false })
 
 watch(productCostSummary, () => {
@@ -454,6 +534,11 @@ onMounted(async () => {
         updateCharts()
     }, 300)
     
+    // 如果是omega用户，获取产品价格
+    if (hasOmegaSubscription.value) {
+        fetchProductPrices()
+    }
+    
     // 响应式调整图表大小
     window.addEventListener('resize', handleResize)
 })
@@ -495,6 +580,21 @@ onUnmounted(() => {
                     </template>
                     <div ref="productChartRef" style="width: 100%; height: 400px;"></div>
                 </el-card>
+            </el-col>
+            <el-col :span="12">
+                <!-- 图表卡片 -->
+                <el-card class="cost-card">
+                    <template #header>
+                        <div class="card-header">
+                            <span>材料分类成本占比</span>
+                        </div>
+                    </template>
+                    <div ref="categoryChartRef" style="width: 100%; height: 400px;"></div>
+                </el-card>
+            </el-col>
+        </el-row>
+        <el-row :gutter="20">
+            <el-col :span="17">
                 <!-- 表格卡片 -->
                 <el-card class="cost-card">
                     <template #header>
@@ -507,53 +607,56 @@ onUnmounted(() => {
                         stripe
                         border
                         style="width: 100%"
+                        show-overflow-tooltip
                     >
-                        <el-table-column prop="type_name" label="产品名称" width="200" />
-                        <el-table-column prop="total_cost" label="生产数量" width="150">
+                        <el-table-column prop="type_name" label="产品名称" width="100" />
+                        <el-table-column prop="total_cost" label="数量" width="75">
                             <template #default="{ row }">
-                                <strong>{{ formatNumber(row.product_num) }}</strong>
+                                <strong>{{ row.product_num }}</strong>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="children_cost" label="材料成本" width="150">
+                        <el-table-column 
+                            v-if="hasOmegaSubscription" 
+                            prop="expected_profit" 
+                            label="预期利润" 
+                            width="150"
+                        >
                             <template #default="{ row }">
-                                {{ formatNumber(row.children_cost) }}
-                            </template>
-                        </el-table-column>
-                        <el-table-column prop="eiv_cost" label="EIV成本" width="150">
-                            <template #default="{ row }">
-                                {{ formatNumber(row.eiv_cost) }}
+                                <div v-if="row.expected_profit !== undefined" :style="{ color: row.expected_profit > 0 ? '#008000' : '#FF0000' }">
+                                    <div>
+                                        <strong>{{ formatNumber(row.expected_profit) }}</strong>
+                                    </div>
+
+                                    <div v-if="row.product_num > 1" style="color: #888;">
+                                        {{ formatNumber(row.expected_profit_per_unit || 0) }}/per
+                                    </div>
+                                </div>
+                                <div v-else style="color: #999;">加载中...</div>
                             </template>
                         </el-table-column>
                         <el-table-column prop="total_cost" label="总成本" width="150">
                             <template #default="{ row }">
-                                <strong>{{ formatNumber(row.total_cost) }}</strong>
+                                <div><strong>{{ formatNumber(row.total_cost) }}</strong> ({{ formatPercentage(row.percentage) }}) </div>
+                                <div v-if="row.product_num > 1" style="color: #888;">{{ formatNumber(row.total_cost / row.product_num)}}/per</div>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="total_cost" label="单位成本" width="150">
+                        <el-table-column prop="children_cost" label="材料成本" width="160">
                             <template #default="{ row }">
-                                <strong>{{ formatNumber(row.total_cost / row.product_num) }}</strong>
+                                <div>{{ formatNumber(row.children_cost) }}</div>
+                                <div v-if="row.product_num > 1" style="color: #888;">{{ formatNumber(row.children_cost / row.product_num)}}/per</div>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="percentage" label="占比" width="100">
+                        <el-table-column prop="eiv_cost" label="EIV成本" width="150">
                             <template #default="{ row }">
-                                {{ formatPercentage(row.percentage) }}
+                                <div>{{ formatNumber(row.eiv_cost) }}</div>
+                                <div v-if="row.product_num > 1" style="color: #888;">{{ formatNumber(row.eiv_cost / row.product_num)}}/per</div>
                             </template>
                         </el-table-column>
                     </el-table>
                 </el-card>
             </el-col>
-            
             <!-- 维度2：分类维度 -->
-            <el-col :span="12">
-                <!-- 图表卡片 -->
-                <el-card class="cost-card">
-                    <template #header>
-                        <div class="card-header">
-                            <span>材料分类成本占比</span>
-                        </div>
-                    </template>
-                    <div ref="categoryChartRef" style="width: 100%; height: 400px;"></div>
-                </el-card>
+            <el-col :span="7">
                 <!-- 表格卡片 -->
                 <el-card class="cost-card">
                     <template #header>
@@ -566,14 +669,15 @@ onUnmounted(() => {
                         stripe
                         border
                         style="width: 100%"
+                        show-overflow-tooltip
                     >
-                        <el-table-column prop="category" label="分类" width="200" />
-                        <el-table-column prop="total_cost" label="总成本" width="200">
+                        <el-table-column prop="category" label="分类" width="100" />
+                        <el-table-column prop="total_cost" label="总成本" width="170">
                             <template #default="{ row }">
                                 <strong>{{ formatNumber(row.total_cost) }}</strong>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="percentage" label="占比" width="150">
+                        <el-table-column prop="percentage" label="占比" width="80">
                             <template #default="{ row }">
                                 {{ formatPercentage(row.percentage) }}
                             </template>
@@ -581,6 +685,8 @@ onUnmounted(() => {
                     </el-table>
                 </el-card>
             </el-col>
+        
+
         </el-row>
     </div>
 </template>

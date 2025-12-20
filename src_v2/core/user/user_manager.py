@@ -10,7 +10,8 @@ from src_v2.core.database.kahuna_database_utils_v2 import (
     UserDBUtils,
     UserDataDBUtils
 )
-from src_v2.core.database.connect_manager import postgres_manager, redis_manager
+from src_v2.core.database.connect_manager import get_postgres_manager as postgres_manager
+from src_v2.core.database.connect_manager import get_redis_manager as rdm
 from sqlalchemy import delete
 from src_v2.core.database.model import (
     User as M_User,
@@ -47,7 +48,7 @@ class UserManager(metaclass=SingletonMeta):
 
         # 信息入库
         #  创建user
-        async with postgres_manager.get_session() as session:
+        async with postgres_manager().get_session() as session:
             user_database_obj = M_User(
                 user_name=user_name,
                 create_date=get_beijing_utctime(datetime.now()),
@@ -78,7 +79,7 @@ class UserManager(metaclass=SingletonMeta):
         return user_data
 
     async def get_main_character_id(self, user_name: AnyStr):
-        main_character_id = await redis_manager.redis.get(f"user_{user_name}:main_character_id")
+        main_character_id = await rdm().r.get(f"user_{user_name}:main_character_id")
         if main_character_id:
             return int(main_character_id)
         user_data = await UserDataDBUtils.select_user_data_by_user_name(user_name)
@@ -86,7 +87,7 @@ class UserManager(metaclass=SingletonMeta):
             raise KahunaException("用户数据不存在")
         if not user_data.main_character_id:
             raise KahunaException("用户主角色未设置")
-        await redis_manager.redis.set(f"user_{user_name}:main_character_id", user_data.main_character_id, ex=60 * 60)
+        await rdm().r.set(f"user_{user_name}:main_character_id", user_data.main_character_id, ex=60 * 60)
         return user_data.main_character_id
 
     async def set_main_character(self, user_name: str, main_character_name: str):
@@ -111,7 +112,7 @@ class UserManager(metaclass=SingletonMeta):
             if "EveCorpDirector" in user_role:
                 await permission_manager.remove_role_from_user(user_name, "EveCorpDirector")
 
-        await redis_manager.redis.set(f"user_{user_name}:main_character_id", main_character_id, ex=60 * 60)
+        await rdm().r.set(f"user_{user_name}:main_character_id", main_character_id, ex=60 * 60)
 
     async def update_same_title_alias_characters(self, character_list: list, main_character_id):
         for character in character_list:
@@ -145,12 +146,12 @@ class UserManager(metaclass=SingletonMeta):
 
 
     async def delete_user(self, user_name: AnyStr):
-        async with postgres_manager.get_session() as session:
+        async with postgres_manager().get_session() as session:
             # 删除userdata
             await UserDataDBUtils.delete_user_data_by_user_name(user_name, session=session)
             # 删除以下表格的用户数据
             # InvitCode
-            async with postgres_manager.get_session() as session:
+            async with postgres_manager().get_session() as session:
                 stmt_invit_code = delete(M_InvitCode).where(M_InvitCode.user_name == user_name)
                 await session.execute(stmt_invit_code)  # type: ignore
                 # UserRoles

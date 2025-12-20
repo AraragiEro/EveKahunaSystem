@@ -6,7 +6,7 @@ from quart import current_app as app
 from src_v2.backend.auth import auth_required, verify_token
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from src_v2.core.database.connect_manager import redis_manager
+from src_v2.core.database.connect_manager import get_redis_manager as rdm
 from src_v2.core.user.user_manager import UserManager
 from src_v2.core.log import logger
 
@@ -30,8 +30,10 @@ async def get_oauth_url():
         url, _ = get_auth_url(user_id=user_id)
         return jsonify({"status": 200, "url": url})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取授权链接失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取授权链接失败"}), 500
 
@@ -133,8 +135,8 @@ async def eve_oauth_callback():
         logger.info(f"成功获取 EVE token。用户ID: {user_id}, Access token 过期时间: {expires_at}, 角色名称: {character.character_name}")
 
         # 设置用户认证缓存状态
-        await redis_manager.redis.hset(f"esi_auth_status:user_{user_id}", mapping={"authStatus": "success", "characterName": character.character_name})
-        await redis_manager.redis.expire(f"esi_auth_status:user_{user_id}", 300) # 5分钟
+        await rdm().redis.hset(f"esi_auth_status:user_{user_id}", mapping={"authStatus": "success", "characterName": character.character_name})
+        await rdm().redis.expire(f"esi_auth_status:user_{user_id}", 300) # 5分钟
         # 完成后，将用户重定向回前端应用程序
         frontend_redirect_url = "https://" + CALLBACK_LOCAL_HOST + "/setting/characterSetting/auth/close" if CALLBACK_LOCAL_HOST else None
         return redirect(frontend_redirect_url)
@@ -155,12 +157,14 @@ async def eve_oauth_callback():
 async def get_auth_status():
     try:
         user_id = g.current_user["user_id"]
-        auth_status = await redis_manager.redis.hget(f"esi_auth_status:user_{user_id}", "authStatus")
-        character_name = await redis_manager.redis.hget(f"esi_auth_status:user_{user_id}", "characterName")
-        await redis_manager.redis.delete(f"esi_auth_status:user_{user_id}")
+        auth_status = await rdm().redis.hget(f"esi_auth_status:user_{user_id}", "authStatus")
+        character_name = await rdm().redis.hget(f"esi_auth_status:user_{user_id}", "characterName")
+        await rdm().redis.delete(f"esi_auth_status:user_{user_id}")
         return jsonify({"status": 200, "authStatus": auth_status, "characterName": character_name})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取认证状态失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取认证状态失败"}), 500

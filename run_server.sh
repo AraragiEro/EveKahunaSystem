@@ -17,6 +17,8 @@ SERVER_SCRIPT="run_server.py"
 # 确保日志目录存在
 mkdir -p "$LOG_DIR"
 
+export PYTHONUNBUFFERED=1
+
 # 检查进程是否运行
 is_running() {
     if [ -f "$PID_FILE" ]; then
@@ -145,6 +147,7 @@ stop_server() {
     if kill -0 "$PID" 2>/dev/null; then
         echo "进程未响应，强制停止..."
         kill -9 "$PID" 2>/dev/null
+        pkill -9 python
         sleep 1
     fi
     

@@ -2,7 +2,7 @@
 from src_v2.model.EVE.sde import SdeUtils
 
 
-async def get_material_type(type_id: int) -> str:
+async def get_material_type(type_id: int, sdm=None) -> str:
     """根据类型ID获取材料类型
     
     Args:
@@ -11,8 +11,8 @@ async def get_material_type(type_id: int) -> str:
     Returns:
         str: 材料类型名称（矿石、冰矿产物、燃料块、元素、气云、行星工业、杂货）
     """
-    group = await SdeUtils.get_groupname_by_id(type_id)
-    category = await SdeUtils.get_category_by_id(type_id)
+    group = await SdeUtils.get_groupname_by_id(type_id, pdm=sdm)
+    category = await SdeUtils.get_category_by_id(type_id, pdm=sdm)
     # 根据 group 或 category 进行判断和分类
     if group == "Mineral":
         return "矿石"

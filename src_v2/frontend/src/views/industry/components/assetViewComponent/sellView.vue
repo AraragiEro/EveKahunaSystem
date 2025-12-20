@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Setting, Search } from '@element-plus/icons-vue'
+import { Setting, Search, Refresh } from '@element-plus/icons-vue'
 
 interface AssetItem {
     type_id: number
@@ -17,10 +17,53 @@ interface Props {
     config: {
         price_base: string,
         percent: number
-    }
+    },
+    lastUpdateTime?: number | string | Date
 }
 
 const props = defineProps<Props>()
+
+const emit = defineEmits<{
+    refresh: []
+}>()
+
+// 计算 lastUpdateTime，如果没有传入则返回 undefined（formatTime 会处理）
+const lastUpdateTime = computed(() => {
+    return props.lastUpdateTime
+})
+
+// 格式化时间
+const formatTime = (time?: number | string | Date): string => {
+    if (!time) return '未知'
+    
+    let date: Date
+    if (typeof time === 'number') {
+        // 如果是时间戳（毫秒），直接使用；如果是秒级时间戳，转换为毫秒
+        date = time > 1e12 ? new Date(time) : new Date(time * 1000)
+    } else if (typeof time === 'string') {
+        date = new Date(time)
+    } else {
+        date = time
+    }
+    
+    if (isNaN(date.getTime())) {
+        return '未知'
+    }
+    
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+}
+
+// 处理刷新
+const handleRefresh = () => {
+    emit('refresh')
+}
 
 // 搜索关键词
 const searchKeyword = ref('')
@@ -36,15 +79,20 @@ const priceBaseText = priceBaseMap[props.config.price_base] || props.config.pric
 
 // 过滤后的资产列表
 const filteredAssetView = computed(() => {
-    if (!searchKeyword.value.trim()) {
-        return props.assetView
+    let result = [...props.assetView]
+    
+    // 如果有搜索关键词，先进行过滤
+    if (searchKeyword.value.trim()) {
+        const keyword = searchKeyword.value.toLowerCase().trim()
+        result = result.filter(asset => {
+            const nameZh = (asset.type_name_zh || '').toLowerCase()
+            const nameEn = asset.type_name.toLowerCase()
+            return nameZh.includes(keyword) || nameEn.includes(keyword)
+        })
     }
-    const keyword = searchKeyword.value.toLowerCase().trim()
-    return props.assetView.filter(asset => {
-        const nameZh = (asset.type_name_zh || '').toLowerCase()
-        const nameEn = asset.type_name.toLowerCase()
-        return nameZh.includes(keyword) || nameEn.includes(keyword)
-    })
+    
+    // 根据价格从大到小排序
+    return result.sort((a, b) => b.price - a.price)
 })
 </script>
 
@@ -72,6 +120,25 @@ const filteredAssetView = computed(() => {
                 </div>
             </el-card>
 
+            <!-- 工具栏 -->
+            <div class="toolbar">
+                <div class="toolbar-right">
+                    <div class="last-update-time">
+                        <span class="time-label">上次获取时间：</span>
+                        <span class="time-value">{{ formatTime(lastUpdateTime) }}</span>
+                    </div>
+                    <el-button 
+                        type="primary" 
+                        :icon="Refresh"
+                        @click="handleRefresh"
+                        :loading="loading"
+                        class="refresh-button"
+                    >
+                        立即刷新
+                    </el-button>
+                </div>
+            </div>
+
             <!-- 搜索框 -->
             <div class="search-container">
                 <el-input
@@ -95,37 +162,33 @@ const filteredAssetView = computed(() => {
                     shadow="hover"
                 >
                     <div class="asset-item-content">
-                        <!-- 图片容器 -->
-                        <div class="asset-image-container">
+                        <!-- 图标容器 -->
+                        <div class="asset-icon-container">
                             <img 
-                                :src="`https://imageserver.eveonline.com/Type/${asset.type_id}_256.png`" 
+                                :src="`https://imageserver.eveonline.com/Type/${asset.type_id}_64.png`" 
                                 :alt="asset.type_name"
-                                class="asset-image"
+                                class="asset-icon"
                             />
-                            <!-- 渐变遮罩 -->
-                            <div class="asset-gradient-overlay"></div>
-                            <!-- 文字信息层 -->
-                            <div class="asset-info-overlay">
-                                <div class="asset-name-section">
-                                    <div class="asset-name-zh">{{ asset.type_name_zh || asset.type_name }}</div>
-                                    <div class="asset-name-en">{{ asset.type_name }}</div>
-                                </div>
-                                <div class="asset-quantity-section">
-                                    <el-tag type="success" class="asset-quantity" size="large">
-                                        {{ asset.quantity }} 个
-                                    </el-tag>
+                            <!-- 可售标记 -->
+                            <!-- <div class="asset-sellable-badge">S</div> -->
+                        </div>
+                        <!-- 信息区域 -->
+                        <div class="asset-info-section">
+                            <!-- 第一行：中文名 | 个数 -->
+                            <div class="asset-top-row">
+                                <div class="asset-name-zh">{{ asset.type_name_zh || asset.type_name }}</div>
+                                <div class="asset-quantity-display">
+                                    <div class="quantity-number">{{ asset.quantity }}</div>
+                                    <div class="quantity-unit">个</div>
                                 </div>
                             </div>
-                        </div>
-                        <!-- 价格区域 -->
-                        <div class="asset-price">
-                            <div class="price-label">单价</div>
-                            <el-statistic 
-                                :value="asset.price" 
-                                :precision="2" 
-                                :suffix="' ISK'"
-                                class="price-statistic"
-                            />
+                            <!-- 第二行：英文名 -->
+                            <div class="asset-name-en">{{ asset.type_name }}</div>
+                            <!-- 第三行：价格 -->
+                            <div class="asset-price-display">
+                                <span class="price-value">{{ asset.price.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</span>
+                                <span class="price-unit"> ISK</span>
+                            </div>
                         </div>
                     </div>
                 </el-card>
@@ -204,6 +267,55 @@ const filteredAssetView = computed(() => {
     color: white;
 }
 
+/* 工具栏 */
+.toolbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    border-radius: 8px;
+}
+
+.toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.last-update-time {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #606266;
+}
+
+.time-label {
+    font-weight: 500;
+    color: #909399;
+}
+
+.time-value {
+    font-weight: 600;
+    color: #303133;
+}
+
+.refresh-button {
+    font-size: 14px;
+    padding: 10px 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+    transition: all 0.3s ease;
+}
+
+.refresh-button:hover {
+    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    transform: translateY(-1px);
+}
+
 /* 搜索框样式 */
 .search-container {
     padding: 0 8px;
@@ -231,159 +343,225 @@ const filteredAssetView = computed(() => {
 /* 资产网格 */
 .asset-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
     gap: 16px;
     padding: 8px;
 }
 
-/* 资产卡片 */
+/* 资产卡片 - EVE风格 */
 .asset-item-card {
+    width: 300px;
+    height: 100px;
     transition: all 0.3s ease;
-    background: white;
+    background: #2D3234;
+    border: none;
+    border-radius: 4px 0 0 4px;
+    overflow: hidden;
+    position: relative;
+    /* EVE风格切角效果：右上角和左下角切角 */
+    clip-path: polygon(
+        0 0,
+        calc(100% - 8px) 0,
+        100% 8px,
+        100% 100%,
+        8px 100%,
+        0 calc(100% - 8px)
+    );
 }
 
 .asset-item-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    background: #353A3D;
 }
 
-.asset-item-card:hover .asset-image-container {
-    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+.asset-item-card :deep(.el-card__body) {
+    padding: 6px 8px;
+    height: 100%;
 }
 
 .asset-item-content {
     display: flex;
-    flex-direction: column;
-    gap: 0;
+    flex-direction: row;
+    gap: 10px;
+    height: 100%;
+    align-items: center;
 }
 
-/* 图片容器 */
-.asset-image-container {
+/* 图标容器 */
+.asset-icon-container {
     position: relative;
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    border-radius: 12px;
-    overflow: hidden;
-    background: #f5f7fa;
+    width: 64px;
+    height: 64px;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.asset-image {
+.asset-icon {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
 }
 
-/* 渐变遮罩 */
-.asset-gradient-overlay {
+/* 可售标记 */
+.asset-sellable-badge {
     position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 33.33%;
-    background: linear-gradient(to top, 
-        rgba(0, 0, 0, 0.85) 0%, 
-        rgba(0, 0, 0, 0.65) 25%, 
-        rgba(0, 0, 0, 0.4) 50%, 
-        rgba(0, 0, 0, 0.15) 75%, 
-        transparent 100%
-    );
-    pointer-events: none;
-    z-index: 1;
-}
-
-/* 文字信息层 */
-.asset-info-overlay {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 33.33%;
+    top: -2px;
+    left: -2px;
+    width: 16px;
+    height: 16px;
+    background: linear-gradient(135deg, #ffa500 0%, #ff8c00 100%);
+    clip-path: polygon(0 0, 100% 0, 0 100%);
     display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    padding: 12px 16px;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: #000;
     z-index: 2;
+    line-height: 1;
+    padding: 1px 0 0 1px;
 }
 
-.asset-name-section {
+/* 信息区域 */
+.asset-info-section {
     flex: 1;
-    text-align: left;
-    color: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    height: 100%;
     min-width: 0;
+    padding: 4px 2px 4px 0;
+    overflow: hidden;
+}
+
+/* 第一行：中文名 | 个数 */
+.asset-top-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 8px;
+    margin-bottom: 4px;
+    min-width: 0;
+    width: 100%;
 }
 
 .asset-name-zh {
-    font-size: 20px;
-    font-weight: 600;
-    color: white;
-    margin-bottom: 2px;
-    word-break: break-word;
+    flex: 0 1 auto;
+    font-size: 15px;
+    font-weight: 700;
+    color: #ffffff;
     line-height: 1.3;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-}
-
-.asset-name-en {
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.9);
     word-break: break-word;
-    line-height: 1.3;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    min-width: 0;
+    max-width: calc(100% - 50px);
 }
 
-.asset-quantity-section {
-    flex-shrink: 0;
-    margin-left: 12px;
-    display: flex;
-    align-items: flex-end;
-}
-
-.asset-quantity {
-    font-size: 16px;
-    font-weight: 600;
-    padding: 4px 10px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-/* 价格显示 */
-.asset-price {
-    width: 100%;
-    padding: 12px 16px;
-    text-align: center;
-    min-height: 60px;
+/* 个数显示 - 两行，显眼加粗现代化字体 */
+.asset-quantity-display {
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    background: #fafafa;
+    align-items: flex-start;
+    flex-shrink: 0;
+    line-height: 1;
 }
 
-.price-label {
-    font-size: 12px;
-    color: #909399;
+.quantity-number {
+    font-size: 18px;
+    font-weight: 800;
+    color: #67c23a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    letter-spacing: -0.5px;
+    line-height: 1.1;
+}
+
+.quantity-unit {
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(103, 194, 58, 0.8);
+    margin-top: 2px;
+    line-height: 1;
+}
+
+/* 第二行：英文名 */
+.asset-name-en {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.3;
+    word-break: break-word;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    -webkit-box-orient: vertical;
     margin-bottom: 4px;
 }
 
-.price-statistic {
+/* 第三行：价格 */
+.asset-price-display {
+    display: flex;
+    align-items: baseline;
     margin-top: 4px;
 }
 
-.price-statistic :deep(.el-statistic__number) {
-    font-size: 18px;
-    font-weight: 600;
+.price-value {
+    font-size: 13px;
+    font-weight: 700;
     color: #409eff;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
-.price-statistic :deep(.el-statistic__suffix) {
-    font-size: 14px;
-    color: #909399;
-    margin-left: 4px;
+.price-unit {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-left: 2px;
+    white-space: nowrap;
 }
 
 /* 响应式设计 */
 @media (max-width: 768px) {
-    .asset-grid {
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    .toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .toolbar-right {
+        width: 100%;
+        flex-direction: column;
+        align-items: stretch;
         gap: 12px;
+    }
+    
+    .last-update-time {
+        justify-content: center;
+        width: 100%;
+    }
+    
+    .refresh-button {
+        width: 100%;
+    }
+    
+    .asset-grid {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+    }
+
+    .asset-item-card {
+        width: 100%;
+        max-width: 220px;
     }
 
     .config-content {
@@ -398,38 +576,43 @@ const filteredAssetView = computed(() => {
 
 @media (max-width: 480px) {
     .asset-grid {
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: 8px;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 10px;
     }
 
-    .asset-image-container {
-        border-radius: 8px;
+    .asset-item-card {
+        width: 100%;
+        max-width: 220px;
+        height: 90px;
     }
 
-    .asset-info-overlay {
-        padding: 8px 12px;
+    .asset-icon-container {
+        width: 56px;
+        height: 56px;
     }
 
     .asset-name-zh {
-        font-size: 12px;
+        font-size: 13px;
     }
 
     .asset-name-en {
         font-size: 10px;
     }
 
-    .asset-quantity {
-        font-size: 11px;
-        padding: 3px 8px;
-    }
-
-    .asset-price {
-        padding: 8px 12px;
-        min-height: 50px;
-    }
-
-    .price-statistic :deep(.el-statistic__number) {
+    .quantity-number {
         font-size: 16px;
+    }
+
+    .quantity-unit {
+        font-size: 9px;
+    }
+
+    .price-value {
+        font-size: 12px;
+    }
+
+    .price-unit {
+        font-size: 9px;
     }
 }
 </style>

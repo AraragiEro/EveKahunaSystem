@@ -7,6 +7,9 @@ import type { EChartsOption } from 'echarts'
 
 const activeTab = ref('calculateHistory')
 
+// 时间范围选择
+const daysRange = ref(7) // 默认7天，范围1-30天
+
 // 折线图相关
 const hourlyChartRef = ref<HTMLElement>()
 let hourlyChartInstance: echarts.ECharts | null = null
@@ -21,7 +24,7 @@ const durationLoading = ref(false)
 const fetchHourlyStatistics = async () => {
   hourlyLoading.value = true
   try {
-    const res = await http.get('/admin/statistics/calculateHistory/hourly?days=7')
+    const res = await http.get(`/admin/statistics/calculateHistory/hourly?days=${daysRange.value}`)
     const data = await res.json()
     
     if (data.status !== 200) {
@@ -31,17 +34,83 @@ const fetchHourlyStatistics = async () => {
     
     const statistics = data.data || []
     
-    // 准备图表数据
-    const hours = statistics.map((item: any) => item.hour)
-    const totalData = statistics.map((item: any) => item.total)
-    const successData = statistics.map((item: any) => item.success)
-    const failedData = statistics.map((item: any) => item.failed)
+    // 生成过去N天的完整小时时间序列（UTC时间）
+    // 获取当前UTC时间
+    const now = new Date()
+    // 计算当前UTC小时的开始时间（去掉分钟、秒、毫秒）
+    const currentUTCHour = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      now.getUTCHours(),
+      0, 0, 0
+    ))
+    const endTime = currentUTCHour
+    const startTime = new Date(endTime.getTime() - daysRange.value * 24 * 60 * 60 * 1000) // N天前
+    
+    // 生成完整的时间序列
+    const allHours: string[] = []
+    const hourMap = new Map<string, { total: number; success: number; failed: number }>()
+    
+    // 将后端返回的数据映射到Map中
+    statistics.forEach((item: any) => {
+      hourMap.set(item.hour, {
+        total: item.total || 0,
+        success: item.success || 0,
+        failed: item.failed || 0
+      })
+    })
+    
+    // 生成完整的小时时间序列（UTC时间）
+    for (let time = new Date(startTime); time <= endTime; time = new Date(time.getTime() + 60 * 60 * 1000)) {
+      // 格式化为 'YYYY-MM-DD HH:00:00' 格式（UTC时间）
+      const year = time.getUTCFullYear()
+      const month = String(time.getUTCMonth() + 1).padStart(2, '0')
+      const day = String(time.getUTCDate()).padStart(2, '0')
+      const hour = String(time.getUTCHours()).padStart(2, '0')
+      const hourStr = `${year}-${month}-${day} ${hour}:00:00`
+      allHours.push(hourStr)
+    }
+    
+    // 准备图表数据，填充缺失的时间点为0
+    // 转换为时间轴格式：[[timestamp, value], ...]
+    const totalData = allHours.map(hour => {
+      // 将 'YYYY-MM-DD HH:00:00' 格式转换为Date对象（UTC时间）
+      const [datePart, timePart] = hour.split(' ')
+      const [year, month, day] = datePart.split('-').map(Number)
+      const [hours] = timePart.split(':').map(Number)
+      const date = new Date(Date.UTC(year, month - 1, day, hours, 0, 0))
+      return [date.getTime(), hourMap.get(hour)?.total || 0]
+    })
+    const successData = allHours.map(hour => {
+      const [datePart, timePart] = hour.split(' ')
+      const [year, month, day] = datePart.split('-').map(Number)
+      const [hours] = timePart.split(':').map(Number)
+      const date = new Date(Date.UTC(year, month - 1, day, hours, 0, 0))
+      return [date.getTime(), hourMap.get(hour)?.success || 0]
+    })
+    const failedData = allHours.map(hour => {
+      const [datePart, timePart] = hour.split(' ')
+      const [year, month, day] = datePart.split('-').map(Number)
+      const [hours] = timePart.split(':').map(Number)
+      const date = new Date(Date.UTC(year, month - 1, day, hours, 0, 0))
+      return [date.getTime(), hourMap.get(hour)?.failed || 0]
+    })
     
     // 更新折线图
     if (hourlyChartInstance) {
+      // 根据选择的天数生成标题
+      const titleText = daysRange.value === 1 
+        ? '过去1天每小时计算统计'
+        : daysRange.value === 7
+        ? '过去一周每小时计算统计'
+        : daysRange.value === 30
+        ? '过去一月每小时计算统计'
+        : `过去${daysRange.value}天每小时计算统计`
+      
       const option: EChartsOption = {
         title: {
-          text: '过去一周每小时计算统计',
+          text: titleText,
           left: 'center',
           top: 10
         },
@@ -49,6 +118,25 @@ const fetchHourlyStatistics = async () => {
           trigger: 'axis',
           axisPointer: {
             type: 'cross'
+          },
+          formatter: (params: any) => {
+            if (Array.isArray(params) && params.length > 0) {
+              const param = params[0]
+              // 时间轴模式下，param.value[0] 是时间戳
+              if (param.value && Array.isArray(param.value) && param.value.length >= 2) {
+                const timestamp = param.value[0]
+                const date = convertUTCToUTC8(new Date(timestamp))
+                const timeStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:00`
+                
+                let result = `<div style="margin-bottom: 5px;"><strong>${timeStr}</strong></div>`
+                params.forEach((item: any) => {
+                  const value = Array.isArray(item.value) ? item.value[1] : item.value
+                  result += `<div>${item.marker}${item.seriesName}: <strong>${value}</strong></div>`
+                })
+                return result
+              }
+            }
+            return ''
           }
         },
         legend: {
@@ -58,19 +146,45 @@ const fetchHourlyStatistics = async () => {
         grid: {
           left: '3%',
           right: '4%',
-          bottom: '3%',
+          bottom: '15%', // 为底部滑块留出空间
           top: '15%',
           containLabel: true
         },
+        dataZoom: [
+          {
+            type: 'inside', // 内置型数据区域缩放组件
+            start: 0,
+            end: 100
+          },
+          {
+            type: 'slider', // 滑动条型数据区域缩放组件
+            start: 0,
+            end: 100,
+            height: 40,
+            bottom: 10,
+            handleIcon: 'path://M30.9,53.2C16.8,53.2,5.3,41.7,5.3,27.6S16.8,2,30.9,2C45,2,56.4,13.5,56.4,27.6S45,53.2,30.9,53.2z M30.9,3.5C17.6,3.5,6.8,14.4,6.8,27.6c0,13.3,10.8,24.1,24.1,24.1C44.2,51.7,55,40.9,55,27.6C54.9,14.4,44.1,3.5,30.9,3.5z M36.9,35.8c0,0.6-0.4,1-1,1H26.8c-0.6,0-1-0.4-1-1V19.4c0-0.6,0.4-1,1-1h9.2c0.6,0,1,0.4,1,1V35.8z',
+            handleSize: '80%',
+            handleStyle: {
+              color: '#fff',
+              shadowBlur: 3,
+              shadowColor: 'rgba(0, 0, 0, 0.6)',
+              shadowOffsetX: 2,
+              shadowOffsetY: 2
+            },
+            labelFormatter: (value: number) => {
+              // 将时间戳转换为UTC+8时间显示
+              const date = convertUTCToUTC8(new Date(value))
+              return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:00`
+            }
+          }
+        ],
         xAxis: {
-          type: 'category',
-          boundaryGap: false,
-          data: hours,
+          type: 'time',
+          boundaryGap: [0, 0], // time类型使用数组格式
           axisLabel: {
-            rotate: 45,
-            formatter: (value: string) => {
+            formatter: (value: number) => {
               // 将UTC时间转换为UTC+8并格式化显示
-              const date = convertUTCToUTC8(value)
+              const date = convertUTCToUTC8(new Date(value))
               return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:00`
             }
           }
@@ -85,21 +199,24 @@ const fetchHourlyStatistics = async () => {
             type: 'line',
             data: totalData,
             itemStyle: { color: '#5470c6' },
-            smooth: true
+            smooth: true,
+            symbol: 'none' // 不显示数据点，使线条更平滑
           },
           {
             name: '成功数量',
             type: 'line',
             data: successData,
             itemStyle: { color: '#91cc75' },
-            smooth: true
+            smooth: true,
+            symbol: 'none'
           },
           {
             name: '失败数量',
             type: 'line',
             data: failedData,
             itemStyle: { color: '#ee6666' },
-            smooth: true
+            smooth: true,
+            symbol: 'none'
           }
         ]
       }
@@ -341,6 +458,12 @@ const initDurationChart = async () => {
   await fetchDurationStatistics()
 }
 
+// 监听时间范围变化
+const handleDaysRangeChange = (value: number) => {
+  // v-model会自动更新daysRange.value，这里直接使用传入的value
+  fetchHourlyStatistics()
+}
+
 // 监听标签页切换
 const handleTabChange = (tabName: string) => {
   if (tabName === 'calculateHistory') {
@@ -382,6 +505,23 @@ onUnmounted(() => {
       <!-- 计算历史行为数据展示 -->
       <el-tab-pane label="计算历史行为数据" name="calculateHistory">
         <div class="chart-container">
+          <!-- 时间范围选择器 -->
+          <div class="range-selector">
+            <div class="range-label">时间范围：</div>
+            <el-slider
+              v-model="daysRange"
+              :min="1"
+              :max="30"
+              :step="1"
+              show-stops
+              :show-tooltip="true"
+              :format-tooltip="(val: number) => `${val}天`"
+              @change="handleDaysRangeChange"
+              style="flex: 1; margin: 0 20px;"
+            />
+            <div class="range-value">{{ daysRange }}天</div>
+          </div>
+          
           <!-- 每小时统计折线图 -->
           <div class="chart-wrapper">
             <div 
@@ -419,6 +559,31 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 30px;
   margin-top: 20px;
+}
+
+.range-selector {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  padding: 20px;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  margin-bottom: 10px;
+}
+
+.range-label {
+  font-size: 14px;
+  color: #606266;
+  font-weight: 500;
+  min-width: 80px;
+}
+
+.range-value {
+  font-size: 14px;
+  color: #409eff;
+  font-weight: 600;
+  min-width: 50px;
+  text-align: right;
 }
 
 .chart-wrapper {

@@ -25,7 +25,8 @@ Kahuna System 是一个专为 EVE Online 玩家设计的 Web 应用平台，集�
 
 ## 核心功能
 
-- **市场价格查询** - 支持吉他和联盟市场实时价格查询【**计划中**】
+- **自选市场价格查询与利润成本分析** - 支持吉他和联盟市场实时价格查询
+  - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/dd98f790-af19-484d-b43e-c82588a6bd88" />
 - **成本计算** - 精确计算制造和采购成本
   - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/5c45aac0-fd2e-4bfd-b5ff-57085d4eca11" />
 - **工业规划** - 智能工业制造规划与报表输出
@@ -35,7 +36,6 @@ Kahuna System 是一个专为 EVE Online 玩家设计的 Web 应用平台，集�
   - <img width="2560" height="1271" alt="landing-page-化矿计算" src="https://github.com/user-attachments/assets/9f98ee62-9211-49e6-9377-b6305954840f" />
 - **采购清单** - 可自定义数据来源的采购清单管理
   - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/6c1eb759-f83a-4c7f-b4e0-e899d865807b" />
-- **利润分析** - 深度利润分析与市场机会挖掘
 - **挂单分析** - 市场订单分析与优化建议【**计划中**】
 - **资产统计** - 角色和公司资产统计与管理【**计划中**】
 
@@ -114,9 +114,9 @@ python run_server.py --prod --host 0.0.0.0 --port 9527
 
 ## 数据库部署
 
-### 使用 Docker 部署 PostgreSQL 和 Redis
+### 使用 Docker 部署数据库服务
 
-推荐使用 Docker Compose 快速部署 PostgreSQL 和 Redis 数据库。
+推荐使用 Docker Compose 快速部署 PostgreSQL、Redis 和 Neo4j 数据库。
 
 #### 创建 docker-compose.yml
 
@@ -159,9 +159,33 @@ services:
       timeout: 5s
       retries: 5
 
+  neo4j:
+    image: neo4j:2025.10.1
+    container_name: kahuna-neo4j
+    ports:
+      - "7687:7687"  # Bolt协议
+      - "7474:7474"  # HTTP
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/var/lib/neo4j/plugins
+      - neo4j_conf:/var/lib/neo4j/conf
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data:
   redis_data:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_conf:
 ```
 
 #### 启动数据库服务
@@ -199,6 +223,50 @@ docker volume ls
 docker volume inspect <volume_name>
 ```
 
+#### 安装 Neo4j APOC 插件
+##### 下载 APOC 插件
+
+1. 访问 [APOC GitHub Releases](https://github.com/neo4j/apoc/releases) 页面
+2. 下载与 Neo4j 版本匹配的 APOC 插件（版本 2025.10.1）：
+   - 直接下载链接：https://github.com/neo4j/apoc/releases/download/2025.10.1/apoc-2025.10.1-core.jar
+   - 或使用 wget/curl 下载：
+     ```bash
+     wget https://github.com/neo4j/apoc/releases/download/2025.10.1/apoc-2025.10.1-core.jar -O ./neo4j_plugins/apoc-2025.10.1-core.jar
+     ```
+
+##### 安装步骤
+
+1. **将下载的 jar 文件放到映射的 plugins 文件夹内**：
+   ```bash
+   # 创建插件目录（如果不存在）
+   mkdir -p ./neo4j_plugins
+   
+   # 将下载的 apoc-2025.10.1-core.jar 文件放到该目录
+   # 确保文件路径为：./neo4j_plugins/apoc-2025.10.1-core.jar
+   ```
+
+2. **重启 Neo4j 容器**使插件生效：
+   ```bash
+   docker-compose restart neo4j
+   ```
+
+3. **验证插件是否安装成功**（可选）：
+   
+   使用 Neo4j Browser（访问 http://localhost:7474）或 cypher-shell 执行：
+   ```cypher
+   CALL apoc.help("path");
+   ```
+   
+   有返回信息无报错即安装成功
+
+##### 注意事项
+
+- APOC 插件版本必须与 Neo4j 版本匹配（2025.10.1）
+- 确保 `neo4j_plugins` 目录已正确映射到容器内的 `/plugins` 目录
+- 首次启动 Neo4j 后，建议修改默认密码（通过 `NEO4J_AUTH` 环境变量或首次登录后修改）
+- 如果插件未生效，检查容器日志：`docker-compose logs neo4j`
+
+
 #### 配置说明
 
 启动数据库后，需要在 `config.toml` 中配置数据库连接信息：
@@ -206,71 +274,32 @@ docker volume inspect <volume_name>
 ```toml
 [POSTGREDB]
 Host = "localhost"
-Port = 5432
+Port = 5432 # 具体看你创建容器时的映射端口
 Database = "kahuna"
 User = "admin"
 Password = "secret"
 
 [REDIS]
 Host = "localhost"
-Port = 6379
-```
+Port = 6379 # 具体看你创建容器时的映射端口
 
-### 手动创建 SDE 数据库
+[NEO4J]
+Host = "localhost"
+Port = 7687 # 具体看你创建容器时的映射端口
+Username = "neo4j"
+Password = "password"
 
-如果使用 PostgreSQL 作为 SDE 数据库，需要手动创建数据库。以下是几种创建方法：
-
-#### 方法一：使用 psql 命令行工具
-
-1. 连接到 PostgreSQL：
-
-```bash
-psql -U admin -h localhost -p 5432 -d postgres
-```
-
-2. 创建 SDE 数据库：
-
-```sql
-CREATE DATABASE "sde";
-```
-
-3. 退出 psql：
-
-```sql
-\q
-```
-
-#### 方法二：使用 SQL 命令（需要管理员权限）
-
-```sql
-CREATE DATABASE "sde";
-```
-
-#### 方法三：使用图形化工具（如 pgAdmin）
-
-1. 连接到 PostgreSQL 服务器（`localhost:5432`）
-2. 右键点击 `Databases` -> `Create` -> `Database...`
-3. 输入数据库名称：`sde`
-4. 点击 `Save` 保存
-
-#### 配置 SDE 数据库
-
-创建数据库后，在 `config.toml` 中配置 SDE 数据库连接信息：
-
-```toml
 [SDEDB]
 Host = "localhost"
-Port = 5432
+Port = 5432 # 具体看你创建容器时的映射端口
 Database = "sde"
 User = "admin"
 Password = "secret"
 ```
 
-## 配置说明
+**注意**：如果使用 Docker Compose 部署，Neo4j 的 Host 应设置为 `localhost`（从宿主机访问）或容器名称 `kahuna-neo4j`（从其他容器访问）。首次启动 Neo4j 后，建议修改默认密码。
 
-### 配置文件
-
-项目使用 TOML 格式的配置文件。将 `config.toml.example` 复制为 `config.toml` 并填写相应配置。
+**注意**：SDE数据库使用前需要初始化，请看下面的sde数据库更新工具。
 
 ### 主要配置项
 

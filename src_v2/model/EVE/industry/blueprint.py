@@ -1,4 +1,5 @@
 from functools import wraps
+import traceback
 from typing import Callable, Optional, List
 from cachetools import LRUCache
 import asyncio
@@ -9,7 +10,7 @@ from ..sde import SdeUtils
 from ..sde.sde_builder import IndustryActivityMaterials, IndustryActivityProducts, IndustryBlueprints, InvTypes, IndustryActivities
 from ..sde.utils import get_db_manager
 from src_v2.core.database.neo4j_utils import Neo4jIndustryUtils as NIU
-from src_v2.core.database.connect_manager import neo4j_manager
+from src_v2.core.database.connect_manager import get_neo4j_manager as neo4j_manager
 from src_v2.core.utils import tqdm_manager
 
 from src_v2.core.log import logger
@@ -78,8 +79,12 @@ class BPManager:
 
     @classmethod
     @cached(ttl=3600)
-    async def get_bp_materials(cls, type_id: int) -> dict:
-        async with (await get_db_manager()).get_session() as session:
+    async def get_bp_materials(cls, type_id: int, pdm = None) -> dict:
+        if pdm:
+            m = pdm
+        else:
+            m = await get_db_manager()
+        async with m.get_session() as session:
             stmt = (
                 select(IndustryActivityMaterials.materialTypeID, IndustryActivityMaterials.quantity)
                 .select_from(IndustryActivityMaterials)
@@ -94,10 +99,14 @@ class BPManager:
 
     @classmethod
     @cached(ttl=3600)
-    async def get_bp_product_quantity_typeid(cls, type_id: int) -> int:
+    async def get_bp_product_quantity_typeid(cls, type_id: int, pdm = None) -> int:
         try:
             #45732是一个测试用数据，会导致误判，需要特殊处理
-            async with (await get_db_manager()).get_session() as session:
+            if pdm:
+                m = pdm
+            else:
+                m = await get_db_manager()
+            async with m.get_session() as session:
                 stmt = (
                     select(IndustryActivityProducts.quantity)
                     .where((IndustryActivityProducts.productTypeID == type_id) &
@@ -113,28 +122,14 @@ class BPManager:
             logger.warning(f"get_bp_product_quantity_typeid: {type_id} error: {e}")
             return 1
 
-    # @classmethod
-    # def get_formula_id_by_prod_typeid(cls, type_id: int, unrefined: bool = False) -> int:
-    #     ressults = (IndustryActivityProducts
-    #              .select(IndustryActivityProducts.blueprintTypeID, IndustryActivityProducts.quantity)
-    #              .where(IndustryActivityProducts.productTypeID == type_id))
-    #
-    #     for res in ressults:
-    #         if unrefined and res.quantity == 1:
-    #             return res.blueprintTypeID
-    #         elif not unrefined and res.quantity > 1:
-    #             return res.blueprintTypeID
-    #
-    # @classmethod
-    # def get_manubp_id_by_prod_typeid(cls, type_id: int) -> int:
-    #     return (IndustryActivityProducts
-    #              .select(IndustryActivityProducts.blueprintTypeID)
-    #              .where(IndustryActivityProducts.productTypeID == type_id)).scalar()
-
     @classmethod
     @cached(ttl=3600)
-    async def get_bp_id_by_prod_typeid(cls, type_id: int) -> Optional[int]:
-        async with (await get_db_manager()).get_session() as session:
+    async def get_bp_id_by_prod_typeid(cls, type_id: int, pdm = None) -> Optional[int]:
+        if pdm:
+            m = pdm
+        else:
+            m = await get_db_manager()
+        async with m.get_session() as session:
             # 优先选择制造活动（activityID == 1），其次选择反应活动（activityID == 11）
             # 因为同一个产品可能对应多个蓝图（制造、研究、复制等），需要明确选择
             stmt = (
@@ -179,7 +174,7 @@ class BPManager:
 
     @classmethod
     @cached(ttl=3600)
-    async def get_production_time(cls, product_id: int) -> int:
+    async def get_production_time(cls, product_id: int, pdm=None) -> int:
         """
         获取指定产品的制造活动时间（秒）
         参数：
@@ -187,7 +182,7 @@ class BPManager:
         返回：
             int: 制造活动时间，单位秒。如果未找到返回0
         """
-        details = await cls.get_blueprint_details(product_id)
+        details = await cls.get_blueprint_details(product_id, pdm=pdm)
         if details is None:
             return 0
             
@@ -198,7 +193,7 @@ class BPManager:
 
     @classmethod
     @cached(ttl=3600)
-    async def get_activity_time_by_typeid(cls, product_id: int) -> int:
+    async def get_activity_time_by_typeid(cls, product_id: int, sdm=None) -> int:
         """
         获取指定产品的制造活动时间（秒）
         参数：
@@ -206,7 +201,7 @@ class BPManager:
         返回：
             int: 制造活动时间，单位秒。如果未找到返回0
         """
-        details = await cls.get_blueprint_details(product_id)
+        details = await cls.get_blueprint_details(product_id, pdm=sdm)
         if details is None:
             return 0
 
@@ -232,8 +227,12 @@ class BPManager:
 
     @classmethod
     @cached(ttl=3600)
-    async def get_activity_id_by_product_typeid(cls, product_typeid: int) -> Optional[int]:
-        async with (await get_db_manager()).get_session() as session:
+    async def get_activity_id_by_product_typeid(cls, product_typeid: int, pdm = None) -> Optional[int]:
+        if pdm:
+            m = pdm
+        else:
+            m = await get_db_manager()
+        async with m.get_session() as session:
             # 优先选择制造活动（activityID == 1），其次选择反应活动（activityID == 11）
             stmt = (
                 select(IndustryActivityProducts.activityID)
@@ -248,7 +247,7 @@ class BPManager:
 
     @classmethod
     @cached(ttl=3600)
-    async def get_blueprint_details(cls, product_id: int) -> Optional[dict]:
+    async def get_blueprint_details(cls, product_id: int, pdm = None) -> Optional[dict]:
         """
         根据产品ID返回蓝图的详细信息字典。
         参数：
@@ -264,7 +263,11 @@ class BPManager:
         }
         
         try:
-            async with (await get_db_manager()).get_session() as session:
+            if pdm:
+                m = pdm
+            else:
+                m = await get_db_manager()
+            async with m.get_session() as session:
                 # 获取产品基本信息
                 stmt = select(InvTypes).where(InvTypes.typeID == product_id)
                 result = await session.execute(stmt)
@@ -326,6 +329,7 @@ class BPManager:
                     })
 
         except Exception as e:
+            traceback.print_exc()
             logger.warning(f"get_blueprint_details error for product_id={product_id}: {e}")
             return None
         
@@ -393,7 +397,7 @@ class BPManager:
         activity_id = await cls.get_activity_id_by_product_typeid(type_id)
         bp_type_id = await cls.get_bp_id_by_prod_typeid(type_id)
 
-        async with neo4j_manager.semaphore:
+        async with neo4j_manager().semaphore:
             # 再次检查，防止在等待信号量期间其他任务已完成
             if f"fill_{product_typeid}" in finished_set:
                 return
@@ -422,7 +426,7 @@ class BPManager:
             # 提前检查是否已完成
             if f"{type_id}_{material_type_id}" in finished_set:
                 return
-            async with neo4j_manager.semaphore:
+            async with neo4j_manager().semaphore:
                 # 再次检查，防止在等待信号量期间其他任务已完成
                 if f"{type_id}_{material_type_id}" in finished_set:
                     return
@@ -464,7 +468,7 @@ class BPManager:
 
     @classmethod
     @cached(ttl=3600)
-    async def get_bp_name_by_typeid(cls, type_id: int, zh=False):
+    async def get_bp_name_by_typeid(cls, type_id: int, zh=False, pdm = None):
         """
         根据产品type_id获取对应蓝图的名称
         参数:
@@ -475,14 +479,11 @@ class BPManager:
         """
         try:
             # 根据产品ID获取蓝图ID
-            blueprint_type_id = await cls.get_bp_id_by_prod_typeid(type_id)
+            blueprint_type_id = await cls.get_bp_id_by_prod_typeid(type_id, pdm=pdm)
             if not blueprint_type_id:
                 return None
             
             # 根据zh参数决定返回英文或中文名称
-            if zh:
-                return await SdeUtils.get_cn_name_by_id(blueprint_type_id)
-            else:
-                return await SdeUtils.get_name_by_id(blueprint_type_id)
+            return await SdeUtils.get_name_by_id(blueprint_type_id, zh=zh, pdm=pdm)
         except Exception:
             return None

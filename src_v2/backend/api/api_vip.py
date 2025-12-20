@@ -5,7 +5,7 @@ from src_v2.core.log import logger
 import traceback
 from src_v2.core.utils import KahunaException
 from src_v2.core.database.kahuna_database_utils_v2 import VipStateDBUtils, UserDBUtils
-from src_v2.core.database.connect_manager import postgres_manager as dbm
+from src_v2.core.database.connect_manager import get_postgres_manager as dbm
 from sqlalchemy import select
 from datetime import datetime
 
@@ -37,8 +37,10 @@ async def get_all_vip_states():
         
         return jsonify({"status": 200, "data": vip_states})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取VIP状态列表失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取VIP状态列表失败"}), 500
 
@@ -84,8 +86,10 @@ async def update_vip_state(user_name: str):
         
         return jsonify({"status": 200, "message": "更新成功"})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"更新VIP状态失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "更新VIP状态失败"}), 500
 
@@ -103,7 +107,7 @@ async def search_users():
             return jsonify({"status": 200, "data": []})
         
         users = []
-        async with dbm.get_session() as session:
+        async with dbm().get_session() as session:
             # 使用LIKE进行模糊搜索
             stmt = select(UserDBUtils.cls_model).where(
                 UserDBUtils.cls_model.user_name.ilike(f'%{query}%')
@@ -116,8 +120,10 @@ async def search_users():
         
         return jsonify({"status": 200, "data": users})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"搜索用户失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "搜索用户失败"}), 500
 

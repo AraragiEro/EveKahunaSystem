@@ -107,6 +107,12 @@ const baseRoutes = [
       component: () => import('../views/utilsView.vue'),
     },
     {
+      path: '/messageBoard',
+      name: 'messageBoard',
+      component: () => import('../views/messageBoardView.vue'),
+      meta: { requiresAuth: true, roles: ['user'] }
+    },
+    {
       path: '/admin',
       name: 'admin',
       component: () => import('../views/adminView.vue'),

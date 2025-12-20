@@ -22,12 +22,14 @@ sys.path.insert(0, str(project_root))
 
 async def cleanup_resources():
     """清理所有资源"""
-    from src_v2.core.database.connect_manager import postgres_manager, redis_manager, neo4j_manager
-    from src_v2.model.EVE.sde.utils import SdeUtils
+    from src_v2.core.database.connect_manager import get_postgres_manager as pdm
+    from src_v2.core.database.connect_manager import get_redis_manager as rdm
+    from src_v2.core.database.connect_manager import get_neo4j_manager as neo4j_manager
+    from src_v2.model.EVE.sde.sde_builder.database_manager import get_sde_database_manager as sde_database_manager
     
     try:
         # 关闭 Neo4j 连接
-        await neo4j_manager.close()
+        await neo4j_manager().close()
         print("[清理] Neo4j 连接已关闭")
     except Exception as e:
         if "sys.meta_path is None" not in str(e) and "shutting down" not in str(e).lower():
@@ -35,22 +37,22 @@ async def cleanup_resources():
     
     try:
         # 关闭 SDE 数据库连接
-        await SdeUtils.close_database()
+        await sde_database_manager().close()
         print("[清理] SDE 数据库连接已关闭")
     except Exception as e:
         print(f"[清理] SDE 数据库连接关闭时出错: {e}")
     
     try:
         # 关闭 PostgreSQL 连接
-        await postgres_manager.close()
+        await pdm().close()
         print("[清理] PostgreSQL 连接已关闭")
     except Exception as e:
         print(f"[清理] PostgreSQL 连接关闭时出错: {e}")
     
     try:
         # 关闭 Redis 连接（如果有 close 方法）
-        if hasattr(redis_manager, 'close'):
-            await redis_manager.close()
+        if hasattr(rdm(), 'close'):
+            await rdm().close()
             print("[清理] Redis 连接已关闭")
     except Exception as e:
         print(f"[清理] Redis 连接关闭时出错: {e}")
@@ -86,19 +88,21 @@ async def main():
     
     try:
         # 初始化数据库连接
-        from src_v2.core.database.connect_manager import postgres_manager, redis_manager, neo4j_manager
-        from src_v2.model.EVE.sde.utils import SdeUtils
+        from src_v2.core.database.connect_manager import get_postgres_manager as pdm
+        from src_v2.core.database.connect_manager import get_redis_manager as rdm
+        from src_v2.core.database.connect_manager import get_neo4j_manager as neo4j_manager
+        from src_v2.model.EVE.sde.sde_builder.database_manager import get_sde_database_manager as sde_database_manager
         
-        await postgres_manager.init()
+        await pdm().init()
         print("  ✓ PostgreSQL 连接成功")
         
-        await redis_manager.init()
+        await rdm().init()
         print("  ✓ Redis 连接成功")
         
-        await neo4j_manager.init()
+        await neo4j_manager().init()
         print("  ✓ Neo4j 连接成功")
         
-        await SdeUtils.init_database()
+        await sde_database_manager().init()
         print("  ✓ SDE 数据库连接成功")
         
     except Exception as e:

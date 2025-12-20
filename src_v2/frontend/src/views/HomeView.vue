@@ -40,12 +40,13 @@ const todoItems = ref<TodoItem[]>([
         children: [
           { id: 'product-list', title: '可调整的产品清单', completed: true },
           { id: 'calc-config', title: '可调整的计算配置', completed: true },
+          { id: 'industry-plan-config', title: '工业计划的配置管理', completed: false },
         ]
       },
       {
         id: 'data-report',
         title: '详细的数据报表',
-        completed: false,
+        completed: true,
         children: [
           { id: 'plan-tree', title: '计划分解树', completed: true },
           { id: 'material-list', title: '材料清单', completed: true },
@@ -54,20 +55,21 @@ const todoItems = ref<TodoItem[]>([
           { id: 'cost-analysis', title: '成本成分比例分析', completed: true },
           { id: 'salary-calc', title: '合作工业的薪水计算', completed: true },
           { id: 'logistics', title: '可参考的物流计划', completed: true },
-          { id: 'data-report', title: '化矿购买推荐', completed: false },
+          { id: 'data-report', title: '化矿购买推荐', completed: true },
+          { id: 'asset-report', title: '资产统计报表', completed: false },
         ]
       },
       {
         id: 'market-analysis',
         title: '市场分析',
-        completed: false,
+        completed: true,
         children: [
           { id: 'market-price', title: '市场价格查看', completed: true },
           { id: 'price-monitor', title: '自选清单的价格监控', completed: true },
           { id: 'profit-calc', title: '自选产品清单的利润计算', completed: true },
           { id: 'product-detail', title: '市场单品的详细数据计算【成本、利润等】', completed: true },
           { id: 'region-profit', title: '特定星域的市场利润计算', completed: true },
-          { id: 'market-analysis', title: '超大列表时拉取粗算成本的能力', completed: false },
+          { id: 'market-analysis', title: '超大列表时拉取粗算成本的能力', completed: true },
         ]
       }
     ]
@@ -95,7 +97,8 @@ const todoItems = ref<TodoItem[]>([
           { id: 'storage', title: '库存管理', completed: true },
           { id: 'setting', title: '设置', completed: true },
         ]
-      }
+      },
+      { id: 'eve-trade-mail-board', 'title': 'EVE交易邮件组读取与展示', completed: false },
     ]
   }
 ])

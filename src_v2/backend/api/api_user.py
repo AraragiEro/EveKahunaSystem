@@ -34,8 +34,10 @@ async def get_character_list():
             })
         return jsonify({"status": 200, "data": character_list_dict})
     except KahunaException as e:
+        traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取角色列表失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取角色列表失败"}), 500
 
@@ -50,6 +52,7 @@ async def delete_character():
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"删除角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "删除角色失败"}), 500
 
@@ -68,6 +71,7 @@ async def get_main_character():
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取主角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取主角色失败"}), 500
 
@@ -90,6 +94,7 @@ async def set_main_character():
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"设置主角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "设置主角色失败"}), 500
 
@@ -114,6 +119,7 @@ async def is_alias_character_setting_avaliable():
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"检查别名角色设置可用性失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "检查别名角色设置可用性失败"}), 500
 
@@ -143,6 +149,7 @@ async def get_same_title_alias_character_list():
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取同title别名角色列表失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取同title别名角色列表失败"}), 500
 
@@ -164,6 +171,7 @@ async def get_alias_character_list():
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"获取别名角色列表失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "获取别名角色列表失败"}), 500
 
@@ -198,8 +206,10 @@ async def search_character():
             except ValueError:
                 return jsonify({"status": 400, "message": "角色ID必须是数字"}), 400
             except KahunaException as e:
+                traceback.print_exc()
                 return jsonify({"status": 500, "message": str(e)}), 500
             except Exception as e:
+                traceback.print_exc()
                 logger.error(f"搜索角色失败: {traceback.format_exc()}")
                 return jsonify({"status": 500, "message": "搜索角色失败"}), 500
         else:  # characterName
@@ -217,8 +227,10 @@ async def search_character():
                                 "CharacterName": character_info.get("name", "")
                             })
             except KahunaException as e:
+                traceback.print_exc()
                 return jsonify({"status": 500, "message": str(e)}), 500
             except Exception as e:
+                traceback.print_exc()
                 logger.error(f"搜索角色失败: {traceback.format_exc()}")
                 return jsonify({"status": 500, "message": "搜索角色失败"}), 500
         
@@ -226,6 +238,7 @@ async def search_character():
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"搜索角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "搜索角色失败"}), 500
 
@@ -272,9 +285,11 @@ async def add_alias_characters():
                 ))
                 added_count += 1
             except KahunaException as e:
+                traceback.print_exc()
                 logger.error(f"添加角色 {character_id} 失败: {str(e)}")
                 failed_list.append(str(character_id))
             except Exception as e:
+                traceback.print_exc()
                 logger.error(f"添加角色 {character_id} 失败: {traceback.format_exc()}")
                 failed_list.append(str(character_id))
         
@@ -294,6 +309,7 @@ async def add_alias_characters():
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"添加别名角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "添加别名角色失败"}), 500
 
@@ -313,5 +329,6 @@ async def save_alias_characters():
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
+        traceback.print_exc()
         logger.error(f"保存别名角色失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "保存别名角色失败"}), 500

@@ -1,10 +1,9 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select
 
 # from .marker import Market
-from src_v2.core.database.connect_manager import redis_manager as rdm, postgres_manager as dbm
+from src_v2.core.database.connect_manager import get_redis_manager
 from src_v2.model.EVE.character.character_manager import CharacterManager
 from src_v2.core.config.config import config, update_config
 #import Exception
@@ -24,6 +23,8 @@ REGION_FORGE_ID = 10000002
 REGION_VALE_ID = 10000003
 REGION_PLEX_ID = 19000001
 JITA_TRADE_HUB_STRUCTURE_ID = 60003760
+JITA_SYSTEM_ID = 30000142
+PERIMETER_SYSTEM_ID = 30000144
 PLEX_ID = 44992
 FRT_4H_STRUCTURE_ID = 1035466617946
 S33RB_O_STRUCTURE_ID = 1045441547980
@@ -112,20 +113,20 @@ class MarketManager(metaclass=SingletonMeta):
                 # 每个订单有15个字段，所以每批最多 2000 条订单（2000 * 15 = 30000 < 32767）
                 batch_size = 2000
                 total_rows = len(rows)
-                
-                for i in range(0, total_rows, batch_size):
-                    batch = rows[i:i + batch_size]
-                    try:
+                semaphore = asyncio.Semaphore(2)
+
+                async def _insert_batch_with_semaphore(batch: list):
+                    async with semaphore:
                         await EveMarketRegionOrdersDBUtils.insert_many(batch)
                         logger.debug(f"成功插入订单批次 region_id={region_id}, 批次 {i//batch_size + 1}/{(total_rows + batch_size - 1)//batch_size}, 数量={len(batch)}")
                         await tqdm_manager.update_mission(f"save_orders_to_database_{region_id}", len(batch))
-                    except Exception as batch_error:
-                        logger.error(
-                            f"插入订单批次失败 region_id={region_id}, 批次 {i//batch_size + 1}, 数量={len(batch)}: {batch_error}",
-                            exc_info=True,
-                        )
-                        # 继续处理下一批次，不中断整个流程
-                        await tqdm_manager.update_mission(f"save_orders_to_database_{region_id}", len(batch))
+
+                tasks = []
+                for i in range(0, total_rows, batch_size):
+                    batch = rows[i:i + batch_size]
+                    task = asyncio.create_task(_insert_batch_with_semaphore(batch))
+                    tasks.append(task)
+                await asyncio.gather(*tasks)
             await tqdm_manager.complete_mission(f"save_orders_to_database_{region_id}")
         except Exception as e:
             # 写库失败不影响后续 Redis 逻辑
@@ -137,7 +138,7 @@ class MarketManager(metaclass=SingletonMeta):
     async def _batch_insert_redis(self, market_zone: str, batch: list):
         """批量插入Redis的辅助方法"""
         for type_id, price_data in batch:
-            await rdm.r.hset(f"market_price:{market_zone}:{type_id}", mapping=price_data)
+            await get_redis_manager().r.hset(f"market_price:{market_zone}:{type_id}", mapping=price_data)
 
     async def update_market_price(self, market_zone: str, main_character_id: int = None):
         if market_zone == "jita":
@@ -160,7 +161,7 @@ class MarketManager(metaclass=SingletonMeta):
             raise KahunaException("主角色没有授权")
 
         async with self.update_frt_price_lock:
-            update_flag = await rdm.r.get(f"market_update_flag:frt")
+            update_flag = await get_redis_manager().r.get(f"market_update_flag:frt")
             if update_flag:
                 return
 
@@ -204,9 +205,13 @@ class MarketManager(metaclass=SingletonMeta):
         # 等待所有批次完成
         await asyncio.gather(*tasks)
         
-        await rdm.r.set(f"market_update_flag:frt", "1", ex=60*60*1)
+        await get_redis_manager().r.set(f"market_update_flag:frt", "1", ex=60*60*1)
 
-    async def update_jita_price(self):
+    async def update_jita_price(self, rdm=None):
+        if rdm:
+            rdm = rdm
+        else:
+            rdm = get_redis_manager()
         async with self.update_jita_price_lock:
             update_flag = await rdm.r.get(f"market_update_flag:jita")
             if update_flag:
@@ -219,7 +224,9 @@ class MarketManager(metaclass=SingletonMeta):
         flat_jita_orders: list[dict] = []
         for order_list in jita_order:
             for order in order_list:
-                if order["location_id"] != JITA_TRADE_HUB_STRUCTURE_ID:
+                if not order['is_buy_order'] and order["location_id"] != JITA_TRADE_HUB_STRUCTURE_ID:
+                    continue
+                elif order['is_buy_order'] and order["system_id"] not in [JITA_SYSTEM_ID, PERIMETER_SYSTEM_ID]:
                     continue
 
                 flat_jita_orders.append(order)
@@ -256,7 +263,7 @@ class MarketManager(metaclass=SingletonMeta):
         # 等待所有批次完成
         await asyncio.gather(*tasks)
 
-        await rdm.r.set(f"market_update_flag:jita", "1", ex=60*60*1)
+        await get_redis_manager().r.set(f"market_update_flag:jita", "1", ex=60*60*2)
 
     async def update_type_id_market_region_history(self, type_id: int, region_id: int):
         """
@@ -377,26 +384,19 @@ class MarketManager(metaclass=SingletonMeta):
             start_date_30d = start_date_30d.replace(tzinfo=None)
             
             # 查询数据库
-            async with dbm.get_session() as session:
-                # 查询7天数据
-                stmt_7d = select(model.EveMarketRegionHistoryStatistic).where(
-                    model.EveMarketRegionHistoryStatistic.type_id == type_id,
-                    model.EveMarketRegionHistoryStatistic.region_id == region_id,
-                    model.EveMarketRegionHistoryStatistic.date >= start_date_7d,
-                    model.EveMarketRegionHistoryStatistic.date < end_date_7d
-                )
-                result_7d = await session.execute(stmt_7d)
-                records_7d = result_7d.scalars().all()
-                
-                # 查询30天数据
-                stmt_30d = select(model.EveMarketRegionHistoryStatistic).where(
-                    model.EveMarketRegionHistoryStatistic.type_id == type_id,
-                    model.EveMarketRegionHistoryStatistic.region_id == region_id,
-                    model.EveMarketRegionHistoryStatistic.date >= start_date_30d,
-                    model.EveMarketRegionHistoryStatistic.date < end_date_30d
-                )
-                result_30d = await session.execute(stmt_30d)
-                records_30d = result_30d.scalars().all()
+            records_7d = await EveMarketRegionHistoryStatisticDBUtils.get_records_by_date_range(
+                type_id=type_id,
+                region_id=region_id,
+                start_date=start_date_7d,
+                end_date=end_date_7d,
+            )
+            
+            records_30d = await EveMarketRegionHistoryStatisticDBUtils.get_records_by_date_range(
+                type_id=type_id,
+                region_id=region_id,
+                start_date=start_date_30d,
+                end_date=end_date_30d,
+            )
             
             # 计算7天统计
             total_volume_7d = 0
@@ -418,10 +418,10 @@ class MarketManager(metaclass=SingletonMeta):
             
             # 保存到Redis
             redis_key_base = f"market_region_history:{region_id}:{type_id}"
-            await rdm.r.set(f"{redis_key_base}:7DAverPrice", str(avg_price_7d))
-            await rdm.r.set(f"{redis_key_base}:7DTotalVolume", str(total_volume_7d))
-            await rdm.r.set(f"{redis_key_base}:30DAverPrice", str(avg_price_30d))
-            await rdm.r.set(f"{redis_key_base}:30DTotalVolume", str(total_volume_30d))
+            await get_redis_manager().r.set(f"{redis_key_base}:7DAverPrice", str(avg_price_7d))
+            await get_redis_manager().r.set(f"{redis_key_base}:7DTotalVolume", str(total_volume_7d))
+            await get_redis_manager().r.set(f"{redis_key_base}:30DAverPrice", str(avg_price_30d))
+            await get_redis_manager().r.set(f"{redis_key_base}:30DTotalVolume", str(total_volume_30d))
             
         except Exception as e:
             logger.error(
@@ -440,10 +440,10 @@ class MarketManager(metaclass=SingletonMeta):
         redis_key_base = f"market_region_history:{region_id}:{type_id}"
         
         # 从 Redis 读取数据，如果为 None 则使用默认值 0.0
-        avg_price_7d_str = await rdm.r.get(f"{redis_key_base}:7DAverPrice")
-        avg_price_30d_str = await rdm.r.get(f"{redis_key_base}:30DAverPrice")
-        total_volume_7d_str = await rdm.r.get(f"{redis_key_base}:7DTotalVolume")
-        total_volume_30d_str = await rdm.r.get(f"{redis_key_base}:30DTotalVolume")
+        avg_price_7d_str = await get_redis_manager().r.get(f"{redis_key_base}:7DAverPrice")
+        avg_price_30d_str = await get_redis_manager().r.get(f"{redis_key_base}:30DAverPrice")
+        total_volume_7d_str = await get_redis_manager().r.get(f"{redis_key_base}:7DTotalVolume")
+        total_volume_30d_str = await get_redis_manager().r.get(f"{redis_key_base}:30DTotalVolume")
         
         try:
             avg_price_7d = float(avg_price_7d_str) if avg_price_7d_str is not None else 0.0
@@ -472,7 +472,7 @@ class MarketManager(metaclass=SingletonMeta):
             'total_volume_30d': total_volume_30d
         }
 
-    async def update_type_id_list_history_detale(self, region_id: int, type_id_list: list):
+    async def update_type_id_list_history_detale(self, region_id: int, type_id_list: list, force: bool = False):
         """
         批量计算多个 type_id 在指定 region 的市场历史统计数据。
         
@@ -484,8 +484,8 @@ class MarketManager(metaclass=SingletonMeta):
         
         # 检查Redis标志
         flag_key = f"market_region_history_detail_update:flag:{region_id}"
-        update_flag = await rdm.r.get(flag_key)
-        if update_flag:
+        update_flag = await get_redis_manager().r.get(flag_key)
+        if update_flag and not force:
             logger.debug(f"检测到市场历史统计更新标志已存在 region_id={region_id}，跳过本次执行")
             return
         
@@ -518,7 +518,7 @@ class MarketManager(metaclass=SingletonMeta):
             expire_seconds = int(delta.total_seconds())
             
             # 设置Redis标志
-            await rdm.r.set(flag_key, "1", ex=expire_seconds)
+            await get_redis_manager().r.set(flag_key, "1", ex=expire_seconds)
             logger.info(f"市场历史统计计算完成 region_id={region_id}，已设置Redis标志，过期时间: {expire_seconds} 秒后（次日凌晨2点）")
             
         except Exception as e:
@@ -528,18 +528,18 @@ class MarketManager(metaclass=SingletonMeta):
             )
             # 即使失败也设置一个较短的过期时间，避免一直重试
             try:
-                await rdm.r.set(flag_key, "1", ex=3600)  # 1小时后过期
+                await get_redis_manager().r.set(flag_key, "1", ex=3600)  # 1小时后过期
             except Exception as redis_error:
                 logger.error(f"设置Redis标志失败: {redis_error}", exc_info=True)
 
     async def get_jita_buy_price(self, type_id: int) -> float:
-        price = await rdm.r.hget(f"market_price:jita:{type_id}", "max_buy")
+        price = await get_redis_manager().r.hget(f"market_price:jita:{type_id}", "max_buy")
         if not price:
             return 0
         return float(price)
 
     async def get_jita_sell_price(self, type_id: int) -> float:
-        price = await rdm.r.hget(f"market_price:jita:{type_id}", "min_sell")
+        price = await get_redis_manager().r.hget(f"market_price:jita:{type_id}", "min_sell")
         if not price:
             return 0
         return float(price)

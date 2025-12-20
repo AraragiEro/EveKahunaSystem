@@ -9,10 +9,8 @@ import traceback
 
 from src_v2.core.database.kahuna_database_utils_v2 import EveAuthedCharacterDBUtils
 from src_v2.core.database.model import EveAuthedCharacter as M_EveAuthedCharacter
-from src_v2.core.database.connect_manager import redis_manager
 from ..eveesi.oauth import refresh_token
 from ..eveesi import eveesi
-from ..eveesi.eveutils import parse_iso_datetime
 from src_v2.core.log import logger
 from src_v2.core.utils import KahunaException, get_beijing_utctime
 

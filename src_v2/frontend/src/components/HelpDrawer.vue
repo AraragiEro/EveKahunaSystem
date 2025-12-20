@@ -10,6 +10,7 @@ import docIndustry3 from '@/assets/doc-industry-3.png'
 import docStorage1 from '@/assets/doc-storage-1.png'
 import docStorage2 from '@/assets/doc-storage-2.png'
 import docStorage3 from '@/assets/doc-storage-3.png'
+import docStorage4 from '@/assets/doc-storage-4.png'
 import docSetting1 from '@/assets/doc-setting-1.png'
 import docQA1 from '@/assets/doc-QA-1.png'
 import docQA2 from '@/assets/doc-QA-2.png'
@@ -32,6 +33,7 @@ const imageMap: Record<string, string> = {
   '/assets/doc-storage-1.png': docStorage1,
   '/assets/doc-storage-2.png': docStorage2,
   '/assets/doc-storage-3.png': docStorage3,
+  '/assets/doc-storage-4.png': docStorage4,
   '/assets/doc-setting-1.png': docSetting1,
   '/assets/doc-QA-1.png': docQA1,
   '/assets/doc-QA-2.png': docQA2,
@@ -347,8 +349,9 @@ onMounted(() => {
   <el-drawer
     v-model="helpStore.isOpen"
     title="指南"
-    :size="800"
+    :size="1000"
     direction="rtl"
+    resizable
     :before-close="helpStore.closeHelp"
   >
     <div class="help-drawer-container">

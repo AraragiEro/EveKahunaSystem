@@ -11,8 +11,9 @@ const props = defineProps<{
 
 // 过滤器状态
 const showFake = ref(false)
-const showUnavailable = ref(false)
+const materialUnavailable = ref(false)
 const activeIdFilter = ref('all')
+const classTypeFilter = ref<string[]>([])
 
 // 会计格式格式化函数
 const formatAccounting = (value: number | string | null | undefined): string => {
@@ -28,6 +29,23 @@ const formatAccounting = (value: number | string | null | undefined): string => 
         minimumFractionDigits: 0,
         maximumFractionDigits: 2
     })
+}
+
+// 时间格式化函数
+const formatDuration = (seconds: number): string => {
+    if (!seconds || seconds <= 0) return '0秒'
+    const days = Math.floor(seconds / 86400)
+    const hours = Math.floor((seconds % 86400) / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const secs = seconds % 60
+    
+    const parts: string[] = []
+    if (days > 0) parts.push(`${days}天`)
+    if (hours > 0) parts.push(`${hours}小时`)
+    if (minutes > 0) parts.push(`${minutes}分钟`)
+    if (secs > 0 && days === 0 && hours === 0) parts.push(`${secs}秒`)
+    
+    return parts.join('') || '0秒'
 }
 
 // 复制单元格内容
@@ -76,8 +94,8 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
 // 工作流表格数据计算
 const workFlowTableView = computed(() => {
     // 使用嵌套对象进行分组：type_id -> fake -> avaliable -> runs
-    const grouped: Record<string, Record<string, Record<string, Record<string, number>>>> = {}
-    const typeInfo: Record<string, { type_name: string, type_name_zh: string, avaliable: boolean, active_id: number }> = {}
+    const grouped: Record<string, Record<string, Record<string, Record<string, { count: number, eiv: number, active_time: number }>>>> = {}
+    const typeInfo: Record<string, { type_name: string, type_name_zh: string, avaliable: boolean, active_id: number, class_type: string }> = {}
     
     // 遍历数据，进行分组统计
     props.workFlowData.forEach((work: any) => {
@@ -97,7 +115,8 @@ const workFlowTableView = computed(() => {
                 type_name: work.type_name || '',
                 type_name_zh: work.type_name_zh || '',
                 avaliable: work.avaliable,
-                active_id: work.active_id
+                active_id: work.active_id,
+                class_type: work.class_type || '其他'
             }
         }
         
@@ -113,11 +132,16 @@ const workFlowTableView = computed(() => {
         }
         const runsKey = String(runs)
         if (!(runsKey in grouped[typeId][fakeKey][avaliableKey])) {
-            grouped[typeId][fakeKey][avaliableKey][runsKey] = 0
+            grouped[typeId][fakeKey][avaliableKey][runsKey] = {
+                count: 0,
+                eiv: 0,
+                active_time: work.active_time * (work.time_eff || 1) || 0
+            }
         }
         
-        // 统计计数
-        grouped[typeId][fakeKey][avaliableKey][runsKey]++
+        // 统计计数和累加eiv
+        grouped[typeId][fakeKey][avaliableKey][runsKey].count++
+        grouped[typeId][fakeKey][avaliableKey][runsKey].eiv += (work.eiv || 0)
     })
     
     // 扁平化为数组
@@ -128,11 +152,16 @@ const workFlowTableView = computed(() => {
         Object.keys(grouped[typeId]).forEach(fakeKey => {
             const fake = fakeKey === 'true'
             Object.keys(grouped[typeId][fakeKey]).forEach(avaliableKey => {
+                // 材料是否满足
                 const avaliable = avaliableKey === 'true'
                 Object.keys(grouped[typeId][fakeKey][avaliableKey]).forEach(runsStr => {
                     const runs = parseInt(runsStr)
-                    const runsCount = grouped[typeId][fakeKey][avaliableKey][runsStr]
-                    if ((showFake.value && !fake) || (showUnavailable.value && !avaliable) || (activeIdFilter.value !== 'all' && info.active_id !== parseInt(activeIdFilter.value))) {
+                    const groupData = grouped[typeId][fakeKey][avaliableKey][runsStr]
+                    const runsCount = groupData.count
+                    if ((showFake.value && !fake) || 
+                        (materialUnavailable.value && !avaliable) || 
+                        (activeIdFilter.value !== 'all' && info.active_id !== parseInt(activeIdFilter.value)) ||
+                        (classTypeFilter.value.length > 0 && !classTypeFilter.value.includes(info.class_type))) {
                         return
                     }
                     result.push({
@@ -143,7 +172,11 @@ const workFlowTableView = computed(() => {
                         active_id: info.active_id,
                         fake: fake,
                         runs: runs,
-                        runs_count: runsCount
+                        runs_count: runsCount,
+                        class_type: info.class_type,
+                        eiv: groupData.eiv,
+                        active_time: groupData.active_time,
+                        total_active_time: groupData.active_time * runsCount
                     })
                 })
             })
@@ -151,6 +184,11 @@ const workFlowTableView = computed(() => {
     })
     
     return result
+})
+
+// 计算总EIV
+const totalEIV = computed(() => {
+    return workFlowTableView.value.reduce((sum, row) => sum + (row.eiv || 0), 0)
 })
 </script>
 
@@ -227,11 +265,59 @@ const workFlowTableView = computed(() => {
                 <span v-else>未知</span>
             </template>
         </el-table-column>
+        <el-table-column label="产物类型" width="150">
+            <template #header>
+                <span>产物类型</span>
+                <el-select v-model="classTypeFilter" multiple collapse-tags collapse-tags-tooltip>
+                    <el-option value="低反">低反</el-option>
+                    <el-option value="高反">高反</el-option>
+                    <el-option value="分子熔铸">分子熔铸</el-option>
+                    <el-option value="聚合物">聚合物</el-option>
+                    <el-option value="高级组件">高级组件</el-option>
+                    <el-option value="旗舰组件">旗舰组件</el-option>
+                    <el-option value="其他">其他</el-option>
+                </el-select>
+            </template>
+            <template #default="{ row }">
+                <div 
+                    class="copyable-cell" 
+                    @click="copyCellContent(row.class_type, '产物类型')"
+                    :title="`点击复制: ${row.class_type || ''}`"
+                >
+                    {{ row.class_type }}
+                </div>
+            </template>
+        </el-table-column>
+        <el-table-column width="150">
+            <template #header>
+                <span>EIV (总计: {{ formatAccounting(totalEIV) }})</span>
+            </template>
+            <template #default="{ row }">
+                <div 
+                    class="copyable-cell" 
+                    @click="copyCellContent(row.eiv, 'EIV')"
+                    :title="`点击复制: ${row.eiv || ''}`"
+                >
+                    {{ formatAccounting(row.eiv) }}
+                </div>
+            </template>
+        </el-table-column>
+        <el-table-column label="估计时间" width="150">
+            <template #default="{ row }">
+                <div 
+                    class="copyable-cell" 
+                    @click="copyCellContent(row.active_time, '估计时间')"
+                    :title="`点击复制: ${row.active_time || ''}秒`"
+                >
+                    {{ formatDuration(row.active_time) }}
+                </div>
+            </template>
+        </el-table-column>
         <el-table-column label="材料满足" prop="avaliable" width="75">
             <template #header>
                 <span>有材料</span>
                 <el-switch
-                    v-model="showUnavailable"
+                    v-model="materialUnavailable"
                     inline-prompt
                     active-text="有材料"
                     inactive-text="所有"
