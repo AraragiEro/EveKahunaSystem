@@ -152,7 +152,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - sde_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin"]
@@ -198,6 +198,7 @@ services:
 
 volumes:
   postgres_data:
+  sde_data
   redis_data:
   neo4j_data:
   neo4j_logs:
