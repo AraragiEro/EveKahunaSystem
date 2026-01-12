@@ -34,8 +34,16 @@ Kahuna System 是一个专为 EVE Online 玩家设计的 Web 应用平台，集�
   - <img width="2560" height="1271" alt="landing-page-化矿计算" src="https://github.com/user-attachments/assets/9f98ee62-9211-49e6-9377-b6305954840f" />
 - **采购清单** - 可自定义数据来源的采购清单管理
   - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/6c1eb759-f83a-4c7f-b4e0-e899d865807b" />
-- **挂单分析** - 市场订单分析与优化建议【**计划中**】
-- **资产统计** - 角色和公司资产统计与管理【**计划中**】
+- **资产统计** - 角色和公司资产统计与管理
+  - **资产统计**
+    - <img width="1600" height="855" alt="image" src="https://github.com/user-attachments/assets/a7c68bcc-8234-4547-8cfa-5207e180494d" />
+  - **挂单分析** - 市场订单分析与优化建议
+    - <img width="1440" height="621" alt="image" src="https://github.com/user-attachments/assets/9aad5871-3f37-4b16-8cc0-a2e6903e8050" />
+  - **历史记录**
+    - <img width="1408" height="763" alt="image" src="https://github.com/user-attachments/assets/a139ec64-0094-4c4a-ac51-d4b0cb910687" />
+
+ 
+
 
 ## 技术栈
 
@@ -468,7 +476,7 @@ python update_sde.py --force
 
 - 更新过程可能需要较长时间，请耐心等待
 - 确保 PostgreSQL 数据库已正确配置并可以连接
-- 确保已创建 SDE 数据库（参考 [手动创建 SDE 数据库](#手动创建-sde-数据库) 部分）
+- 确保已创建 SDE 数据（如果使用compose创建容器，应该已经创建了sde数据库，直接运行脚本更新即可。）
 - 更新过程中会占用一定的系统资源，建议在服务器负载较低时执行
 
 ### init_neo4j.py - Neo4j 数据库初始化脚本
