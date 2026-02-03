@@ -26,6 +26,7 @@ async def main():
     args = parser.parse_args()
     
     builder = SDEBuilder()
+    await builder.init_database()
     
     try:
         if args.check_only:

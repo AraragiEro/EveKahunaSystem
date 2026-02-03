@@ -207,6 +207,30 @@ async def main():
     except Exception as e:
         logger.error(f"启动 Jita 基础成本刷新定时器时发生错误: {e}", exc_info=True)
 
+    # 启动Overview历史数据自动保存定时器
+    try:
+        from src_v2.model.EVE.home.overview_history_timer import OverviewHistoryTimer
+        OverviewHistoryTimer().start()
+        logger.info("Overview历史数据自动保存定时器已启动")
+    except Exception as e:
+        logger.error(f"启动 Overview历史数据自动保存定时器时发生错误: {e}", exc_info=True)
+
+    # 启动 Public Character 信息刷新定时器
+    try:
+        from src_v2.model.EVE.character.public_character_refresh_timer import PublicCharacterRefreshTimer
+        PublicCharacterRefreshTimer().start()
+        logger.info("Public Character 信息刷新定时器已启动")
+    except Exception as e:
+        logger.error(f"启动 Public Character 信息刷新定时器时发生错误: {e}", exc_info=True)
+
+    # 启动联盟合同刷新定时器
+    try:
+        from src_v2.model.EVE.market.alliance_contract_refresh_timer import AllianceContractRefreshTimer
+        AllianceContractRefreshTimer().start()
+        logger.info("联盟合同刷新定时器已启动")
+    except Exception as e:
+        logger.error(f"启动联盟合同刷新定时器时发生错误: {e}", exc_info=True)
+
     # 初始化 Quart App
     app = get_app()
     

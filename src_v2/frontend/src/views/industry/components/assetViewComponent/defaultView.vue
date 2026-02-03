@@ -62,10 +62,8 @@ const handleRefresh = () => {
 
 <template>
     <div v-loading="loading" class="asset-view-dialog-content">
-        <div v-if="!loading && assetView.length === 0" class="empty-state">
-            <el-empty description="暂无数据" />
-        </div>
-        <div v-else class="default-view-container">
+        
+        <div class="default-view-container">
             <!-- 工具栏 -->
             <div class="toolbar">
                 <div class="toolbar-right">
@@ -85,8 +83,11 @@ const handleRefresh = () => {
                 </div>
             </div>
             
+            <div v-if="!loading && assetView.length === 0" class="empty-state">
+            <el-empty description="暂无数据" />
+            </div>
             <!-- 资产网格 -->
-            <div class="asset-grid">
+            <div class="asset-grid" v-else>
             <el-card 
                 v-for="asset in assetView" 
                 :key="asset.type_id" 

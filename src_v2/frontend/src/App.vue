@@ -6,6 +6,7 @@ import { useHelpStore } from '@/stores/help'
 import { useEdition } from '@/composables/useEdition'
 import smallSideBar from './components/sideBar/smallSideBar.vue'
 import HelpDrawer from './components/HelpDrawer.vue'
+import VipPricingDialog from './components/VipPricingDialog.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import githubIcon from '@/assets/github-mark.svg'
 import aifadianLogo from '@/assets/横版-白底-透明背景.png'
@@ -51,7 +52,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
 
 
 // 定义公开页面列表（不需要认证和主布局）
-const publicPages = ['login', 'landing', 'forbidden', 'characterAuthClose', 'publicStorage']
+const publicPages = ['login', 'landing', 'forbidden', 'characterAuthClose', 'publicStorage', 'allianceContract']
 const isPublicPage = computed(() => publicPages.includes(route.name as string))
 
 // 主菜单配置 - 使用 computed 响应式地生成菜单项
@@ -60,7 +61,10 @@ const menuItems = computed(() => {
   let id_index = 1
 
   // 首页始终显示
-  items.push({ id: id_index++, icon: 'House', label: '首页', active: router.currentRoute.value.path === '/home' || router.currentRoute.value.path === '/', route: '/home' })
+  items.push({ id: id_index++, icon: 'Tickets', label: 'TODO', active: router.currentRoute.value.path === '/todolist' || router.currentRoute.value.path === '/', route: '/todolist' })
+  if (authStore.user?.roles.includes('vip_alpha') || authStore.user?.roles.includes('vip_omega')) {
+    items.push({ id: id_index++, icon: 'House', label: '总览', active: router.currentRoute.value.path.startsWith('/home'), route: '/home' })
+  }
 
   // 根据用户角色动态添加菜单项
   const userRoles = authStore.user?.roles || []
@@ -110,6 +114,19 @@ const hasOmegaSubscription = computed(() => {
   const userRoles = authStore.user?.roles || []
   return userRoles.includes('vip_omega')
 })
+
+// 判断是否为非VIP用户
+const isNonVip = computed(() => {
+  return !hasAlphaSubscription.value && !hasOmegaSubscription.value
+})
+
+// VIP弹窗控制
+const vipDialogVisible = ref(false)
+
+// 打开VIP弹窗
+const openVipDialog = () => {
+  vipDialogVisible.value = true
+}
 
 // 当前时间，用于定时更新剩余时间显示
 const currentTime = ref(Date.now())
@@ -222,7 +239,7 @@ onUnmounted(() => {
         <el-header class="main-header">
           <div class="header-content">
             <div class="header-title">
-              <h2>Kahuna-System V1.5.0</h2>
+              <h2>Kahuna-System V1.5.1</h2>
               <el-tag :type="isEnterprise ? 'success' : 'info'" size="small" class="edition-tag">
                 {{ isEnterprise ? '紫竹梅特供版' : '社区版' }}
               </el-tag>
@@ -242,6 +259,15 @@ onUnmounted(() => {
                 :type="getRemainingTimeTagType(subscriptionEndDate)" size="small" class="edition-tag">
                 {{ getRemainingTimeText(subscriptionEndDate) }}
               </el-tag>
+              <el-button
+                v-if="isNonVip"
+                type="primary"
+                size="small"
+                @click="openVipDialog"
+                class="edition-tag get-vip-button"
+              >
+                获取VIP
+              </el-button>
             </div>
 
             <div class="header-actions">
@@ -303,6 +329,9 @@ onUnmounted(() => {
 
     <!-- 全局文档 Drawer -->
     <HelpDrawer />
+
+    <!-- VIP方案弹窗 -->
+    <VipPricingDialog v-model="vipDialogVisible" />
   </div>
 </template>
 
@@ -362,6 +391,14 @@ onUnmounted(() => {
   font-weight: 500;
   padding: 4px 10px;
   border-radius: 4px;
+}
+
+.get-vip-button {
+  margin-left: 8px;
+  font-size: 12px;
+  padding: 4px 12px;
+  height: auto;
+  line-height: 1.5;
 }
 
 .header-actions {

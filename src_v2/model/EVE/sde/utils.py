@@ -887,6 +887,25 @@ class SdeUtils:
         except Exception as e:
             logger.warning(f"获取 type_id={type_id} 的体积时出错: {e}")
             return 0.0
+    
+    @staticmethod
+    @cached(ttl=3600, serializer=PickleSerializer())
+    async def get_packaged_volume_by_type_id(type_id: int, sdm=None) -> float:
+        """根据 typeID 获取包装体积"""
+        try:
+            if sdm:
+                m = sdm
+            else:
+                m = await get_db_manager()
+            async with m.get_readonly_session() as session:
+                stmt = select(InvTypes.packagedVolume).where(InvTypes.typeID == type_id)
+                result = await session.execute(stmt)
+                volume = result.scalar()
+                return volume if volume is not None else 0.0
+        except Exception as e:
+            logger.warning(f"获取 type_id={type_id} 的包装体积时出错: {e}")
+            return 0.0
+
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())

@@ -29,10 +29,12 @@ NULL_MANU_SEC_BONUS = 2.1
 NULL_REAC_SEC_BONUS = 1.1
 
 RIG_MATER_EFF = {
+    0: 0,
     1: 0.02,
     2: 0.024
 }
 RIG_TIME_EFF = {
+    0: 0,
     1: 0.2,
     2: 0.24,
 }
@@ -44,7 +46,7 @@ MID_STRUCTURE_MANU_TIME_EFF = 1 - 0.2
 LARGE_STRUCTURE_MANU_TIME_EFF = 1 - 0.3
 
 MID_STRUCTURE_REAC_TIME_EFF = 1 - 0.25
-SMALL_STRUCTURE_REAC_TIME_EFF = 0
+SMALL_STRUCTURE_REAC_TIME_EFF = 1
 
 MANU_SKILL_TIME_EFF = 1 - 0.354
 REAC_SKILL_TIME_EFF = 1 - 0.2
@@ -206,7 +208,9 @@ class ConfigFlowOperateCenter():
         container_owner_list = []
         for config in self.load_asset_confs:
             container_owner_list.append(
-                [config['asset_container_id'], config['asset_owner_id']])
+                [config['asset_container_id'],
+                config['asset_owner_id'],
+                config.get('location_flag', None)])
         assets = await NAU.get_asset_by_type_id_in_container_owner_list(type_id, container_owner_list, self.npm)
         self.cache[f"get_type_assets_{type_id}"] = assets
         return assets
@@ -230,12 +234,17 @@ class ConfigFlowOperateCenter():
             # 检查主角色同公司是否有总监
             main_character_id = await UserManager().get_main_character_id(self.user_name)
             main_character = await CharacterManager().get_character_by_character_id(main_character_id)
-            director = await CharacterManager().get_director_character_id_of_corporation(main_character.corporation_id)
-            if director:
-                director = await CharacterManager().get_character_by_character_id(director)
-                character_ids.append(director.character_id)
-            else:
-                director = None
+            director_character_ids = await CharacterManager().get_director_character_id_of_corporation(main_character.corporation_id)
+            director = None
+            for director_character_id in director_character_ids:
+                director = await CharacterManager().get_character_by_character_id(director_character_id)
+                try:
+                    await director.ac_token
+                    character_ids.append(director.character_id)
+                    break
+                except Exception as e:
+                    logger.warning(f"获取总监角色 {director_character_id} 的token失败: {str(e)}")
+                    continue
 
             running_job_list = []
             # 获取运行中的job
@@ -339,7 +348,7 @@ class ConfigFlowOperateCenter():
     async def get_max_job_run(self, type_id: int) -> int:
         max_acctive_time = (3 * 24 + 6) * 3600
         active_time = await BPM.get_production_time(type_id, pdm=self.sdm)
-        max_job_run = max_acctive_time // active_time
+        max_job_run = max(1, max_acctive_time // active_time)
 
         if not active_time:
             return 100000000
@@ -349,20 +358,23 @@ class ConfigFlowOperateCenter():
 
         try:
             if conf["judge_type"] == 'count':
-                return conf.get('max_count', max_job_run)
+                return max(1, conf.get('max_count', max_job_run))
             elif conf["judge_type"] == 'time':
                 _, time_eff = await self.get_efficiency(type_id)
                 _, fake_time_eff = await self.get_conf_eff(type_id)
             else:
                 return max_job_run
-                
+
             try:
-                h, m, s = conf["max_time_date"].split(":")
-                day = conf["max_time_day"]
+                d = conf.get("max_time_date", None)
+                if not d:
+                    d = "00:00:00"
+                h, m, s = d.split(":")
+                day = conf.get("max_time_day", 0)
                 max_time = day * 24 * 3600 + \
                     int(h) * 3600 + int(m) * 60 + int(s)
-    
-                return max_time // (active_time * time_eff * fake_time_eff)
+
+                return max(1, max_time // (active_time * time_eff * fake_time_eff))
             except Exception as e:
                 logger.error(f"获取最大作业运行数量失败: {e}")
                 logger.error(f"配置: {conf}")
@@ -403,12 +415,17 @@ class ConfigFlowOperateCenter():
             # 检查主角色同公司是否有总监
             main_character_id = await UserManager().get_main_character_id(self.user_name)
             main_character = await CharacterManager().get_character_by_character_id(main_character_id)
-            director = await CharacterManager().get_director_character_id_of_corporation(main_character.corporation_id)
-            if director:
-                director = await CharacterManager().get_character_by_character_id(director)
-                character_ids.append(director.character_id)
-            else:
-                director = None
+            director_character_ids = await CharacterManager().get_director_character_id_of_corporation(main_character.corporation_id)
+            director = None
+            for director_character_id in director_character_ids:
+                director = await CharacterManager().get_character_by_character_id(director_character_id)
+                try:
+                    await director.ac_token
+                    character_ids.append(director.character_id)
+                    break
+                except Exception as e:
+                    logger.warning(f"获取总监角色 {director_character_id} 的token失败: {str(e)}")
+                    continue
 
             bp_assets = {}
             # 获取运行中的job
@@ -725,7 +742,8 @@ class ConfigFlowOperateCenter():
                 return
 
             container_id_list = [[conf['asset_container_id'],
-                                  conf['asset_owner_id']] for conf in self.load_asset_confs]
+                                  conf['asset_owner_id'],
+                                  conf.get('location_flag', None)] for conf in self.load_asset_confs]
 
             assets = await NAU.get_asset_in_container_owner_list(container_id_list, self.npm)
             for asset in assets:
@@ -767,9 +785,9 @@ class ConfigFlowOperateCenter():
             }
         """
         structure_material_provide_dict = {}
-        contaier_conf_dict = {conf['asset_container_id']                              : conf for conf in self.load_asset_confs}
+        contaier_conf_dict = {conf['asset_container_id']: conf for conf in self.load_asset_confs}
 
-        assets = await NAU.get_asset_in_container_owner_list([[conf['asset_container_id'], conf['asset_owner_id']] for conf in self.load_asset_confs], self.npm)
+        assets = await NAU.get_asset_in_container_owner_list([[conf['asset_container_id'], conf['asset_owner_id'], conf.get('location_flag', None)] for conf in self.load_asset_confs], self.npm)
         for asset in assets:
             asset_container_conf = contaier_conf_dict.get(
                 asset['location_id'], None)
@@ -870,7 +888,7 @@ class ConfigFlowOperateCenter():
 
     async def refresh_system_cost(self):
         async with op_lock_manager.refresh_system_cost_lock:
-            if await self.rdm.r.get(f"system_cost_cache:status") == "ok":
+            if self.plan_name.startswith("calculate_cost") or await self.rdm.r.get(f"system_cost_cache:status") == "ok":
                 return
 
             result = await eveesi.industry_systems(log=True)

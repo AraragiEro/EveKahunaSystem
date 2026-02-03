@@ -1,7 +1,11 @@
+import traceback
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Any
+
 from quart import Quart, request, jsonify, g, Blueprint, redirect
+
 from src_v2.backend.auth import auth_required
 from src_v2.core.log import logger
-import traceback
 
 from src_v2.core.user.user_manager import UserManager
 from src_v2.model.EVE.character.character import Character
@@ -15,9 +19,173 @@ from src_v2.core.utils import KahunaException
 api_user_bp = Blueprint('api_user', __name__, url_prefix='/api/user')
 
 
+# 请求数据模型
+@dataclass
+class DeleteCharacterRequest:
+    """删除角色请求"""
+    characterName: str
+
+
+@dataclass
+class SetMainCharacterRequest:
+    """设置主角色请求"""
+    characterName: str
+
+
+@dataclass
+class SearchCharacterRequest:
+    """搜索角色请求"""
+    inputType: str  # 'characterId' or 'characterName'
+    inputValue: str
+
+
+@dataclass
+class AddAliasCharactersRequest:
+    """添加别名角色请求"""
+    characterIds: List[int]
+
+
+@dataclass
+class AliasCharacterItem:
+    """别名角色项"""
+    CharacterId: int
+    Enabled: bool
+
+
+@dataclass
+class SaveAliasCharactersRequest:
+    """保存别名角色请求"""
+    aliasCharacterList: List[AliasCharacterItem]
+
+
+# 响应数据模型
+@dataclass
+class CharacterItem:
+    """角色项"""
+    name: str
+    expiresDate: Optional[str] = None
+    corpId: Optional[int] = None
+    corpName: Optional[str] = None
+
+
+@dataclass
+class CharacterListResponse:
+    """角色列表响应"""
+    status: int
+    data: List[CharacterItem]
+
+
+@dataclass
+class MessageResponse:
+    """消息响应"""
+    status: int
+    message: str
+
+
+@dataclass
+class MainCharacterResponse:
+    """主角色响应"""
+    status: int
+    mainCharacter: str
+    director: bool
+
+
+@dataclass
+class SetMainCharacterResponse:
+    """设置主角色响应"""
+    status: int
+    message: str
+    director: bool
+
+
+@dataclass
+class AliasCharacterSettingAvailableResponse:
+    """别名角色设置可用性响应"""
+    status: int
+    isAliasCharacterSettingAvaliable: bool
+
+
+@dataclass
+class AliasCharacterItemResponse:
+    """别名角色项响应"""
+    CharacterId: int
+    CharacterName: str
+    Enabled: bool
+
+
+@dataclass
+class AliasCharacterListResponse:
+    """别名角色列表响应"""
+    status: int
+    data: List[AliasCharacterItemResponse]
+
+
+@dataclass
+class SearchCharacterItem:
+    """搜索角色项"""
+    CharacterId: int
+    CharacterName: str
+
+
+@dataclass
+class SearchCharacterResponse:
+    """搜索角色响应"""
+    status: int
+    data: List[SearchCharacterItem]
+
+
+@dataclass
+class AddAliasCharactersResponse:
+    """添加别名角色响应"""
+    status: int
+    message: str
+    failedList: List[str]
+    aliasCharacterList: List[AliasCharacterItemResponse]
+
+
+@dataclass
+class ErrorResponse:
+    """错误响应"""
+    status: int
+    message: str
+
+
 @api_user_bp.route("/list", methods=["GET"])
 @auth_required
+# @validate_response(CharacterListResponse)
 async def get_character_list():
+    """
+    获取角色列表
+    
+    获取当前用户的所有EVE角色列表，包括角色名称、过期时间、公司ID和公司名称。
+
+    Tags:
+        - 用户角色管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 成功返回角色列表
+            - status: 状态码 (200)
+            - data: 角色列表，每个元素包含角色名称、过期时间、公司ID和公司名称 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [
+                {
+                    "name": "Character Name",
+                    "expiresDate": "2024-12-31T23:59:59",
+                    "corpId": 123456,
+                    "corpName": "Corporation Name"
+                }
+            ]
+        }
+    """
     try:
         character_list = await CharacterManager().get_user_all_characters(g.current_user["user_id"])
 
@@ -28,11 +196,12 @@ async def get_character_list():
                 continue
             character_list_dict.append({
                 "name": character.character_name,
+                "characterId": character.character_id,
                 "expiresDate": character.expires_time,
                 "corpId": character.corporation_id,
                 "corpName": corp_data.name
             })
-        return jsonify({"status": 200, "data": character_list_dict})
+        return {"status": 200, "data": character_list_dict}
     except KahunaException as e:
         traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
@@ -43,12 +212,47 @@ async def get_character_list():
 
 @api_user_bp.route("/deleteCharacter", methods=["POST"])
 @auth_required
+# @validate_request(DeleteCharacterRequest)
+# @validate_response(MessageResponse)
 async def delete_character():
+    """
+    删除角色
+    
+    删除指定的EVE角色。只能删除当前用户自己的角色。
+
+    Tags:
+        - 用户角色管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - characterName (string, required): 要删除的角色名称
+
+    Responses:
+        200: 删除成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "characterName": "Character Name"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "角色删除成功"
+        }
+    """
     try:
         data = await request.get_json()
         character_name = data.get("characterName")
         await CharacterManager().delete_character_by_character_name(character_name, g.current_user["user_id"])
-        return jsonify({"status": 200, "message": "角色删除成功"})
+        return {"status": 200, "message": "角色删除成功"}
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
@@ -58,7 +262,35 @@ async def delete_character():
 
 @api_user_bp.route("/getMainCharacter", methods=["GET"])
 @auth_required
+# @validate_response(MainCharacterResponse)
 async def get_main_character():
+    """
+    获取主角色
+    
+    获取当前用户的主角色信息，包括角色名称和是否为总监。
+
+    Tags:
+        - 用户角色管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 成功返回主角色信息
+            - status: 状态码 (200)
+            - mainCharacter: 主角色名称 (string)
+            - director: 是否为总监 (boolean)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "mainCharacter": "Character Name",
+            "director": true
+        }
+    """
     try:
         user_id = g.current_user["user_id"]
         main_character_id = await UserManager().get_main_character_id(user_id)
@@ -67,7 +299,7 @@ async def get_main_character():
             director = True
         else:
             director = False
-        return jsonify({"status": 200, "mainCharacter": main_character.character_name, "director": director})
+        return {"status": 200, "mainCharacter": main_character.character_name, "director": director}
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
@@ -77,7 +309,44 @@ async def get_main_character():
 
 @api_user_bp.route("/setMainCharacter", methods=["POST"])
 @auth_required
+# @validate_request(SetMainCharacterRequest)
+# @validate_response(SetMainCharacterResponse)
 async def set_main_character():
+    """
+    设置主角色
+    
+    设置当前用户的主角色。设置后会自动刷新角色token并检查是否为总监。
+
+    Tags:
+        - 用户角色管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - characterName (string, required): 要设置为主角色的角色名称
+
+    Responses:
+        200: 设置成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+            - director: 是否为总监 (boolean)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "characterName": "Character Name"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "主角色设置成功",
+            "director": true
+        }
+    """
     user_id = g.current_user["user_id"]
     data = await request.get_json()
     character_name = data.get("characterName")
@@ -90,7 +359,7 @@ async def set_main_character():
             director = True
         else:
             director = False
-        return jsonify({"status": 200, "message": "主角色设置成功", "director": director})
+        return {"status": 200, "message": "主角色设置成功", "director": director}
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
@@ -100,7 +369,33 @@ async def set_main_character():
 
 @api_user_bp.route('/isAliasCharacterSettingAvaliable', methods=['GET'])
 @auth_required
+# @validate_response(AliasCharacterSettingAvailableResponse)
 async def is_alias_character_setting_avaliable():
+    """
+    检查别名角色设置可用性
+    
+    检查当前用户所在公司是否有绑定总监权限账号，以确定是否可以设置别名角色。
+
+    Tags:
+        - 用户角色管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 成功返回可用性
+            - status: 状态码 (200)
+            - isAliasCharacterSettingAvaliable: 是否可用 (boolean)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "isAliasCharacterSettingAvaliable": true
+        }
+    """
     user_id = g.current_user["user_id"]
     try:
         # 获取用户主账号
@@ -110,12 +405,12 @@ async def is_alias_character_setting_avaliable():
         # 判断用户所在公司是否有绑定总监权限账号
         director_character_id = await CharacterManager().get_director_character_id_of_corporation(main_character.corporation_id)
         if not director_character_id:
-            return jsonify({"status": 200, "isAliasCharacterSettingAvaliable": False})
+            return {"status": 200, "isAliasCharacterSettingAvaliable": False}
         
         # 否则返回false
         # 有则返回true
 
-        return jsonify({"status": 200, "isAliasCharacterSettingAvaliable": True})
+        return {"status": 200, "isAliasCharacterSettingAvaliable": True}
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
@@ -125,7 +420,39 @@ async def is_alias_character_setting_avaliable():
 
 @api_user_bp.route('/getSameTitleAliasCharacterList', methods=['POST'])
 @auth_required
+# @validate_response(AliasCharacterListResponse)
 async def get_same_title_alias_character_list():
+    """
+    获取同title别名角色列表
+    
+    刷新并获取与主角色同title的别名角色列表。会先刷新公司内所有公开角色信息，然后更新同title别名角色。
+
+    Tags:
+        - 用户角色管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 成功返回别名角色列表
+            - status: 状态码 (200)
+            - data: 别名角色列表，每个元素包含角色ID、角色名称和启用状态 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [
+                {
+                    "CharacterId": 123456,
+                    "CharacterName": "Character Name",
+                    "Enabled": false
+                }
+            ]
+        }
+    """
     user_id = g.current_user["user_id"]
     try:
         main_character_id = await UserManager().get_main_character_id(user_id)
@@ -155,7 +482,39 @@ async def get_same_title_alias_character_list():
 
 @api_user_bp.route('/getAliasCharacterList', methods=['GET'])
 @auth_required
+# @validate_response(AliasCharacterListResponse)
 async def get_alias_character_list():
+    """
+    获取别名角色列表
+    
+    获取当前用户主角色的所有别名角色列表。
+
+    Tags:
+        - 用户角色管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 成功返回别名角色列表
+            - status: 状态码 (200)
+            - data: 别名角色列表，每个元素包含角色ID、角色名称和启用状态 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [
+                {
+                    "CharacterId": 123456,
+                    "CharacterName": "Character Name",
+                    "Enabled": true
+                }
+            ]
+        }
+    """
     user_id = g.current_user["user_id"]
     main_character_id = await UserManager().get_main_character_id(user_id)
     try:
@@ -177,8 +536,52 @@ async def get_alias_character_list():
 
 @api_user_bp.route('/searchCharacter', methods=['POST'])
 @auth_required
+# @validate_request(SearchCharacterRequest)
+# @validate_response(SearchCharacterResponse)
 async def search_character():
-    """搜索角色（通过角色ID或角色名称）"""
+    """
+    搜索角色（通过角色ID或角色名称）
+    
+    根据角色ID或角色名称搜索EVE角色。支持通过角色ID精确搜索或通过角色名称模糊搜索。
+
+    Tags:
+        - 用户角色管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - inputType (string, required): 搜索类型，可选值: characterId, characterName
+        - inputValue (string, required): 搜索值，角色ID（数字）或角色名称
+
+    Responses:
+        200: 成功返回搜索结果
+            - status: 状态码 (200)
+            - data: 搜索结果列表，每个元素包含角色ID和角色名称 (array)
+        400: 请求参数错误
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "inputType": "characterName",
+            "inputValue": "Character"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [
+                {
+                    "CharacterId": 123456,
+                    "CharacterName": "Character Name"
+                }
+            ]
+        }
+    """
     try:
         user_id = g.current_user["user_id"]
         data = await request.get_json()
@@ -234,7 +637,7 @@ async def search_character():
                 logger.error(f"搜索角色失败: {traceback.format_exc()}")
                 return jsonify({"status": 500, "message": "搜索角色失败"}), 500
         
-        return jsonify({"status": 200, "data": result})
+        return {"status": 200, "data": result}
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
@@ -244,8 +647,55 @@ async def search_character():
 
 @api_user_bp.route('/addAliasCharacters', methods=['POST'])
 @auth_required
+# @validate_request(AddAliasCharactersRequest)
+# @validate_response(AddAliasCharactersResponse)
 async def add_alias_characters():
-    """添加选中的别名角色"""
+    """
+    添加选中的别名角色
+    
+    批量添加别名角色。如果角色已存在则跳过，添加失败的角色会记录在failedList中。
+
+    Tags:
+        - 用户角色管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - characterIds (array, required): 角色ID列表
+
+    Responses:
+        200: 添加完成
+            - status: 状态码 (200)
+            - message: 成功消息，包含添加成功的数量 (string)
+            - failedList: 添加失败的角色ID列表 (array)
+            - aliasCharacterList: 更新后的别名角色列表 (array)
+        400: 请求参数错误
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "characterIds": [123456, 789012]
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "成功添加 2 个角色",
+            "failedList": [],
+            "aliasCharacterList": [
+                {
+                    "CharacterId": 123456,
+                    "CharacterName": "Character Name",
+                    "Enabled": false
+                }
+            ]
+        }
+    """
     try:
         user_id = g.current_user["user_id"]
         data = await request.get_json()
@@ -315,7 +765,47 @@ async def add_alias_characters():
 
 @api_user_bp.route('/saveAliasCharacters', methods=['POST'])
 @auth_required
+# @validate_request(SaveAliasCharactersRequest)
+# @validate_response(MessageResponse)
 async def save_alias_characters():
+    """
+    保存别名角色
+    
+    批量保存别名角色的启用状态。
+
+    Tags:
+        - 用户角色管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - aliasCharacterList (array, required): 别名角色列表，每个元素包含CharacterId和Enabled
+
+    Responses:
+        200: 保存成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "aliasCharacterList": [
+                {
+                    "CharacterId": 123456,
+                    "Enabled": true
+                }
+            ]
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "保存成功"
+        }
+    """
     try:
         data = await request.get_json()
         aliasCharacterList = data.get("aliasCharacterList", [])
@@ -325,7 +815,7 @@ async def save_alias_characters():
                 continue
             alias_character_obj.enabled = alias_character["Enabled"]
             await EveAliasCharacterDBUtils.save_obj(alias_character_obj)
-        return jsonify({"status": 200, "message": "保存成功"})
+        return {"status": 200, "message": "保存成功"}
     except KahunaException as e:
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:

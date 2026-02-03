@@ -1,6 +1,6 @@
 import traceback
 import warnings
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import AnyStr, AsyncGenerator, Optional, Type
 
 from sqlalchemy import delete, func, insert, or_, select, text
@@ -354,6 +354,54 @@ class UserDataDBUtils(_CommonUtils):
             stmt = delete(cls.cls_model).where(
                 cls.cls_model.user_name == user_name)
             await session.execute(stmt)
+
+    @classmethod
+    async def update_user_setting(cls, user_name: str, setting_key: str, setting_value):
+        """更新用户设置中的指定键值
+
+        Args:
+            user_name: 用户名
+            setting_key: 设置键名
+            setting_value: 设置值
+        """
+        async with get_postgres_manager().get_session() as session:
+            user_data = await cls.select_user_data_by_user_name(user_name)
+            if not user_data:
+                raise ValueError(f"用户 {user_name} 不存在")
+
+            # 如果setting为None，初始化为空字典
+            if user_data.setting is None:
+                user_data.setting = {}
+
+            # 更新设置
+            if not isinstance(user_data.setting, dict):
+                user_data.setting = {}
+
+            user_data.setting[setting_key] = setting_value
+            await session.merge(user_data)
+            await session.commit()
+            return user_data
+
+    @classmethod
+    async def get_user_setting(cls, user_name: str, setting_key: str, default_value=None):
+        """获取用户设置中的指定键值
+
+        Args:
+            user_name: 用户名
+            setting_key: 设置键名
+            default_value: 默认值（如果不存在）
+
+        Returns:
+            设置值或默认值
+        """
+        user_data = await cls.select_user_data_by_user_name(user_name)
+        if not user_data or not user_data.setting:
+            return default_value
+
+        if not isinstance(user_data.setting, dict):
+            return default_value
+
+        return user_data.setting.get(setting_key, default_value)
 
 
 class RolesDBUtils(_CommonUtils):
@@ -835,6 +883,21 @@ class EveIndustryAssetContainerPermissionDBUtils(_CommonUtils):
             result = await session.execute(stmt)
             return result.scalars().first()
 
+    @classmethod
+    async def select_by_container_id_owner_id_user_name_location_flag(cls, container_id: int, owner_id: int, user_name: str, location_flag: str):
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.asset_container_id == container_id
+            ).where(
+                cls.cls_model.asset_owner_id == owner_id
+            ).where(
+                cls.cls_model.user_name == user_name
+            ).where(
+                cls.cls_model.location_flag == location_flag
+            )
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
 
 class EveIndustryPlanConfigFlowConfigDBUtils(_CommonUtils):
     cls_model = model.EveIndustryPlanConfigFlowConfig
@@ -1259,6 +1322,27 @@ class EveMarketRegionHistoryStatisticDBUtils(_CommonUtils):
             result = await session.execute(stmt)
             return result.scalars().all()
 
+    @classmethod
+    async def get_latest_record(
+        cls,
+        type_id: int,
+        region_id: int,
+    ):
+        """
+        获取指定 type_id、region_id 的最新历史统计记录。
+
+        :param type_id: 物品类型ID
+        :param region_id: 区域ID
+        :return: 最新记录，如果没有则返回 None
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.type_id == type_id,
+                cls.cls_model.region_id == region_id,
+            ).order_by(cls.cls_model.date.desc()).limit(1)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
 
 class EveMarketRegionOrdersDBUtils(_CommonUtils):
     """
@@ -1337,6 +1421,160 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
 
             return order_data
 
+    @classmethod
+    async def save_orders_via_temp_table(
+        cls,
+        region_id: int,
+        orders_generator,
+        total_count: int,
+        progress_callback=None
+    ):
+        """
+        使用临时表方案保存订单数据，避免多次append操作。
+
+        :param region_id: 区域ID
+        :param orders_generator: 订单数据生成器，每次yield一个批次的数据列表
+        :param total_count: 总订单数量，用于进度跟踪
+        :param progress_callback: 进度回调函数，接收已处理数量作为参数
+        """
+        import uuid
+        temp_table_name = f"eve_market_region_orders_tmp_{uuid.uuid4().hex[:8]}"
+
+        try:
+            async with get_postgres_manager().engine.begin() as conn:
+                # 1. 创建临时表（使用相同的结构，但不包含id字段，因为原表的id是自增的）
+                columns_def = []
+                for col in cls.cls_model.__table__.columns:
+                    # 跳过id字段，因为原表的id是自增的
+                    if col.name == 'id':
+                        continue
+                    col_def = f'"{col.name}" {cls._get_postgresql_type(col.type)}'
+                    # 保留NOT NULL约束（除了created_at/updated_at）
+                    if not col.nullable and col.name not in ('created_at', 'updated_at'):
+                        col_def += ' NOT NULL'
+                    columns_def.append(col_def)
+
+                create_sql = text(f'''
+                    CREATE TEMP TABLE "{temp_table_name}" (
+                        {", ".join(columns_def)}
+                    )
+                ''')
+                await conn.execute(create_sql)
+
+                # 2. 分批插入数据到临时表
+                batch_size = 2000
+                processed_count = 0
+
+                # 构建列名列表（排除id，因为临时表不需要自增id）
+                column_names = [
+                    col.name for col in cls.cls_model.__table__.columns if col.name != 'id']
+                cols_csv = ', '.join([f'"{c}"' for c in column_names])
+
+                async def _insert_batch(batch: list):
+                    if not batch:
+                        return
+
+                    # 构建批量插入语句，使用 VALUES 子句
+                    # 格式: INSERT INTO table (col1, col2) VALUES (val1, val2), (val3, val4), ...
+                    values_parts = []
+                    params = {}
+                    param_index = 0
+
+                    for row in batch:
+                        row_values = []
+                        for col in column_names:
+                            param_name = f"p{param_index}"
+                            params[param_name] = row.get(col)
+                            row_values.append(f":{param_name}")
+                            param_index += 1
+                        values_parts.append(f"({', '.join(row_values)})")
+
+                    values_clause = ', '.join(values_parts)
+                    insert_sql = text(f'''
+                        INSERT INTO "{temp_table_name}" ({cols_csv})
+                        VALUES {values_clause}
+                    ''')
+                    await conn.execute(insert_sql, params)
+
+                batch = []
+                for row in orders_generator:
+                    batch.append(row)
+                    if len(batch) >= batch_size:
+                        await _insert_batch(batch)
+                        if progress_callback:
+                            await progress_callback(len(batch))
+                        batch = []
+
+                # 插入剩余数据
+                if batch:
+                    await _insert_batch(batch)
+                    if progress_callback:
+                        await progress_callback(len(batch))
+
+                # 3. 删除原表中该region的数据
+                delete_sql = text(f'''
+                    DELETE FROM {cls.cls_model.__tablename__}
+                    WHERE region_id = :region_id
+                ''')
+                await conn.execute(delete_sql, {"region_id": region_id})
+
+                # 4. 将临时表数据复制到原表
+                column_names = [
+                    col.name for col in cls.cls_model.__table__.columns if col.name != 'id']
+                cols_csv = ', '.join([f'"{c}"' for c in column_names])
+                copy_sql = text(f'''
+                    INSERT INTO {cls.cls_model.__tablename__} ({cols_csv})
+                    SELECT {cols_csv} FROM "{temp_table_name}"
+                ''')
+                await conn.execute(copy_sql)
+
+                # 5. 临时表会在连接关闭时自动删除（因为是TEMP TABLE）
+
+        except Exception as e:
+            logger.error(
+                f"使用临时表保存订单数据失败 region_id={region_id}: {e}",
+                exc_info=True,
+            )
+            raise
+
+    @staticmethod
+    def _get_postgresql_type(sqlalchemy_type):
+        """将SQLAlchemy类型转换为PostgreSQL类型字符串"""
+        from sqlalchemy.dialects import postgresql
+
+        # 尝试使用 SQLAlchemy 的类型编译功能（最可靠的方法）
+        try:
+            # 使用 PostgreSQL 方言编译类型
+            dialect = postgresql.dialect()
+            compiled = sqlalchemy_type.compile(dialect=dialect)
+            return str(compiled)
+        except Exception:
+            # 如果编译失败，使用简单的类型映射
+            pass
+
+        # 简单的类型映射作为后备方案
+        type_mapping = {
+            'Integer': 'INTEGER',
+            'BigInteger': 'BIGINT',
+            'Text': 'TEXT',
+            'String': 'TEXT',
+            'DateTime': 'TIMESTAMP',
+            'Date': 'DATE',
+            'Time': 'TIME',
+            'Float': 'DOUBLE PRECISION',
+            'Numeric': 'NUMERIC',
+            'Boolean': 'BOOLEAN',
+            'LargeBinary': 'BYTEA',
+        }
+
+        # 尝试通过类型名称匹配
+        type_name = type(sqlalchemy_type).__name__
+        if type_name in type_mapping:
+            return type_mapping[type_name]
+
+        # 默认返回TEXT
+        return 'TEXT'
+
 
 class EnterpriseMarketDBUtils(_CommonUtils):
     """企业市场数据库工具类"""
@@ -1373,3 +1611,243 @@ class EnterpriseMarketDBUtils(_CommonUtils):
         except Exception as e:
             logger.error(f"收集 product_type_ids 失败: {e}", exc_info=True)
             return []
+
+
+class EveOverviewHistoryDBUtils(_CommonUtils):
+    """Overview历史数据数据库工具类"""
+    cls_model = model.EveOverviewHistory
+
+    @classmethod
+    async def save_overview_data(cls, user_name: str, date: date, data: dict):
+        """保存或更新指定日期的overview数据
+
+        Args:
+            user_name: 用户名
+            date: 日期（Date类型，仅年月日）
+            data: overview数据（字典）
+
+        Returns:
+            保存的历史记录对象
+        """
+        async with get_postgres_manager().get_session() as session:
+            # 使用 PostgreSQL 的 insert（支持 on_conflict_do_update）实现真正的 upsert
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            # 构建插入语句
+            stmt = pg_insert(cls.cls_model).values(
+                user_name=user_name,
+                date=date,
+                data=data
+            )
+
+            # 基于唯一约束 (user_name, date) 进行冲突处理
+            # 如果冲突则更新 data 字段
+            index_cols = [
+                cls.cls_model.user_name,
+                cls.cls_model.date
+            ]
+            stmt = stmt.on_conflict_do_update(
+                index_elements=index_cols,
+                set_={'data': stmt.excluded.data}
+            )
+
+            await session.execute(stmt)
+            await session.commit()
+
+            # 重新查询返回
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.user_name == user_name,
+                cls.cls_model.date == date
+            )
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def get_overview_data_by_date(cls, user_name: str, date: date):
+        """获取指定日期的overview数据
+
+        Args:
+            user_name: 用户名
+            date: 日期（Date类型）
+
+        Returns:
+            历史记录对象或None
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.user_name == user_name,
+                cls.cls_model.date == date
+            )
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def get_overview_data_by_date_range(cls, user_name: str, start_date: date, end_date: date):
+        """获取指定日期范围内的overview数据
+
+        Args:
+            user_name: 用户名
+            start_date: 开始日期（Date类型）
+            end_date: 结束日期（Date类型）
+
+        Returns:
+            历史记录列表，按日期升序排列
+        """
+        stmt = select(cls.cls_model).where(
+            cls.cls_model.user_name == user_name,
+            cls.cls_model.date >= start_date,
+            cls.cls_model.date <= end_date
+        ).order_by(cls.cls_model.date.asc())
+        return await _AsyncIteratorWrapper.from_stmt(stmt)
+
+    @classmethod
+    async def check_date_exists(cls, user_name: str, date: date) -> bool:
+        """检查指定日期是否已有数据
+
+        Args:
+            user_name: 用户名
+            date: 日期（Date类型）
+
+        Returns:
+            True如果存在，False如果不存在
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(func.count(cls.cls_model.id)).where(
+                cls.cls_model.user_name == user_name,
+                cls.cls_model.date == date
+            )
+            result = await session.execute(stmt)
+            count = result.scalar()
+            return count > 0 if count else False
+
+    @classmethod
+    async def get_latest_overview_data_excluding_today(cls, user_name: str, exclude_date: date):
+        """获取除指定日期外的最近一次overview历史记录
+
+        Args:
+            user_name: 用户名
+            exclude_date: 要排除的日期（通常是今天）
+
+        Returns:
+            历史记录对象或None（如果没有找到）
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.user_name == user_name,
+                cls.cls_model.date < exclude_date
+            ).order_by(cls.cls_model.date.desc()).limit(1)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def get_earliest_overview_data(cls, user_name: str):
+        """获取最早的一次overview历史记录
+
+        Args:
+            user_name: 用户名
+
+        Returns:
+            历史记录对象或None（如果没有找到）
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.user_name == user_name
+            ).order_by(cls.cls_model.date.asc()).limit(1)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def get_overview_data_near_date(cls, user_name: str, target_date: date):
+        """获取指定日期附近的历史数据
+        先尝试查询目标日期的精确数据，如果没有则查询目标日期之前最近的数据
+
+        Args:
+            user_name: 用户名
+            target_date: 目标日期
+
+        Returns:
+            历史记录对象或None（如果没有找到）
+        """
+        async with get_postgres_manager().get_session() as session:
+            # 先尝试查询目标日期的精确数据
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.user_name == user_name,
+                cls.cls_model.date == target_date
+            )
+            result = await session.execute(stmt)
+            record = result.scalars().first()
+            if record:
+                return record
+
+            # 如果没有精确数据，查询目标日期之前最近的数据
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.user_name == user_name,
+                cls.cls_model.date < target_date
+            ).order_by(cls.cls_model.date.desc()).limit(1)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+
+class EveCorporationContractDBUtils(_CommonUtils):
+    """公司合同数据库工具类"""
+    cls_model = model.EveCorporationContract
+
+
+class EnterpriseMarketCostHistoryDBUtils(_CommonUtils):
+    """企业版市场成本历史缓存数据库工具类"""
+    cls_model = model.EnterpriseMarketCostHistory
+
+    @classmethod
+    async def get_by_type_id(cls, type_id: int):
+        """根据 type_id 获取缓存数据
+
+        Args:
+            type_id: 物品类型ID
+
+        Returns:
+            缓存记录对象，如果不存在则返回 None
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.type_id == type_id
+            )
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def save_or_update(cls, type_id: int, history_data: dict):
+        """保存或更新缓存数据
+
+        Args:
+            type_id: 物品类型ID
+            history_data: 历史成本数据字典
+
+        Returns:
+            保存的记录对象
+        """
+        async with get_postgres_manager().get_session() as session:
+            # 使用 PostgreSQL 的 insert（支持 on_conflict_do_update）实现真正的 upsert
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            # 构建插入语句
+            stmt = pg_insert(cls.cls_model).values(
+                type_id=type_id,
+                history_data=history_data
+            )
+
+            # 基于主键 type_id 进行冲突处理
+            # 如果冲突则更新 history_data 字段
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[cls.cls_model.type_id],
+                set_={'history_data': stmt.excluded.history_data}
+            )
+
+            await session.execute(stmt)
+            await session.commit()
+
+            # 重新查询返回
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.type_id == type_id
+            )
+            result = await session.execute(stmt)
+            return result.scalars().first()

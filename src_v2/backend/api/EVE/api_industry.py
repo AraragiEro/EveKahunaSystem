@@ -4,6 +4,8 @@ import json
 import math
 import re
 import traceback
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 import jwt
 from quart import Blueprint, Quart
@@ -33,9 +35,50 @@ api_industry_bp = Blueprint(
     'api_industry', __name__, url_prefix='/api/EVE/industry')
 
 
+# 响应数据模型（通用）
+@dataclass
+class ErrorResponse:
+    """错误响应"""
+    status: int
+    message: str
+
+
 @api_industry_bp.route("/getMarketTree", methods=["POST"])
 @auth_required
 async def get_market_tree():
+    """
+    获取市场树
+
+    获取指定市场节点的子节点树结构。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - node (string, required): 市场节点
+
+    Responses:
+        200: 成功返回市场树
+            - status: 状态码 (200)
+            - data: 市场树数据 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "node": "root"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [...]
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
 
@@ -57,7 +100,46 @@ async def get_market_tree():
 async def search_market_types():
     """
     搜索市场类型
-    根据关键词从SDE中搜索符合条件的type_id列表，过滤出可被蓝图生产的类型，然后从neo4j中获取对应的市场节点
+
+    根据关键词从SDE中搜索符合条件的type_id列表，过滤出可被蓝图生产的类型，然后从neo4j中获取对应的市场节点。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - keyword (string, required): 搜索关键字
+
+    Responses:
+        200: 成功返回搜索结果
+            - status: 状态码 (200)
+            - data: 匹配的类型列表，每个元素包含type_id和type_name_zh (array)
+            - count: 结果数量 (integer)
+        400: 请求参数错误
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "keyword": "物品名称"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [
+                {
+                    "type_id": 123,
+                    "type_name_zh": "物品中文名称"
+                }
+            ],
+            "count": 1
+        }
     """
     data = await request.json
     user_id = g.current_user["user_id"]
@@ -155,6 +237,41 @@ async def search_market_types():
 @api_industry_bp.route("/createPlan", methods=["POST"])
 @auth_required
 async def create_plan():
+    """
+    创建计划
+
+    创建新的工业计划。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - name (string, required): 计划名称
+        - 其他计划配置参数
+
+    Responses:
+        200: 创建成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "name": "计划名称",
+            ...
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "计划创建成功"
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
 
@@ -175,6 +292,36 @@ async def create_plan():
 @api_industry_bp.route("/getPlanTableData", methods=["POST"])
 @auth_required
 async def get_plan_table_data():
+    """
+    获取计划表格数据
+
+    获取当前用户的计划列表。管理员可以获取所有用户的计划。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 成功返回计划列表
+            - status: 状态码 (200)
+            - data: 计划列表 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [
+                {
+                    "name": "计划名称",
+                    ...
+                }
+            ]
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
     logger.info(f"获取计划表格数据: {user_id}")
@@ -209,6 +356,44 @@ async def get_plan_table_data():
 @api_industry_bp.route("/addPlanProduct", methods=["POST"])
 @auth_required
 async def add_plan_product():
+    """
+    添加计划产品
+
+    向指定计划添加产品。管理员可以为其他用户添加产品。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - plan_name (string, required): 计划名称
+        - type_id (integer, required): 产品类型ID
+        - quantity (integer, required): 数量
+        - user_name (string, optional): 用户名（仅管理员可用）
+
+    Responses:
+        200: 添加成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "plan_name": "计划名称",
+            "type_id": 123,
+            "quantity": 10
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "产品添加成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -248,6 +433,47 @@ async def add_plan_product():
 @api_industry_bp.route("/savePlanProducts", methods=["POST"])
 @auth_required
 async def save_plan_products():
+    """
+    保存计划产品
+
+    批量保存计划的产品列表。管理员可以为其他用户保存产品。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - plan_name (string, required): 计划名称
+        - products (array, required): 产品列表，每个元素包含type_id和quantity
+        - user_name (string, optional): 用户名（仅管理员可用）
+
+    Responses:
+        200: 保存成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "plan_name": "计划名称",
+            "products": [
+                {
+                    "type_id": 123,
+                    "quantity": 10
+                }
+            ]
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "产品保存成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -342,6 +568,42 @@ async def get_plan_calculate_result_table_view():
 @api_industry_bp.route("/addIndustrypermision", methods=["POST"])
 @auth_required
 async def add_industrypermision():
+    """
+    添加工业许可
+
+    为用户添加工业许可（容器权限）。管理员可以为其他用户添加许可。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - user_name (string, optional): 用户名（仅管理员可用）
+        - 其他许可配置参数
+
+    Responses:
+        200: 添加成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "asset_owner_id": 123456,
+            "asset_container_id": 789012,
+            ...
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "新增许可成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -381,6 +643,40 @@ async def add_industrypermision():
 @api_industry_bp.route("/getUserAllContainerPermission", methods=["POST"])
 @auth_required
 async def get_user_all_container_permission():
+    """
+    获取用户所有容器许可
+
+    获取指定用户的所有容器许可列表。管理员可以查询其他用户的许可。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - user_name (string, optional): 用户名（仅管理员可用）
+        - force_refresh (boolean, optional): 是否强制刷新缓存，默认false
+
+    Responses:
+        200: 成功返回许可列表
+            - status: 状态码 (200)
+            - data: 容器许可列表 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "force_refresh": false
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [...]
+        }
+    """
     current_user_id = g.current_user["user_id"]
     data = await request.json
     force_refresh = data.get("force_refresh", False)
@@ -421,9 +717,175 @@ async def get_user_all_container_permission():
         return jsonify({"status": 500, "message": "获取用户所有容器许可失败"}), 500
 
 
+@api_industry_bp.route("/getLocationFlagList", methods=["POST"])
+@auth_required
+async def get_location_flag_list():
+    """
+    获取位置标志列表
+
+    获取指定容器的可用位置标志列表。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - asset_owner_id (integer, required): 资产所有者ID
+        - asset_container_id (integer, required): 资产容器ID
+
+    Responses:
+        200: 成功返回位置标志列表
+            - status: 状态码 (200)
+            - data: 位置标志列表，每个元素包含value和label (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "asset_owner_id": 123456,
+            "asset_container_id": 789012
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [
+                {
+                    "value": "CorpSAG1",
+                    "label": "公司机库1"
+                }
+            ]
+        }
+    """
+    data = await request.json
+    current_user_id = g.current_user["user_id"]
+    asset_owner_id = data["asset_owner_id"]
+    asset_container_id = data["asset_container_id"]
+
+    try:
+        location_flag_list = await IndustryManager.get_location_flag_list(asset_owner_id, asset_container_id)
+        if location_flag_list:
+            res_data = [{"value": item, "label": item.replace(
+                'CorpSAG', '公司机库')} for item in location_flag_list]
+            return jsonify({"data": res_data, "status": 200})
+        else:
+            return jsonify({"data": [], "status": 200})
+    except KahunaException as e:
+        traceback.print_exc()
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        traceback.print_exc()
+        logger.error(f"获取位置标志列表失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "获取位置标志列表失败"}), 500
+
+    return jsonify({"data": location_flag_list, "status": 200})
+
+
+@api_industry_bp.route("/updateContainerPermissionLocationFlag", methods=["POST"])
+@auth_required
+async def update_container_permission_location_flag():
+    """
+    更新容器许可位置标志
+
+    更新指定容器许可的位置标志。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - asset_owner_id (integer, required): 资产所有者ID
+        - asset_container_id (integer, required): 资产容器ID
+        - location_flag (string, required): 位置标志
+
+    Responses:
+        200: 更新成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "asset_owner_id": 123456,
+            "asset_container_id": 789012,
+            "location_flag": "CorpSAG1"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "修改位置标志成功"
+        }
+    """
+    data = await request.json
+    current_user_id = g.current_user["user_id"]
+    try:
+        asset_owner_id = data["asset_owner_id"]
+        asset_container_id = data["asset_container_id"]
+        location_flag = data["location_flag"]
+        data = {
+            "asset_owner_id": asset_owner_id,
+            "asset_container_id": asset_container_id,
+            "location_flag": location_flag
+        }
+        await IndustryManager.update_container_permission_location_flag(current_user_id, data)
+        logger.info(
+            f"{current_user_id} 修改用户 {current_user_id} 的容器许可位置标志: {asset_owner_id}, {asset_container_id}, {location_flag}")
+        return jsonify({"message": "修改位置标志成功", "status": 200})
+    except KahunaException as e:
+        traceback.print_exc()
+        return jsonify({"status": 500, "message": str(e)}), 500
+    except Exception as e:
+        traceback.print_exc()
+        logger.error(f"修改位置标志失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "修改位置标志失败"}), 500
+
+
 @api_industry_bp.route("/deleteIndustrypermision", methods=["POST"])
 @auth_required
 async def delete_industrypermision():
+    """
+    删除工业许可
+
+    删除指定的工业许可（容器权限）。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - asset_owner_id (integer, required): 资产所有者ID
+        - asset_container_id (integer, required): 资产容器ID
+
+    Responses:
+        200: 删除成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "asset_owner_id": 123456,
+            "asset_container_id": 789012
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "删除许可成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -463,6 +925,44 @@ async def delete_industrypermision():
 @api_industry_bp.route("/updateContainerPermissionTag", methods=["POST"])
 @auth_required
 async def update_container_permission_tag():
+    """
+    更新容器许可标签
+
+    更新指定容器许可的标签。管理员可以为其他用户更新标签。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - asset_owner_id (integer, required): 资产所有者ID
+        - asset_container_id (integer, required): 资产容器ID
+        - tag (string, required): 标签
+        - user_name (string, optional): 用户名（仅管理员可用）
+
+    Responses:
+        200: 更新成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "asset_owner_id": 123456,
+            "asset_container_id": 789012,
+            "tag": "标签名称"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "更新标签成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -503,6 +1003,34 @@ async def update_container_permission_tag():
 @auth_required
 @role_required(["vip_alpha"], 402, "仅ALPHA订阅者可拉取真实资产建筑。虚拟建筑可正常使用。")
 async def get_structure_list():
+    """
+    获取建筑列表
+
+    获取当前用户的建筑列表。仅ALPHA订阅者可拉取真实资产建筑。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 成功返回建筑列表
+            - status: 状态码 (200)
+            - data: 建筑列表 (array)
+        402: 需要ALPHA订阅
+            - status: 状态码 (402)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [...]
+        }
+    """
     user_id = g.current_user["user_id"]
     try:
         structure_list = await IndustryManager.get_structure_list(user_id)
@@ -519,6 +1047,41 @@ async def get_structure_list():
 @api_industry_bp.route("/getGroupSuggestions", methods=["POST"])
 @auth_required
 async def get_structure_assign_keyword_suggestions():
+    """
+    获取建筑分配关键字建议
+
+    根据分配类型和查询关键字获取建议列表。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - assign_type (string, required): 分配类型
+        - query (string, required): 查询关键字
+
+    Responses:
+        200: 成功返回建议列表
+            - status: 状态码 (200)
+            - data: 建议列表 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "assign_type": "group",
+            "query": "关键字"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [...]
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
 
@@ -537,7 +1100,31 @@ async def get_structure_assign_keyword_suggestions():
 @api_industry_bp.route("/getTypeList", methods=["GET"])
 @auth_required
 async def get_type_list():
-    data = await request.json
+    """
+    获取类型列表
+
+    获取所有可用的类型列表。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 成功返回类型列表
+            - status: 状态码 (200)
+            - data: 类型列表 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [...]
+        }
+    """
     user_id = g.current_user["user_id"]
 
     try:
@@ -555,6 +1142,39 @@ async def get_type_list():
 @api_industry_bp.route("/getTypeSuggestionsList", methods=["POST"])
 @auth_required
 async def get_type_suggestions_list():
+    """
+    获取类型建议列表
+
+    根据查询关键字获取类型建议列表。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - query (string, required): 查询关键字
+
+    Responses:
+        200: 成功返回类型建议列表
+            - status: 状态码 (200)
+            - data: 类型建议列表 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "query": "关键字"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [...]
+        }
+    """
     data = await request.json
 
     try:
@@ -574,7 +1194,48 @@ async def get_type_suggestions_list():
 @api_industry_bp.route("/searchMineralOrIceProduct", methods=["POST"])
 @auth_required
 async def search_mineral_or_ice_product():
-    """根据名称查询矿物或冰矿产物类型"""
+    """
+    搜索矿物或冰矿产物
+
+    根据名称查询矿物或冰矿产物类型。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - name (string, required): 物品名称
+
+    Responses:
+        200: 成功返回查询结果
+            - status: 状态码 (200)
+            - data: 包含type_id、type_name、type_name_zh和material_type的对象，如果未找到则为null
+            - message: 提示信息（可选）
+        400: 请求参数错误
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "name": "矿物名称"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "type_id": 123,
+                "type_name": "Mineral Name",
+                "type_name_zh": "矿物中文名称",
+                "material_type": "矿石"
+            }
+        }
+    """
     data = await request.json
     name = data.get("name", "").strip()
 
@@ -617,6 +1278,43 @@ async def search_mineral_or_ice_product():
 @api_industry_bp.route("/createConfigFlowConfig", methods=["POST"])
 @auth_required
 async def create_config_flow_config():
+    """
+    创建配置流配置
+
+    创建新的配置流配置。管理员可以为其他用户创建配置。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - config_type (string, required): 配置类型
+        - config_value (string, required): 配置值
+        - user_name (string, optional): 用户名（仅管理员可用）
+        - 其他配置参数
+
+    Responses:
+        200: 创建成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "config_type": "type",
+            "config_value": "value"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "创建配置流配置成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -663,6 +1361,44 @@ async def create_config_flow_config():
 @api_industry_bp.route("/modifyConfigFlowConfig", methods=["POST"])
 @auth_required
 async def modify_config_flow_config():
+    """
+    修改配置流配置
+
+    修改指定的配置流配置。管理员可以为其他用户修改配置。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - config_id (integer, required): 配置ID
+        - config_type (string, optional): 配置类型
+        - config_value (string, optional): 配置值
+        - user_name (string, optional): 用户名（仅管理员可用）
+        - 其他配置参数
+
+    Responses:
+        200: 修改成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "config_id": 1,
+            "config_value": "new_value"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "修改配置流配置成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -703,7 +1439,36 @@ async def modify_config_flow_config():
 @api_industry_bp.route("/fetchRecommendedPresets", methods=["GET"])
 @auth_required
 async def fetch_recommended_presets():
-    data = await request.json
+    """
+    获取推荐预设
+
+    获取并创建推荐的配置流预设。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 成功返回预设统计
+            - status: 状态码 (200)
+            - data: 包含created和existing数量的统计对象
+            - message: 提示信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "created": 10,
+                "existing": 5
+            },
+            "message": "成功创建 10 个配置，5 个配置已存在"
+        }
+    """
     user_id = g.current_user["user_id"]
     preset_name = "default_bp_and_material"
 
@@ -729,6 +1494,40 @@ async def fetch_recommended_presets():
 @api_industry_bp.route("/deleteConfigFlowConfig", methods=["POST"])
 @auth_required
 async def delete_config_flow_config():
+    """
+    删除配置流配置
+
+    删除指定的配置流配置。管理员可以为其他用户删除配置。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - config_id (integer, required): 配置ID
+        - user_name (string, optional): 用户名（仅管理员可用）
+
+    Responses:
+        200: 删除成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "config_id": 1
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "删除配置流配置成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -764,6 +1563,34 @@ async def delete_config_flow_config():
 @api_industry_bp.route("/getConfigFlowConfigList", methods=["GET"])
 @auth_required
 async def get_config_flow_config_list():
+    """
+    获取配置流配置列表
+
+    获取当前用户的配置流配置列表。管理员可以查询其他用户的配置列表。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - user_name (query, string, optional): 用户名（仅管理员可用）
+
+    Responses:
+        200: 成功返回配置列表
+            - status: 状态码 (200)
+            - data: 配置列表，按config_type排序 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [...]
+        }
+    """
     data = await request.json if request.is_json else {}
     current_user_id = g.current_user["user_id"]
 
@@ -808,6 +1635,42 @@ async def get_config_flow_config_list():
 @api_industry_bp.route("/addConfigToPlan", methods=["POST"])
 @auth_required
 async def add_config_to_plan():
+    """
+    添加配置到计划
+
+    将配置流配置添加到指定计划。管理员可以为其他用户添加配置。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - plan_name (string, required): 计划名称
+        - config_id (integer, required): 配置ID
+        - user_name (string, optional): 用户名（仅管理员可用）
+
+    Responses:
+        200: 添加成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "plan_name": "计划名称",
+            "config_id": 1
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "添加配置到计划成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -847,6 +1710,40 @@ async def add_config_to_plan():
 @api_industry_bp.route("/getConfigFlowList", methods=["POST"])
 @auth_required
 async def get_config_flow_list():
+    """
+    获取配置流列表
+
+    获取指定计划的配置流列表。管理员可以查询其他用户的配置流。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - plan_name (string, required): 计划名称
+        - user_name (string, optional): 用户名（仅管理员可用）
+
+    Responses:
+        200: 成功返回配置流列表
+            - status: 状态码 (200)
+            - data: 配置流列表 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "plan_name": "计划名称"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [...]
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -886,6 +1783,42 @@ async def get_config_flow_list():
 @api_industry_bp.route("/saveConfigFlowToPlan", methods=["POST"])
 @auth_required
 async def save_config_flow_to_plan():
+    """
+    保存配置流到计划
+
+    保存配置流到指定计划。管理员可以为其他用户保存配置流。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - plan_name (string, required): 计划名称
+        - config_flow (object, required): 配置流数据
+        - user_name (string, optional): 用户名（仅管理员可用）
+
+    Responses:
+        200: 保存成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "plan_name": "计划名称",
+            "config_flow": {...}
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "保存配置流成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -928,6 +1861,41 @@ async def save_config_flow_to_plan():
 @api_industry_bp.route("/saveConfigFlowPreset", methods=["POST"])
 @auth_required
 async def save_config_flow_preset():
+    """
+    保存配置流预设
+
+    保存配置流预设。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - preset_name (string, required): 预设名称
+        - config_list (array, required): 配置列表
+
+    Responses:
+        200: 保存成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "preset_name": "预设名称",
+            "config_list": [...]
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "保存预设成功"
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
 
@@ -950,6 +1918,31 @@ async def save_config_flow_preset():
 @api_industry_bp.route("/getConfigFlowPresets", methods=["GET"])
 @auth_required
 async def get_config_flow_presets():
+    """
+    获取配置流预设列表
+
+    获取当前用户的所有配置流预设列表。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 成功返回预设列表
+            - status: 状态码 (200)
+            - data: 预设列表 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": [...]
+        }
+    """
     user_id = g.current_user["user_id"]
 
     try:
@@ -969,6 +1962,41 @@ async def get_config_flow_presets():
 @api_industry_bp.route("/loadConfigFlowPreset", methods=["POST"])
 @auth_required
 async def load_config_flow_preset():
+    """
+    加载配置流预设到计划
+
+    将指定的配置流预设加载到计划中。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - preset_id (integer, required): 预设ID
+        - plan_name (string, required): 计划名称
+
+    Responses:
+        200: 加载成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "preset_id": 1,
+            "plan_name": "计划名称"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "加载预设成功"
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
 
@@ -991,6 +2019,39 @@ async def load_config_flow_preset():
 @api_industry_bp.route("/deleteConfigFlowPreset", methods=["POST"])
 @auth_required
 async def delete_config_flow_preset():
+    """
+    删除配置流预设
+
+    删除指定的配置流预设。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - preset_id (integer, required): 预设ID
+
+    Responses:
+        200: 删除成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "preset_id": 1
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "删除预设成功"
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
 
@@ -1012,6 +2073,41 @@ async def delete_config_flow_preset():
 @api_industry_bp.route("/updateConfigFlowPresetName", methods=["POST"])
 @auth_required
 async def update_config_flow_preset_name():
+    """
+    更新配置流预设名称
+
+    更新指定配置流预设的名称。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - preset_id (integer, required): 预设ID
+        - preset_name (string, required): 新的预设名称
+
+    Responses:
+        200: 更新成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "preset_id": 1,
+            "preset_name": "新预设名称"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "更新预设名称成功"
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
 
@@ -1034,6 +2130,39 @@ async def update_config_flow_preset_name():
 @api_industry_bp.route("/shareConfigFlowPreset", methods=["POST"])
 @auth_required
 async def share_config_flow_preset():
+    """
+    分享配置流预设
+
+    生成配置流预设的分享代码。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - preset_id (integer, required): 预设ID
+
+    Responses:
+        200: 分享成功
+            - status: 状态码 (200)
+            - share_code: 分享代码 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "preset_id": 1
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "share_code": "abc123"
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
 
@@ -1055,6 +2184,41 @@ async def share_config_flow_preset():
 @api_industry_bp.route("/loadSharedConfigFlowPreset", methods=["POST"])
 @auth_required
 async def load_shared_config_flow_preset():
+    """
+    载入分享的配置流预设
+
+    通过分享代码载入其他用户分享的配置流预设。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - share_code (string, required): 分享代码
+
+    Responses:
+        200: 载入成功
+            - status: 状态码 (200)
+            - message: 成功消息，包含创建的配置数量 (string)
+            - data: 创建的配置列表 (array)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "share_code": "abc123"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "成功载入分享预设，创建了 5 个配置",
+            "data": [...]
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
 
@@ -1076,6 +2240,37 @@ async def load_shared_config_flow_preset():
 @api_industry_bp.route("/getConfigFlowPresetDetail", methods=["GET"])
 @auth_required
 async def get_config_flow_preset_detail():
+    """
+    获取配置流预设详情
+
+    获取指定配置流预设的详细信息（用于编辑）。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - preset_id (query, integer, required): 预设ID
+
+    Responses:
+        200: 成功返回预设详情
+            - status: 状态码 (200)
+            - data: 预设详情 (object)
+        400: 请求参数错误
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {...}
+        }
+    """
     user_id = g.current_user["user_id"]
     preset_id = request.args.get("preset_id", type=int)
 
@@ -1098,6 +2293,41 @@ async def get_config_flow_preset_detail():
 @api_industry_bp.route("/saveConfigFlowPresetConfig", methods=["POST"])
 @auth_required
 async def save_config_flow_preset_config():
+    """
+    保存配置流预设配置
+
+    保存配置流预设的配置（用于编辑）。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - preset_id (integer, required): 预设ID
+        - config_list (array, required): 配置列表
+
+    Responses:
+        200: 保存成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "preset_id": 1,
+            "config_list": [...]
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "保存预设配置成功"
+        }
+    """
     data = await request.json
     user_id = g.current_user["user_id"]
 
@@ -1120,6 +2350,42 @@ async def save_config_flow_preset_config():
 @api_industry_bp.route("/modifyPlanSettings", methods=["POST"])
 @auth_required
 async def modify_plan_settings():
+    """
+    修改计划设置
+
+    修改指定计划的设置。管理员可以为其他用户修改计划设置。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - plan_name (string, required): 计划名称
+        - plan_settings (object, required): 计划设置
+        - user_name (string, optional): 用户名（仅管理员可用）
+
+    Responses:
+        200: 修改成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "plan_name": "计划名称",
+            "plan_settings": {...}
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "修改计划设置成功"
+        }
+    """
     data = await request.json
     current_user_id = g.current_user["user_id"]
 
@@ -1182,6 +2448,39 @@ async def delete_plan():
 @api_industry_bp.route("/getItemInfo", methods=["POST"])
 @auth_required
 async def get_item_info():
+    """
+    获取物品信息
+
+    获取指定类型ID的物品信息。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - type_id (integer, required): 物品类型ID
+
+    Responses:
+        200: 成功返回物品信息
+            - status: 状态码 (200)
+            - data: 物品信息 (object)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "type_id": 123
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {...}
+        }
+    """
     data = await request.json
 
     try:
@@ -1199,6 +2498,39 @@ async def get_item_info():
 @api_industry_bp.route("/getLaborForceData", methods=["POST"])
 @auth_required
 async def get_labor_force_data():
+    """
+    获取劳动力数据
+
+    获取指定计划的劳动力数据。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - plan_name (string, required): 计划名称
+
+    Responses:
+        200: 成功返回劳动力数据
+            - status: 状态码 (200)
+            - data: 劳动力数据 (string或object)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "plan_name": "计划名称"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": "获取劳动力数据成功"
+        }
+    """
     user_id = g.current_user["user_id"]
 
     try:
@@ -1216,6 +2548,67 @@ async def get_labor_force_data():
 @auth_required
 @role_required(["vip_alpha"], 402, "仅ALPHA订阅者可获取压缩矿数据。")
 async def get_compressed_asteroid_data():
+    """
+    获取压缩矿数据
+
+    根据矿物需求计算最优的压缩矿采购方案。仅ALPHA订阅者可获取压缩矿数据。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - mineral_data (array, required): 矿物数据列表，每个元素包含type_id、type_name、quantity、real_quantity
+        - waste_penalty (number, optional): 浪费惩罚系数，默认0.1
+        - shortage_penalty (number, optional): 不足惩罚系数，默认0.5
+        - refinement_rate (number, optional): 化矿率，默认0.906
+        - purchase_mode (string, optional): 采购模式，默认"扫单"
+        - quantity_mode (string, optional): 数量模式，默认"缺失"
+        - liquidity_impact (number, optional): 收单流动性溢价系数，默认0.0
+        - purchase_time_limit (integer, optional): 采购时间上限（天），默认7
+        - shipping_cost_per_volume (number, optional): 运费设置（isk/立方），默认0.0
+
+    Responses:
+        200: 成功返回压缩矿数据
+            - status: 状态码 (200)
+            - data: 包含采购方案、多余矿物、缺失矿物等信息的对象
+        400: 请求参数错误
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+        402: 需要ALPHA订阅
+            - status: 状态码 (402)
+            - message: 错误信息 (string)
+        500: 服务器错误或优化失败
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "mineral_data": [
+                {
+                    "type_id": 34,
+                    "type_name": "Tritanium",
+                    "quantity": 1000,
+                    "real_quantity": 800
+                }
+            ],
+            "waste_penalty": 0.1,
+            "shortage_penalty": 0.5
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "purcheses_res": {...},
+                "excess_minerals_res": {...},
+                "shortage_minerals_res": {...},
+                "total_cost": 1000000
+            }
+        }
+    """
     data = await request.json
     mineral_data = data.get('mineral_data', [])
     waste_penalty = data.get('waste_penalty', 0.1)  # 浪费惩罚系数，默认0.1
@@ -1467,6 +2860,43 @@ async def get_compressed_asteroid_data():
 @auth_required
 @role_required(["vip_alpha"], 402, "仅ALPHA订阅者可同步许可到计划配置。")
 async def sync_permission_to_plan_config():
+    """
+    同步许可到计划配置
+
+    将容器许可同步到计划配置中。管理员可以为其他用户同步许可。仅ALPHA订阅者可同步许可到计划配置。
+
+    Tags:
+        - EVE工业管理
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - plan_name (string, required): 计划名称
+        - user_name (string, optional): 用户名（仅管理员可用）
+
+    Responses:
+        200: 同步成功
+            - status: 状态码 (200)
+            - message: 成功消息 (string)
+        402: 需要ALPHA订阅
+            - status: 状态码 (402)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "plan_name": "计划名称"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "message": "同步许可到计划配置成功"
+        }
+    """
     current_user_id = g.current_user["user_id"]
     data = await request.json
 
@@ -1501,23 +2931,25 @@ async def sync_permission_to_plan_config():
             config for config in all_configs if config["config_type"] == "LoadAssetConf"]
 
         # 3. 建立映射关系
-        # 访问许可的 (user_id, asset_container_id, asset_owner_id) -> 访问许可对象
+        # 访问许可的 (user_id, asset_container_id, asset_owner_id, location_flag) -> 访问许可对象
         permission_key_map = {}
         for perm in container_permissions:
             container_id = perm.get("asset_container_id")
             owner_id = perm.get("asset_owner_id")
+            location_flag = perm.get("location_flag")
             if container_id and owner_id:
-                key = (user_id, container_id, owner_id)
+                key = (user_id, container_id, owner_id, location_flag)
                 permission_key_map[key] = perm
 
-        # LoadAssetConf 配置的 (user_id, asset_container_id, asset_owner_id) -> 配置对象
+        # LoadAssetConf 配置的 (user_id, asset_container_id, asset_owner_id, location_flag) -> 配置对象
         config_key_map = {}
         for config in load_asset_configs:
             config_value = config.get("config_value", {})
             container_id = config_value.get("asset_container_id")
             owner_id = config_value.get("asset_owner_id")
+            location_flag = config_value.get("location_flag")
             if container_id and owner_id:
-                key = (user_id, container_id, owner_id)
+                key = (user_id, container_id, owner_id, location_flag)
                 config_key_map[key] = config
 
         # 4. 找出需要创建的配置（访问许可有但配置没有）

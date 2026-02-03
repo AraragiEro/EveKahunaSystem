@@ -11,6 +11,7 @@ def init_api(app):
     from .api_public import api_public_bp
     from .api_statistics import api_statistics_bp
     from .api_message_board import api_message_board_bp
+    from .EVE.api_home import api_home_bp
 
     app.register_blueprint(api_EVE_asset_bp)
     app.register_blueprint(api_auth_bp)
@@ -24,6 +25,7 @@ def init_api(app):
     app.register_blueprint(api_public_bp)
     app.register_blueprint(api_statistics_bp)
     app.register_blueprint(api_message_board_bp)
+    app.register_blueprint(api_home_bp)
 
     # 条件注册企业版 API
     # 仅在版本为企业版且模块存在时注册
@@ -34,6 +36,8 @@ def init_api(app):
         try:
             from src_v2.enterprise.api.api_enterprise import api_enterprise_bp
             app.register_blueprint(api_enterprise_bp)
+            from src_v2.enterprise.api.api_contract import api_contract_bp
+            app.register_blueprint(api_contract_bp)
             logger.info("企业版 API 已注册")
         except ImportError as e:
             logger.warning(f"企业版 API 模块不存在，跳过注册: {e}")

@@ -11,6 +11,7 @@ from .esi_api.industry import *
 from .esi_api.universe import *
 from .esi_api.search import *
 from .esi_api.assets import *
+from .esi_api.wallet import *
 
 permission_set = set()
 

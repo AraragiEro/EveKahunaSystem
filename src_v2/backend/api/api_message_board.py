@@ -1,6 +1,7 @@
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from quart import Blueprint, g, jsonify, request
 from sqlalchemy import and_, desc, func, or_, select
@@ -14,7 +15,131 @@ from src_v2.core.log import logger
 from src_v2.core.permission.permission_manager import permission_manager
 from src_v2.core.utils import KahunaException
 
-api_message_board_bp = Blueprint("api_message_board", __name__, url_prefix="/api/message-board")
+api_message_board_bp = Blueprint(
+    "api_message_board", __name__, url_prefix="/api/message-board")
+
+
+# 请求数据模型
+@dataclass
+class CreateCardRequest:
+    """创建留言卡片请求"""
+    type: str  # bug, feat, chat
+    title: str
+    content: str
+
+
+@dataclass
+class CreateReplyRequest:
+    """创建回复请求"""
+    content: str
+
+
+@dataclass
+class UpdateCardRequest:
+    """更新卡片请求"""
+    status: Optional[str] = None
+    title: Optional[str] = None
+    content: Optional[str] = None
+    type: Optional[str] = None
+
+
+# 响应数据模型
+@dataclass
+class UserBrief:
+    """用户摘要"""
+    id: str
+    name: str
+    avatarUrl: Optional[str] = None
+
+
+@dataclass
+class CardItem:
+    """卡片项"""
+    id: int
+    title: str
+    type: str
+    status: str
+    author: UserBrief
+    created_at: Optional[str] = None
+    last_reply_at: Optional[str] = None
+    reply_count: int = 0
+    auto_closed: bool = False
+    is_hidden: bool = False
+    content_snippet: Optional[str] = None
+
+
+@dataclass
+class PaginationInfo:
+    """分页信息"""
+    page: int
+    page_size: int
+    total: int
+    has_next: bool
+
+
+@dataclass
+class CardListResponse:
+    """卡片列表响应"""
+    status: int
+    data: Dict[str, Any]  # items: List[CardItem], pagination: PaginationInfo
+
+
+@dataclass
+class CardDetail:
+    """卡片详情"""
+    id: int
+    title: str
+    type: str
+    status: str
+    content: str
+    author: UserBrief
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    last_reply_at: Optional[str] = None
+    reply_count: int = 0
+    auto_closed: bool = False
+    closed_at: Optional[str] = None
+    is_hidden: bool = False
+
+
+@dataclass
+class CardDetailResponse:
+    """卡片详情响应"""
+    status: int
+    data: CardDetail
+
+
+@dataclass
+class ReplyItem:
+    """回复项"""
+    id: int
+    author: UserBrief
+    content: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    is_hidden: bool = False
+
+
+@dataclass
+class ReplyListResponse:
+    """回复列表响应"""
+    status: int
+    data: Dict[str, Any]  # items: List[ReplyItem], pagination: PaginationInfo
+
+
+@dataclass
+class MessageResponse:
+    """消息响应"""
+    status: int
+    message: str
+
+
+@dataclass
+class ErrorResponse:
+    """错误响应"""
+    status: int
+    message: str
+    code: Optional[str] = None
 
 
 async def _get_all_roles(user_id: str) -> set[str]:
@@ -70,9 +195,68 @@ def _serialize_user_brief(user_name: str) -> dict:
 
 @api_message_board_bp.route("/cards", methods=["GET"])
 @auth_required
+# @validate_response(CardListResponse)
 async def list_cards():
     """
     获取留言卡片列表（筛选 + 排序 + 分页）
+    
+    获取留言卡片列表，支持多种筛选条件、排序和分页。普通用户只能看到未隐藏的卡片和自己创建的隐藏卡片，管理员可以看到所有卡片。
+
+    Tags:
+        - 留言板
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - page (query, integer, optional): 页码，默认1
+        - page_size (query, integer, optional): 每页数量，默认20，最大50
+        - status (query, array, optional): 状态筛选，可选值: created, in_progress, closed，默认["created", "in_progress"]
+        - type (query, array, optional): 类型筛选，可选值: bug, feat, chat
+        - created_from (query, string, optional): 创建时间起始，ISO格式
+        - created_to (query, string, optional): 创建时间结束，ISO格式
+        - mine (query, boolean, optional): 是否只显示我创建的，默认false
+        - participated (query, boolean, optional): 是否只显示我回复过的，默认false
+        - publisher_search (query, string, optional): 发布人搜索关键字
+        - order_by (query, string, optional): 排序字段，可选值: created_at, last_reply_at，默认last_reply_at
+        - order (query, string, optional): 排序方向，可选值: asc, desc，默认desc
+        - show_hidden (query, boolean, optional): 管理员专用，是否只显示隐藏的卡片，默认false
+
+    Responses:
+        200: 成功返回卡片列表
+            - status: 状态码 (200)
+            - data: 包含items（卡片列表）和pagination（分页信息）的对象
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "items": [
+                    {
+                        "id": 1,
+                        "title": "标题",
+                        "type": "bug",
+                        "status": "in_progress",
+                        "author": {"id": "user1", "name": "user1", "avatarUrl": null},
+                        "created_at": "2024-01-01T00:00:00",
+                        "last_reply_at": "2024-01-01T01:00:00",
+                        "reply_count": 5,
+                        "auto_closed": false,
+                        "is_hidden": false,
+                        "content_snippet": "内容摘要..."
+                    }
+                ],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 20,
+                    "total": 100,
+                    "has_next": true
+                }
+            }
+        }
     """
     try:
         user_id = g.current_user["user_id"]
@@ -84,32 +268,37 @@ async def list_cards():
 
         # 状态过滤，默认排除 closed
         # 兼容 axios 默认数组序列化（status[]=...），优先读取 status，其次 status[]
-        status_list = request.args.getlist("status") or request.args.getlist("status[]")
+        status_list = request.args.getlist(
+            "status") or request.args.getlist("status[]")
         if not status_list:
             status_list = ["created", "in_progress"]
 
         # 类型过滤，兼容 axios 的 type[]=... 数组写法
-        type_list = request.args.getlist("type") or request.args.getlist("type[]")
+        type_list = request.args.getlist(
+            "type") or request.args.getlist("type[]")
         created_from = request.args.get("created_from")
         created_to = request.args.get("created_to")
         mine = request.args.get("mine", "false").lower() == "true"
-        participated = request.args.get("participated", "false").lower() == "true"
+        participated = request.args.get(
+            "participated", "false").lower() == "true"
         publisher_search = request.args.get("publisher_search", "").strip()
         order_by = request.args.get("order_by", "last_reply_at")
         order = request.args.get("order", "desc")
         # 管理员筛选隐藏卡片
-        show_hidden = request.args.get("show_hidden", "false").lower() == "true"
+        show_hidden = request.args.get(
+            "show_hidden", "false").lower() == "true"
 
         async with get_postgres_manager().get_session() as session:
             is_admin = await _is_admin(user_id)
-            
+
             stmt = select(model.MessageCard)
 
             # 隐藏状态过滤：如果卡片被隐藏，只有发布者或管理员可见
             if not is_admin:
                 if mine:
                     # 如果勾选了"我创建的"，只显示自己创建的留言（包括隐藏和未隐藏的）
-                    stmt = stmt.where(model.MessageCard.author_user_name == user_id)
+                    stmt = stmt.where(
+                        model.MessageCard.author_user_name == user_id)
                 else:
                     # 默认情况：显示所有未隐藏的卡片，或者自己发布的隐藏卡片
                     # 即：所有人的未隐藏留言 + 属于自己的已隐藏留言
@@ -128,7 +317,8 @@ async def list_cards():
                 # 如果 show_hidden=false，不添加过滤条件，显示所有卡片
                 # 如果勾选了"我创建的"，添加作者过滤
                 if mine:
-                    stmt = stmt.where(model.MessageCard.author_user_name == user_id)
+                    stmt = stmt.where(
+                        model.MessageCard.author_user_name == user_id)
 
             # 状态
             if status_list:
@@ -165,14 +355,16 @@ async def list_cards():
             # 发布人搜索（这里用 user_name 模糊匹配）
             if publisher_search:
                 like_pattern = f"%{publisher_search}%"
-                stmt = stmt.where(model.MessageCard.author_user_name.ilike(like_pattern))
+                stmt = stmt.where(
+                    model.MessageCard.author_user_name.ilike(like_pattern))
 
             # 排序
             if order_by == "created_at":
                 order_column = model.MessageCard.created_at
             else:
                 # 默认按 last_reply_at 排序，空值时可退化为 created_at
-                order_column = func.coalesce(model.MessageCard.last_reply_at, model.MessageCard.created_at)
+                order_column = func.coalesce(
+                    model.MessageCard.last_reply_at, model.MessageCard.created_at)
             order_fn = desc if order.lower() == "desc" else lambda c: c
             stmt = stmt.order_by(order_fn(order_column))
 
@@ -195,7 +387,8 @@ async def list_cards():
                     select(
                         model.MessageReply.card_id,
                         func.count().label("reply_count"),
-                        func.max(model.MessageReply.created_at).label("last_reply_at"),
+                        func.max(model.MessageReply.created_at).label(
+                            "last_reply_at"),
                     )
                     .where(model.MessageReply.card_id.in_(card_ids))
                     .where(model.MessageReply.is_deleted == False)  # noqa: E712
@@ -212,7 +405,8 @@ async def list_cards():
 
                 for card in cards:
                     reply_info = reply_map.get(card.id, {})
-                    last_reply_at = card.last_reply_at or reply_info.get("last_reply_at") or card.created_at
+                    last_reply_at = card.last_reply_at or reply_info.get(
+                        "last_reply_at") or card.created_at
                     # 为前端卡片提供内容摘要，避免一次性返回完整 content
                     content_snippet = None
                     if card.content:
@@ -260,9 +454,66 @@ async def list_cards():
 
 @api_message_board_bp.route("/cards", methods=["POST"])
 @auth_required
+# @validate_request(CreateCardRequest)
+# @validate_response(CardDetailResponse)
 async def create_card():
     """
     创建留言卡片
+    
+    创建新的留言卡片。非管理员用户每分钟仅允许发送一条留言或回复。chat类型的卡片初始状态为in_progress，其他类型为created。
+
+    Tags:
+        - 留言板
+
+    Security:
+        - Bearer: []
+
+    Request Body:
+        - type (string, required): 卡片类型，可选值: bug, feat, chat
+        - title (string, required): 标题
+        - content (string, required): 内容
+
+    Responses:
+        200: 创建成功
+            - status: 状态码 (200)
+            - data: 创建的卡片详情
+        400: 请求参数错误
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+        429: 频率限制
+            - status: 状态码 (429)
+            - message: 错误信息 (string)
+            - code: "RATE_LIMIT"
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "type": "bug",
+            "title": "发现一个bug",
+            "content": "详细描述..."
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "id": 1,
+                "title": "发现一个bug",
+                "type": "bug",
+                "status": "created",
+                "content": "详细描述...",
+                "author": {"id": "user1", "name": "user1", "avatarUrl": null},
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+                "last_reply_at": "2024-01-01T00:00:00",
+                "reply_count": 0,
+                "auto_closed": false,
+                "closed_at": null,
+                "is_hidden": false
+            }
+        }
     """
     try:
         user_id = g.current_user["user_id"]
@@ -314,7 +565,7 @@ async def create_card():
                 "content_snippet": card.content[:200] if card.content else None,
             }
 
-        return jsonify({"status": 200, "data": result})
+        return {"status": 200, "data": result}
     except KahunaException as e:
         traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
@@ -326,21 +577,65 @@ async def create_card():
 
 @api_message_board_bp.route("/cards/<int:card_id>", methods=["GET"])
 @auth_required
+# @validate_response(CardDetailResponse)
 async def get_card_detail(card_id: int):
     """
     获取单个 card 详情（不含回复列表）
+    
+    获取指定卡片的详细信息。如果卡片被隐藏且当前用户不是发布者也不是管理员，将返回404。
+
+    Tags:
+        - 留言板
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - card_id (path, integer, required): 卡片ID
+
+    Responses:
+        200: 成功返回卡片详情
+            - status: 状态码 (200)
+            - data: 卡片详情对象
+        404: 卡片不存在或无权访问
+            - status: 状态码 (404)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "id": 1,
+                "title": "标题",
+                "type": "bug",
+                "status": "in_progress",
+                "content": "完整内容...",
+                "author": {"id": "user1", "name": "user1", "avatarUrl": null},
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T01:00:00",
+                "last_reply_at": "2024-01-01T01:00:00",
+                "reply_count": 5,
+                "auto_closed": false,
+                "closed_at": null,
+                "is_hidden": false
+            }
+        }
     """
     try:
         user_id = g.current_user["user_id"]
         is_admin = await _is_admin(user_id)
-        
+
         async with get_postgres_manager().get_session() as session:
-            stmt = select(model.MessageCard).where(model.MessageCard.id == card_id)
+            stmt = select(model.MessageCard).where(
+                model.MessageCard.id == card_id)
             result = await session.execute(stmt)
             card = result.scalars().first()
             if not card:
                 return jsonify({"status": 404, "message": "留言卡片不存在"}), 404
-            
+
             # 检查隐藏权限：如果卡片被隐藏且当前用户不是发布者也不是管理员，返回404
             if card.is_hidden and not is_admin and card.author_user_name != user_id:
                 return jsonify({"status": 404, "message": "留言卡片不存在"}), 404
@@ -372,7 +667,7 @@ async def get_card_detail(card_id: int):
                 "is_hidden": bool(card.is_hidden) if card.is_hidden is not None else False,
             }
 
-        return jsonify({"status": 200, "data": data})
+        return {"status": 200, "data": data}
     except KahunaException as e:
         traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
@@ -384,21 +679,70 @@ async def get_card_detail(card_id: int):
 
 @api_message_board_bp.route("/cards/<int:card_id>/replies", methods=["GET"])
 @auth_required
+# @validate_response(ReplyListResponse)
 async def list_replies(card_id: int):
     """
     获取 card 回复列表（分页）
+    
+    获取指定卡片的回复列表，支持分页。普通用户看不到他人隐藏的回复，管理员可以看到所有回复。
+
+    Tags:
+        - 留言板
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - card_id (path, integer, required): 卡片ID
+        - page (query, integer, optional): 页码，默认1
+        - page_size (query, integer, optional): 每页数量，默认20，最大50
+
+    Responses:
+        200: 成功返回回复列表
+            - status: 状态码 (200)
+            - data: 包含items（回复列表）和pagination（分页信息）的对象
+        404: 卡片不存在
+            - status: 状态码 (404)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "items": [
+                    {
+                        "id": 1,
+                        "author": {"id": "user1", "name": "user1", "avatarUrl": null},
+                        "content": "回复内容",
+                        "created_at": "2024-01-01T00:00:00",
+                        "updated_at": "2024-01-01T00:00:00",
+                        "is_hidden": false
+                    }
+                ],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 20,
+                    "total": 50,
+                    "has_next": true
+                }
+            }
+        }
     """
     try:
         user_id = g.current_user["user_id"]
         is_admin = await _is_admin(user_id)
-        
+
         page = int(request.args.get("page", 1))
         page_size = min(int(request.args.get("page_size", 20)), 50)
         offset = (page - 1) * page_size
 
         async with get_postgres_manager().get_session() as session:
             # 确保 card 存在
-            card_stmt = select(model.MessageCard.id).where(model.MessageCard.id == card_id)
+            card_stmt = select(model.MessageCard.id).where(
+                model.MessageCard.id == card_id)
             card_res = await session.execute(card_stmt)
             if not card_res.scalar():
                 return jsonify({"status": 404, "message": "留言卡片不存在"}), 404
@@ -424,13 +768,15 @@ async def list_replies(card_id: int):
             count_res = await session.execute(count_stmt)
             total = count_res.scalar() or 0
 
-            stmt = base_stmt.order_by(model.MessageReply.created_at.asc()).offset(offset).limit(page_size)
+            stmt = base_stmt.order_by(model.MessageReply.created_at.asc()).offset(
+                offset).limit(page_size)
             result = await session.execute(stmt)
             replies = result.scalars().all()
 
             items = []
             for r in replies:
-                is_hidden = bool(r.is_hidden) if r.is_hidden is not None else False
+                is_hidden = bool(
+                    r.is_hidden) if r.is_hidden is not None else False
                 items.append(
                     {
                         "id": r.id,
@@ -467,9 +813,61 @@ async def list_replies(card_id: int):
 
 @api_message_board_bp.route("/cards/<int:card_id>/replies", methods=["POST"])
 @auth_required
+# @validate_request(CreateReplyRequest)
+# @validate_response(CardDetailResponse)
 async def create_reply(card_id: int):
     """
     创建回复
+    
+    为指定卡片创建回复。非管理员用户每分钟仅允许发送一条留言或回复。已关闭的卡片无法继续回复。
+
+    Tags:
+        - 留言板
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - card_id (path, integer, required): 卡片ID
+
+    Request Body:
+        - content (string, required): 回复内容
+
+    Responses:
+        200: 创建成功
+            - status: 状态码 (200)
+            - data: 创建的回复信息
+        400: 请求参数错误或卡片已关闭
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+            - code: "CARD_CLOSED" (如果卡片已关闭)
+        404: 卡片不存在
+            - status: 状态码 (404)
+            - message: 错误信息 (string)
+        429: 频率限制
+            - status: 状态码 (429)
+            - message: 错误信息 (string)
+            - code: "RATE_LIMIT"
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "content": "这是回复内容"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "id": 1,
+                "author": {"id": "user1", "name": "user1", "avatarUrl": null},
+                "content": "这是回复内容",
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00"
+            }
+        }
     """
     try:
         user_id = g.current_user["user_id"]
@@ -483,7 +881,8 @@ async def create_reply(card_id: int):
 
         async with get_postgres_manager().get_session() as session:
             # 检查 card
-            card_stmt = select(model.MessageCard).where(model.MessageCard.id == card_id)
+            card_stmt = select(model.MessageCard).where(
+                model.MessageCard.id == card_id)
             card_res = await session.execute(card_stmt)
             card = card_res.scalars().first()
             if not card:
@@ -521,7 +920,7 @@ async def create_reply(card_id: int):
                 "updated_at": now.isoformat(),
             }
 
-        return jsonify({"status": 200, "data": data_resp})
+        return {"status": 200, "data": data_resp}
     except KahunaException as e:
         traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
@@ -533,11 +932,68 @@ async def create_reply(card_id: int):
 
 @api_message_board_bp.route("/cards/<int:card_id>", methods=["PATCH"])
 @auth_required
+# @validate_request(UpdateCardRequest)
+# @validate_response(CardDetailResponse)
 async def update_card(card_id: int):
     """
     更新 card 状态 / 标题 / 内容 / 类型
-    - 非管理员：仅允许将自己创建的 card 状态改为 closed
-    - 管理员：允许任意状态变更和字段修改
+    
+    更新卡片的状态、标题、内容或类型。非管理员只能关闭自己创建的卡片或修改自己卡片的类型；管理员可以任意修改。
+
+    Tags:
+        - 留言板
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - card_id (path, integer, required): 卡片ID
+
+    Request Body:
+        - status (string, optional): 新状态，可选值: created, in_progress, closed
+        - title (string, optional): 新标题（仅管理员）
+        - content (string, optional): 新内容（仅管理员）
+        - type (string, optional): 新类型，可选值: bug, feat, chat
+
+    Responses:
+        200: 更新成功
+            - status: 状态码 (200)
+            - data: 更新后的卡片详情
+        400: 请求参数错误
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+        403: 无权限修改
+            - status: 状态码 (403)
+            - message: 错误信息 (string)
+        404: 卡片不存在
+            - status: 状态码 (404)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Request:
+        {
+            "status": "closed"
+        }
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "id": 1,
+                "title": "标题",
+                "type": "bug",
+                "status": "closed",
+                "content": "内容",
+                "author": {"id": "user1", "name": "user1", "avatarUrl": null},
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T02:00:00",
+                "last_reply_at": "2024-01-01T01:00:00",
+                "auto_closed": false,
+                "closed_at": "2024-01-01T02:00:00"
+            }
+        }
     """
     try:
         user_id = g.current_user["user_id"]
@@ -551,7 +1007,8 @@ async def update_card(card_id: int):
         is_admin = await _is_admin(user_id)
 
         async with get_postgres_manager().get_session() as session:
-            stmt = select(model.MessageCard).where(model.MessageCard.id == card_id)
+            stmt = select(model.MessageCard).where(
+                model.MessageCard.id == card_id)
             res = await session.execute(stmt)
             card = res.scalars().first()
             if not card:
@@ -560,13 +1017,21 @@ async def update_card(card_id: int):
             now = datetime.utcnow()
 
             if not is_admin:
-                # 仅允许作者关闭自己的卡片
+                # 允许作者关闭自己的卡片
                 if new_status and new_status == "closed":
                     if card.author_user_name != user_id:
                         return jsonify({"status": 403, "message": "只能关闭自己创建的卡片"}), 403
                     card.status = "closed"
                     card.closed_at = now
                     card.closed_by = user_id
+                    card.updated_at = now
+                # 允许作者修改自己卡片的类型
+                elif new_type is not None:
+                    if card.author_user_name != user_id:
+                        return jsonify({"status": 403, "message": "只能修改自己创建的卡片"}), 403
+                    if new_type not in ("bug", "feat", "chat"):
+                        return jsonify({"status": 400, "message": "非法类型值"}), 400
+                    card.type = new_type
                     card.updated_at = now
                 else:
                     return jsonify({"status": 403, "message": "无权限修改状态或内容"}), 403
@@ -606,7 +1071,7 @@ async def update_card(card_id: int):
                 "closed_at": (card.closed_at.isoformat() if card.closed_at else None),
             }
 
-        return jsonify({"status": 200, "data": data_resp})
+        return {"status": 200, "data": data_resp}
     except KahunaException as e:
         traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
@@ -618,16 +1083,65 @@ async def update_card(card_id: int):
 
 @api_message_board_bp.route("/cards/<int:card_id>/hide", methods=["PATCH"])
 @auth_required
+# @validate_response(CardDetailResponse)
 async def toggle_card_hidden(card_id: int):
     """
     隐藏卡片（作者或管理员），单向不可逆
+    
+    隐藏指定的留言卡片。只有卡片的作者或管理员可以隐藏卡片。隐藏操作是单向不可逆的。
+
+    Tags:
+        - 留言板
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - card_id (path, integer, required): 卡片ID
+
+    Responses:
+        200: 隐藏成功
+            - status: 状态码 (200)
+            - data: 更新后的卡片详情
+        400: 卡片已被隐藏
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+        403: 无权限隐藏
+            - status: 状态码 (403)
+            - message: 错误信息 (string)
+        404: 卡片不存在
+            - status: 状态码 (404)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "id": 1,
+                "title": "标题",
+                "type": "bug",
+                "status": "in_progress",
+                "content": "内容",
+                "author": {"id": "user1", "name": "user1", "avatarUrl": null},
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T02:00:00",
+                "last_reply_at": "2024-01-01T01:00:00",
+                "auto_closed": false,
+                "closed_at": null,
+                "is_hidden": true
+            }
+        }
     """
     try:
         user_id = g.current_user["user_id"]
         is_admin = await _is_admin(user_id)
 
         async with get_postgres_manager().get_session() as session:
-            stmt = select(model.MessageCard).where(model.MessageCard.id == card_id)
+            stmt = select(model.MessageCard).where(
+                model.MessageCard.id == card_id)
             res = await session.execute(stmt)
             card = res.scalars().first()
             if not card:
@@ -661,7 +1175,7 @@ async def toggle_card_hidden(card_id: int):
                 "is_hidden": bool(card.is_hidden),
             }
 
-        return jsonify({"status": 200, "data": data_resp})
+        return {"status": 200, "data": data_resp}
     except KahunaException as e:
         traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
@@ -673,16 +1187,59 @@ async def toggle_card_hidden(card_id: int):
 
 @api_message_board_bp.route("/replies/<int:reply_id>/hide", methods=["PATCH"])
 @auth_required
+# @validate_response(CardDetailResponse)
 async def toggle_reply_hidden(reply_id: int):
     """
     隐藏评论（作者或管理员），单向不可逆
+    
+    隐藏指定的回复评论。只有回复的作者或管理员可以隐藏回复。隐藏操作是单向不可逆的。
+
+    Tags:
+        - 留言板
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - reply_id (path, integer, required): 回复ID
+
+    Responses:
+        200: 隐藏成功
+            - status: 状态码 (200)
+            - data: 更新后的回复信息
+        400: 回复已被隐藏
+            - status: 状态码 (400)
+            - message: 错误信息 (string)
+        403: 无权限隐藏
+            - status: 状态码 (403)
+            - message: 错误信息 (string)
+        404: 回复不存在
+            - status: 状态码 (404)
+            - message: 错误信息 (string)
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "id": 1,
+                "author": {"id": "user1", "name": "user1", "avatarUrl": null},
+                "content": "回复内容",
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T02:00:00",
+                "is_hidden": true
+            }
+        }
     """
     try:
         user_id = g.current_user["user_id"]
         is_admin = await _is_admin(user_id)
 
         async with get_postgres_manager().get_session() as session:
-            stmt = select(model.MessageReply).where(model.MessageReply.id == reply_id)
+            stmt = select(model.MessageReply).where(
+                model.MessageReply.id == reply_id)
             res = await session.execute(stmt)
             reply = res.scalars().first()
             if not reply:
@@ -709,7 +1266,7 @@ async def toggle_reply_hidden(reply_id: int):
                 "is_hidden": bool(reply.is_hidden),
             }
 
-        return jsonify({"status": 200, "data": data_resp})
+        return {"status": 200, "data": data_resp}
     except KahunaException as e:
         traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
@@ -722,14 +1279,38 @@ async def toggle_reply_hidden(reply_id: int):
 @api_message_board_bp.route("/admin/auto-close", methods=["POST"])
 @auth_required
 @role_required(["admin"])
+# @validate_response(CardDetailResponse)
 async def auto_close_cards():
     """
     管理端触发：自动关闭超过 7 天无回复的 card
-    该接口可由定时任务或运维脚本调用
+    
+    自动关闭超过7天无回复的留言卡片。该接口可由定时任务或运维脚本调用。仅管理员可访问。
+
+    Tags:
+        - 留言板管理
+
+    Security:
+        - Bearer: []
+
+    Responses:
+        200: 执行成功
+            - status: 状态码 (200)
+            - data: 包含affected字段的对象，表示关闭的卡片数量
+        500: 服务器错误
+            - status: 状态码 (500)
+            - message: 错误信息 (string)
+
+    Example Response:
+        {
+            "status": 200,
+            "data": {
+                "affected": 5
+            }
+        }
     """
     try:
         affected = await MessageBoardDBUtils.auto_close_inactive_cards()
-        return jsonify({"status": 200, "data": {"affected": affected}})
+        return {"status": 200, "data": {"affected": affected}}
     except KahunaException as e:
         traceback.print_exc()
         return jsonify({"status": 500, "message": str(e)}), 500
@@ -737,4 +1318,3 @@ async def auto_close_cards():
         traceback.print_exc()
         logger.error(f"自动关闭留言卡片失败: {traceback.format_exc()}")
         return jsonify({"status": 500, "message": "自动关闭留言卡片失败"}), 500
-

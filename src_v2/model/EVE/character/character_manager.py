@@ -96,7 +96,7 @@ class CharacterManager(metaclass=SingletonMeta):
                         .replace(tzinfo=None))
 
         character_db_obj = await EveAuthedCharacterDBUtils.select_character_by_character_id(character_id)
-        if character_db_obj:
+        if character_db_obj and user_name != character_db_obj.owner_user_name:
             raise KahunaException('角色已被其他用户绑定，共享账号是不对的！')
 
         character_db_obj = M_EveAuthedCharacter(
@@ -157,10 +157,11 @@ class CharacterManager(metaclass=SingletonMeta):
         return character
 
     async def get_director_character_id_of_corporation(self, corporation_id: int):
+        res = []
         async for character in await EveAuthedCharacterDBUtils.select_all_characters_by_corporation_id(corporation_id):
             if character.director:
-                return character.character_id
-        return None
+                res.append(character.character_id)
+        return res
 
     async def refresh_all_public_characters_info_of_corporation(self, access_token, corporation_id: int):
         last_refresh_time = await rdm().redis.get(f"forever:ref_corp_chac_pub_info_corpid_{corporation_id}")

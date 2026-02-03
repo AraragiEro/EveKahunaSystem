@@ -34,6 +34,7 @@ dependencies = [
     "numpy>=2.3.5",
     "ortools>=9.14.6206",
     "cryptography>=46.0.3",
+    "quart-schema>=0.23.0",
 ]
 
 [[tool.uv.index]]

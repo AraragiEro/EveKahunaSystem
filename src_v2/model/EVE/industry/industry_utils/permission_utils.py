@@ -9,6 +9,7 @@ from src_v2.core.database.kahuna_database_utils_v2 import (
     EveIndustryAssetContainerPermissionDBUtils
 )
 from src_v2.core.utils import KahunaException
+from src_v2.core.database.neo4j_utils import Neo4jAssetUtils as NAU
 
 # 本地导入 - EVE 模块
 from src_v2.model.EVE.character import CharacterManager
@@ -29,8 +30,8 @@ async def add_industrypermision(user_id: str, data):
     system_data = data['system']
 
     async for container in await EveIndustryAssetContainerPermissionDBUtils.select_all_by_user_name(user_id):
-        if container.asset_container_id == container_data['item_id']:
-            raise KahunaException(f"容器 {container_data['item_id']} 已存在")
+        if container.asset_container_id == container_data['item_id'] and container.location_flag == asset_data['location_flag']:
+            raise KahunaException(f"容器 {container_data['item_id']} 位置标志 {asset_data['location_flag']} 已存在")
 
     # # 检查是否为建筑节点，禁止使用建筑节点作为许可访问点
     # async with neo4j_manager().get_session() as session:
@@ -51,6 +52,7 @@ async def add_industrypermision(user_id: str, data):
     permission_obj.structure_id = structure_data['structure_id']
     permission_obj.system_id = system_data['system_id']
     permission_obj.tag = data['tag']
+    permission_obj.location_flag = asset_data['location_flag']
     await EveIndustryAssetContainerPermissionDBUtils.save_obj(permission_obj)
 
 
@@ -69,6 +71,24 @@ async def delete_industrypermision(user_id: str, data):
             await EveIndustryAssetContainerPermissionDBUtils.delete_obj(permission)
             return
     raise KahunaException(f"许可不存在")
+
+
+def _serialize_for_redis(data: dict) -> dict:
+    """将字典中的复杂类型（list, dict）序列化为JSON字符串，以便存储到Redis
+    
+    Args:
+        data: 要序列化的字典
+    
+    Returns:
+        序列化后的字典，所有list和dict值都被转换为JSON字符串
+    """
+    result = {}
+    for key, value in data.items():
+        if isinstance(value, (list, dict)):
+            result[key] = json.dumps(value, ensure_ascii=False)
+        else:
+            result[key] = value
+    return result
 
 
 async def get_user_all_container_permission(user_id: str):
@@ -100,29 +120,68 @@ async def get_user_all_container_permission(user_id: str):
                 owner = await eveesi.corporations_corporation_id(pull_mission.asset_owner_id)
                 onwer_corp_d[pull_mission.asset_owner_id] = owner['name']
             owner_name = onwer_corp_d[pull_mission.asset_owner_id]
+        else:
+            raise KahunaException(f"资产所有者类型错误: {owner_type}")
         system_info = await SdeUtils.get_system_info_by_id(container.system_id)
-        structure_info_cache = await rdm().r.hgetall(f'eveesi:universe_structures_structure:{container.structure_id}')
-        if not structure_info_cache:
-            structure_info_cache = await eveesi.universe_structures_structure(access_character.ac_token, container.structure_id)
-            structure_info_cache.pop("position")
-            await rdm().redis.hset(f'eveesi:universe_structures_structure:{container.structure_id}', mapping=structure_info_cache)
+        if container.structure_id > 100000000:
+            structure_info_cache = await rdm().r.hgetall(f'eveesi:universe_structures_structure:{container.structure_id}')
+            if not structure_info_cache:
+                # 玩家建筑
+                structure_info_cache = await eveesi.universe_structures_structure(access_character.ac_token, container.structure_id)
+                structure_info_cache.pop("position", None)
+                # 序列化复杂类型以便存储到Redis
+                serialized_cache = _serialize_for_redis(structure_info_cache)
+                await rdm().redis.hset(f'eveesi:universe_structures_structure:{container.structure_id}', mapping=serialized_cache)
+        # 空间站
+        else:
+            station_info_cache = await rdm().r.hgetall(f'eveesi:universe_stations_station:{container.structure_id}')
+            if not station_info_cache:
+                station_info_cache = await eveesi.universe_stations_station(container.structure_id)
+                station_info_cache.pop("position", None)
+                # 序列化复杂类型以便存储到Redis
+                serialized_cache = _serialize_for_redis(station_info_cache)
+                await rdm().redis.hset(f'eveesi:universe_stations_station:{container.structure_id}', mapping=serialized_cache)
         
         container = {
             "asset_owner_id": container.asset_owner_id,
             "asset_container_id": container.asset_container_id,
             "structure_id": container.structure_id,
-            "structure_name": structure_info_cache['name'],
+            "structure_name": structure_info_cache['name'] if structure_info_cache else station_info_cache['name'],
             "system_id": container.system_id,
             "system_name": system_info['system_name'],
             "owner_type": owner_type,
             "owner_name": owner_name,
             "tag": container.tag,
+            "location_flag": container.location_flag,
         }
         all_container_permission.append(container)
 
     await rdm().r.set(f'container_permission:{user_id}:all_container_permission', json.dumps(all_container_permission), ex=60*60)
     return all_container_permission
 
+
+async def get_location_flag_list(asset_owner_id: int, asset_container_id: int):
+    """获取位置标志列表
+    
+    Args:
+        asset_owner_id: 资产所有者ID
+        asset_container_id: 资产容器ID
+    """
+    asset_in_user_container_list = await NAU.get_asset_in_container_owner_list([[asset_container_id, asset_owner_id, None]])
+
+    for asset in asset_in_user_container_list:
+        if 'CorpSAG' in asset['location_flag']:
+            return [
+                'CorpSAG1',
+                'CorpSAG2',
+                'CorpSAG3',
+                'CorpSAG4',
+                'CorpSAG5',
+                'CorpSAG6',
+                'CorpSAG7',
+            ]
+    
+    return []
 
 async def update_container_permission_tag(user_id: str, data):
     """更新容器许可标签
@@ -148,7 +207,37 @@ async def update_container_permission_tag(user_id: str, data):
     
     # 更新标签
     permission.tag = new_tag
-    await EveIndustryAssetContainerPermissionDBUtils.save_obj(permission)
+    await EveIndustryAssetContainerPermissionDBUtils.merge(permission)
+    
+    # 清除缓存
+    await rdm().r.delete(f'container_permission:{user_id}:all_container_permission')
+
+
+async def update_container_permission_location_flag(user_id: str, data):
+    """更新容器许可位置标志
+    
+    Args:
+        user_id: 用户ID
+        data: 包含 asset_owner_id, asset_container_id 和 location_flag 的数据
+    
+    Raises:
+        KahunaException: 如果许可不存在或无权修改
+    """
+    asset_owner_id = data['asset_owner_id']
+    asset_container_id = data['asset_container_id']
+    new_location_flag = data['location_flag']
+    
+    # 查找许可记录（包含 user_name 条件）
+    permission = await EveIndustryAssetContainerPermissionDBUtils.select_by_container_id_owner_id_and_user_name(
+        asset_container_id, asset_owner_id, user_id
+    )
+    
+    if not permission:
+        raise KahunaException(f"许可不存在")
+    
+    # 更新位置标志
+    permission.location_flag = new_location_flag
+    await EveIndustryAssetContainerPermissionDBUtils.merge(permission)
     
     # 清除缓存
     await rdm().r.delete(f'container_permission:{user_id}:all_container_permission')

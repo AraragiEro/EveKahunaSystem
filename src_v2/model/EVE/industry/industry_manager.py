@@ -2,6 +2,9 @@
 import asyncio
 import json
 import multiprocessing
+import os
+import signal
+import time
 import traceback
 from asyncio import Queue
 from concurrent.futures import ProcessPoolExecutor
@@ -51,6 +54,7 @@ from .industry_utils import (
     get_config_flow_preset_detail,
     get_config_flow_presets,
     get_item_info,
+    get_location_flag_list,
     get_market_tree,
     get_material_type,
     get_plan_tableview_data,
@@ -66,6 +70,7 @@ from .industry_utils import (
     save_config_flow_to_plan,
     share_config_flow_preset,
     update_config_flow_preset_name,
+    update_container_permission_location_flag,
     update_container_permission_tag,
     update_plan_status,
 )
@@ -266,6 +271,76 @@ class IndustryManager(metaclass=SingletonMeta):
             self._process_pool = ProcessPoolExecutor(max_workers=max_workers)
         return self._process_pool
 
+    @staticmethod
+    def _force_kill_process_pool(process_pool: ProcessPoolExecutor, running_type: list, futures_map: dict):
+        """
+        强制kill进程池中的所有进程
+        这是最激进的清理方式，直接终止进程并清理running_type
+        """
+        killed_count = 0
+        cleaned_type_ids = []
+
+        try:
+            # 先尝试shutdown，但可能不会立即生效
+            try:
+                process_pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+
+            # 通过进程池的内部属性获取所有进程
+            # ProcessPoolExecutor 使用 _processes 字典存储进程
+            if hasattr(process_pool, '_processes') and process_pool._processes is not None:
+                for process in process_pool._processes.values():
+                    if process and process.is_alive():
+                        try:
+                            pid = process.pid
+                            logger.warning(f"强制kill进程 {pid}")
+                            # 使用 SIGTERM 先尝试优雅终止
+                            os.kill(pid, signal.SIGTERM)
+                            killed_count += 1
+                            # 等待一小段时间，如果进程还在运行，使用 SIGKILL
+                            time.sleep(0.5)
+                            if process.is_alive():
+                                os.kill(pid, signal.SIGKILL)
+                                logger.warning(f"使用 SIGKILL 强制终止进程 {pid}")
+                        except ProcessLookupError:
+                            # 进程已经不存在
+                            pass
+                        except Exception as e:
+                            logger.error(
+                                f"kill进程 {process.pid if process else 'unknown'} 时出错: {e}")
+                            # 如果 SIGTERM 失败，尝试 SIGKILL
+                            try:
+                                if process and process.is_alive():
+                                    os.kill(process.pid, signal.SIGKILL)
+                                    logger.warning(
+                                        f"使用 SIGKILL 强制终止进程 {process.pid}")
+                            except Exception as kill_err:
+                                logger.error(
+                                    f"SIGKILL 进程 {process.pid if process else 'unknown'} 时出错: {kill_err}")
+
+            # 清理 running_type 中对应的 type_id
+            # 通过 futures_map 找到对应的 type_id
+            for task, task_info in futures_map.items():
+                if task and not task.done():
+                    type_id = task_info.get("type_id")
+                    if type_id and type_id in running_type:
+                        running_type.remove(type_id)
+                        cleaned_type_ids.append(type_id)
+                        logger.info(f"从 running_type 中清理 type_id: {type_id}")
+
+            if cleaned_type_ids:
+                logger.info(
+                    f"已清理 running_type 中的 {len(cleaned_type_ids)} 个 type_id: {cleaned_type_ids}")
+
+            logger.info(
+                f"已强制kill {killed_count} 个进程，清理了 {len(cleaned_type_ids)} 个 running_type 条目")
+
+        except Exception as e:
+            logger.error(f"强制kill进程池时出错: {e}", exc_info=True)
+
+        return killed_count, cleaned_type_ids
+
     @classmethod
     async def calculate_cost(cls, op: ConfigFlowOperateCenter, type_id_list, market_id: int = None):
         """
@@ -290,97 +365,305 @@ class IndustryManager(metaclass=SingletonMeta):
 
         running_type = []
 
-        async def calculate_cost_async(type_id: int, plan_data):
+        async def calculate_cost_async(type_id: int, plan_data, batch_process_pool: ProcessPoolExecutor, futures_map: dict):
             async with semaphore:
                 running_type.append(type_id)
                 logger.info(
                     f"calculate_cost_async {type_id} start, running_type: {running_type}")
-                # 使用多进程计算计划状态
-                IndustryManager()._process_pool = IndustryManager(
-                )._get_process_pool(max_workers=SUBWORKER_COUNT)
-                future = IndustryManager()._process_pool.submit(
+                # 使用批次专用的进程池
+                process_future = batch_process_pool.submit(
                     _run_async_calculation_in_process, type_id, plan_data)
-                asyncio_future = asyncio.wrap_future(future)
-                result = await asyncio_future
+                # 保存进程池future和type_id的引用，用于强制清理
+                task = asyncio.current_task()
+                if task:
+                    futures_map[task] = {
+                        "process_future": process_future, "type_id": type_id}
+                asyncio_future = asyncio.wrap_future(process_future)
+                try:
+                    result = await asyncio_future
+                finally:
+                    # 确保从 running_type 中移除
+                    if type_id in running_type:
+                        running_type.remove(type_id)
             await tqdm_manager.update_mission(f"calculate_cost_{op.user_name}_{market_id}", 1)
-            running_type.remove(type_id)
             return type_id, result
 
         cost_dict = {}
-        futures = []
         await tqdm_manager.add_mission(f"calculate_cost_{op.user_name}_{market_id}", len(type_id_list))
-        for type_id in type_id_list:
-            # 构造计划数据（可序列化的字典）
-            plan_name = f"calculate_cost_and_market_histyory_{type_id}"
-            plan_settings = op.plan_settings
-            plan_settings["name"] = plan_name
-            plan_settings["work_type"] = "whole"
-            plan_settings["split_to_jobs"] = True
-            # plan_settings["considerate_asset"] = True
-            plan_settings["considerate_bp_relation"] = False
-            plan_settings["considerate_running_job"] = False
-            plan_settings["full_split"] = False
 
-            plan_data = {
-                "plan_name": plan_name,
-                "user_name": op.user_name,
-                "plan_settings": plan_settings,
-                "products": [{
-                    "index_id": 1,
-                    "product_type_id": type_id,
-                    # 加大数量，避免计算结果不准确
-                    "quantity": 1000
-                }]
-            }
-
-            futures.append(asyncio.create_task(
-                calculate_cost_async(type_id, plan_data)))
-
-        # 使用 asyncio.as_completed 实时更新进度
+        # 分批处理，每批SUBWORKER_COUNT个任务
         completed_count = 0
         result_key = None
         has_error = False
         if market_id is not None and progress_key:
             result_key = f"market_cost_calculation_result:{op.user_name}:{market_id}"
-            for future in asyncio.as_completed(futures):
+
+        # 将type_id_list分批
+        batch_size = SUBWORKER_COUNT or 3  # 确保是int类型，fallback与默认值一致
+        for batch_start in range(0, len(type_id_list), batch_size):
+            batch_end = min(batch_start + batch_size, len(type_id_list))
+            batch_type_ids = type_id_list[batch_start:batch_end]
+
+            # 为每个批次创建独立的进程池，便于超时时强制清理
+            batch_process_pool = ProcessPoolExecutor(
+                max_workers=SUBWORKER_COUNT)
+            batch_futures_map = {}  # 跟踪进程池的futures，用于强制清理
+
+            # 创建当前批次的futures
+            futures = []
+            for type_id in batch_type_ids:
+                # 构造计划数据（可序列化的字典）
+                plan_name = f"calculate_cost_and_market_histyory_{type_id}"
+                plan_settings = op.plan_settings
+                plan_settings["name"] = plan_name
+                plan_settings["work_type"] = "whole"
+                plan_settings["split_to_jobs"] = True
+                # plan_settings["considerate_asset"] = True
+                plan_settings["considerate_bp_relation"] = False
+                plan_settings["considerate_running_job"] = False
+                plan_settings["full_split"] = False
+
+                plan_data = {
+                    "plan_name": plan_name,
+                    "real_plan_name": op.plan_name,
+                    "user_name": op.user_name,
+                    "plan_settings": plan_settings,
+                    "products": [{
+                        "index_id": 1,
+                        "product_type_id": type_id,
+                        # 加大数量，避免计算结果不准确
+                        "quantity": 1000
+                    }]
+                }
+
+                # 创建任务并跟踪进程池future
+                task = asyncio.create_task(
+                    calculate_cost_async(type_id, plan_data, batch_process_pool, batch_futures_map))
+                futures.append(task)
+
+            # 等待当前批次完成
+            if market_id is not None and progress_key:
+                # 有market_id的情况，使用asyncio.wait实时更新进度，并设置超时防止阻塞
+                batch_timeout = 180  # 批次超时时间：5分钟
+                remaining_futures = set(futures)
+                start_time = asyncio.get_event_loop().time()
+
                 try:
-                    result = await future
-                    completed_count += 1
-                    cost_dict[result[0]] = {
-                        "type_id": result[0],
-                        "eiv_cost_dict": result[1]["eiv_cost_dict"],
-                        "material_output": result[1]["material_output"],
-                    }
-                    # 更新进度
-                    await rdm().r.hset(progress_key, mapping={
-                        "status": "running",
-                        "completed": completed_count,
-                        "total": total_count,
-                        "current_step": f"已完成 {completed_count}/{total_count}"
-                    })
-                except KahunaException as e:
-                    traceback.print_exc()
-                    logger.error(f"计算任务失败: {e}")
-                    has_error = True
-                    completed_count += 1
-                    await rdm().r.hset(progress_key, mapping={
-                        "status": "running",
-                        "completed": completed_count,
-                        "total": total_count,
-                        "current_step": f"任务失败: {str(e)}"
-                    })
+                    while remaining_futures:
+                        # 检查是否超时
+                        elapsed_time = asyncio.get_event_loop().time() - start_time
+                        if elapsed_time >= batch_timeout:
+                            logger.warning(
+                                f"批次超时（{batch_timeout}秒），强制kill进程并清理 {len(remaining_futures)} 个未完成任务")
+
+                            # 最激进的清理策略：直接kill进程池中的所有进程
+                            logger.warning(f"强制kill进程池中的所有进程，释放资源")
+                            killed_count, _ = IndustryManager._force_kill_process_pool(
+                                batch_process_pool, running_type, batch_futures_map)
+
+                            # 尝试shutdown进程池（可能已经部分关闭）
+                            try:
+                                batch_process_pool.shutdown(
+                                    wait=False, cancel_futures=True)
+                            except Exception as e:
+                                logger.debug(f"shutdown进程池时出错（可能已关闭）: {e}")
+
+                            # 取消所有未完成的asyncio任务
+                            cancelled_count = 0
+                            for future in remaining_futures:
+                                cancelled = future.cancel()
+                                if cancelled:
+                                    cancelled_count += 1
+                                    try:
+                                        # 快速确认取消状态
+                                        await asyncio.wait_for(future, timeout=0.1)
+                                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                                        pass
+                                    except Exception as e:
+                                        logger.error(f"取消任务时出错: {e}")
+                                completed_count += 1
+
+                            has_error = True
+                            await rdm().r.hset(progress_key, mapping={
+                                "status": "running",
+                                "completed": completed_count,
+                                "total": total_count,
+                                "current_step": f"批次超时，已kill {killed_count} 个进程，清理 {len(remaining_futures)} 个任务"
+                            })
+                            break
+
+                        # 等待至少一个任务完成，剩余超时时间
+                        remaining_timeout = batch_timeout - elapsed_time
+                        done, pending = await asyncio.wait(
+                            remaining_futures,
+                            timeout=remaining_timeout,
+                            return_when=asyncio.FIRST_COMPLETED
+                        )
+
+                        # 如果 asyncio.wait 超时（done 为空但 pending 不为空），说明整体超时
+                        if not done and pending:
+                            logger.warning(
+                                f"批次超时（{batch_timeout}秒），强制kill进程并清理 {len(pending)} 个未完成任务")
+
+                            # 最激进的清理策略：直接kill进程池中的所有进程
+                            logger.warning(f"强制kill进程池中的所有进程，释放资源")
+                            killed_count, _ = IndustryManager._force_kill_process_pool(
+                                batch_process_pool, running_type, batch_futures_map)
+
+                            # 尝试shutdown进程池（可能已经部分关闭）
+                            try:
+                                batch_process_pool.shutdown(
+                                    wait=False, cancel_futures=True)
+                            except Exception as e:
+                                logger.debug(f"shutdown进程池时出错（可能已关闭）: {e}")
+
+                            # 取消所有未完成的asyncio任务
+                            cancelled_count = 0
+                            for future in pending:
+                                cancelled = future.cancel()
+                                if cancelled:
+                                    cancelled_count += 1
+                                    try:
+                                        # 快速确认取消状态
+                                        await asyncio.wait_for(future, timeout=0.1)
+                                    except (asyncio.CancelledError, asyncio.TimeoutError):
+                                        pass
+                                    except Exception as e:
+                                        logger.error(f"取消任务时出错: {e}")
+                                completed_count += 1
+
+                            has_error = True
+                            await rdm().r.hset(progress_key, mapping={
+                                "status": "running",
+                                "completed": completed_count,
+                                "total": total_count,
+                                "current_step": f"批次超时，已kill {killed_count} 个进程，清理 {len(pending)} 个任务"
+                            })
+                            break
+
+                        # 处理已完成的任务
+                        for future in done:
+                            try:
+                                result = await future
+                                completed_count += 1
+                                cost_dict[result[0]] = {
+                                    "type_id": result[0],
+                                    "eiv_cost_dict": result[1]["eiv_cost_dict"],
+                                    "material_output": result[1]["material_output"],
+                                }
+                                # 更新进度
+                                await rdm().r.hset(progress_key, mapping={
+                                    "status": "running",
+                                    "completed": completed_count,
+                                    "total": total_count,
+                                    "current_step": f"已完成 {completed_count}/{total_count}"
+                                })
+                            except KahunaException as e:
+                                traceback.print_exc()
+                                logger.error(f"计算任务失败: {e}")
+                                has_error = True
+                                completed_count += 1
+                                await rdm().r.hset(progress_key, mapping={
+                                    "status": "running",
+                                    "completed": completed_count,
+                                    "total": total_count,
+                                    "current_step": f"任务失败: {str(e)}"
+                                })
+                            except Exception as e:
+                                traceback.print_exc()
+                                logger.error(f"计算任务失败: {e}")
+                                has_error = True
+                                completed_count += 1
+                                await rdm().r.hset(progress_key, mapping={
+                                    "status": "running",
+                                    "completed": completed_count,
+                                    "total": total_count,
+                                    "current_step": f"任务失败: {str(e)}"
+                                })
+
+                        # 更新剩余任务集合
+                        remaining_futures = pending
+
                 except Exception as e:
                     traceback.print_exc()
-                    logger.error(f"计算任务失败: {e}")
+                    logger.error(f"批次处理异常: {e}")
                     has_error = True
-                    completed_count += 1
+                    # 最激进的清理策略：直接kill进程池中的所有进程
+                    logger.warning(f"批次处理异常，强制kill进程池中的所有进程")
+                    killed_count, _ = IndustryManager._force_kill_process_pool(
+                        batch_process_pool, running_type, batch_futures_map)
+                    try:
+                        batch_process_pool.shutdown(
+                            wait=False, cancel_futures=True)
+                    except Exception as shutdown_err:
+                        logger.debug(f"shutdown进程池时出错（可能已关闭）: {shutdown_err}")
+                    # 取消所有未完成的任务
+                    for future in remaining_futures:
+                        if not future.done():
+                            future.cancel()
+                            try:
+                                await future
+                            except asyncio.CancelledError:
+                                pass
+                            except Exception as cancel_err:
+                                logger.error(f"取消任务时出错: {cancel_err}")
+                            completed_count += 1
                     await rdm().r.hset(progress_key, mapping={
                         "status": "running",
                         "completed": completed_count,
                         "total": total_count,
-                        "current_step": f"任务失败: {str(e)}"
+                        "current_step": f"批次处理异常: {str(e)}，已kill {killed_count} 个进程"
                     })
+                finally:
+                    # 确保进程池被清理，即使正常完成也要关闭
+                    try:
+                        # 使用shutdown的返回值或异常来判断是否已关闭
+                        batch_process_pool.shutdown(wait=True)
+                        logger.debug(f"批次进程池已正常关闭")
+                    except RuntimeError:
+                        # 进程池已经关闭，忽略
+                        pass
+                    except Exception as cleanup_err:
+                        logger.warning(f"清理批次进程池时出错: {cleanup_err}")
+            else:
+                # 没有market_id的情况，使用asyncio.gather
+                try:
+                    results = await asyncio.gather(*futures)
+                    for result in results:
+                        cost_dict[result[0]] = result[1]
+                        completed_count += 1
+                except Exception as e:
+                    traceback.print_exc()
+                    logger.error(f"批次计算任务失败: {e}")
+                    has_error = True
+                    # 最激进的清理策略：直接kill进程池中的所有进程
+                    logger.warning(f"批次计算失败，强制kill进程池中的所有进程")
+                    killed_count, _ = IndustryManager._force_kill_process_pool(
+                        batch_process_pool, running_type, batch_futures_map)
+                    try:
+                        batch_process_pool.shutdown(
+                            wait=False, cancel_futures=True)
+                    except Exception as shutdown_err:
+                        logger.debug(f"shutdown进程池时出错（可能已关闭）: {shutdown_err}")
+                    # 对于失败的批次，仍然增加计数
+                    completed_count += len(batch_type_ids)
+                finally:
+                    # 确保进程池被清理
+                    try:
+                        # 使用shutdown的返回值或异常来判断是否已关闭
+                        batch_process_pool.shutdown(wait=True)
+                        logger.debug(f"批次进程池已正常关闭")
+                    except RuntimeError:
+                        # 进程池已经关闭，忽略
+                        pass
+                    except Exception as cleanup_err:
+                        logger.warning(f"清理批次进程池时出错: {cleanup_err}")
 
+            # 清理当前批次的futures
+            futures.clear()
+
+        # 所有批次处理完成
+        if market_id is not None and progress_key:
             logger.info(
                 f"calculate_cost_async complete. result_key:{result_key}")
             # 计算完成，将结果存储到 Redis
@@ -404,11 +687,6 @@ class IndustryManager(metaclass=SingletonMeta):
                     })
                     logger.info(
                         f"result save complete. result_key:{result_key}")
-        else:
-            # 如果没有 market_id，使用原来的方式
-            results = await asyncio.gather(*futures)
-            for result in results:
-                cost_dict[result[0]] = result[1]
         await tqdm_manager.complete_mission(f"calculate_cost_{op.user_name}_{market_id}")
 
         return cost_dict
@@ -530,8 +808,15 @@ class IndustryManager(metaclass=SingletonMeta):
 
         op.index_product_dict = {
             product["index_id"]: product["product_type_id"] for product in products}
-        op.product_num_dict = {
-            product["product_type_id"]: product["quantity"] for product in products}
+        # 修复：累加相同 product_type_id 的数量，而不是覆盖
+        op.product_num_dict = {}
+        for product in products:
+            product_type_id = product["product_type_id"]
+            quantity = product["quantity"]
+            if product_type_id in op.product_num_dict:
+                op.product_num_dict[product_type_id] += quantity
+            else:
+                op.product_num_dict[product_type_id] = quantity
 
         last_progress = 0
         # await tqdm_manager.add_mission(f"create_plan_{plan_name}", len(products))
@@ -746,6 +1031,14 @@ class IndustryManager(metaclass=SingletonMeta):
         return await get_user_all_container_permission(user_id)
 
     @classmethod
+    async def get_location_flag_list(cls, asset_owner_id: int, asset_container_id: int):
+        return await get_location_flag_list(asset_owner_id, asset_container_id)
+
+    @classmethod
+    async def update_container_permission_location_flag(cls, user_id: str, data):
+        return await update_container_permission_location_flag(user_id, data)
+
+    @classmethod
     async def update_container_permission_tag(cls, user_id: str, data):
         return await update_container_permission_tag(user_id, data)
 
@@ -911,8 +1204,16 @@ class IndustryManager(metaclass=SingletonMeta):
             # 从数据库获取计划的产品条目数量（不同产品类型的数量）
             try:
                 product_count = 0
-                async for product in await EveIndustryPlanProductDBUtils.select_all_by_user_name_and_plan_name(user_id, plan_name):
-                    product_count += 1  # 统计产品条目数量，而不是数量总和
+                product_data_obj = await EveIndustryPlanProductJSONBDBUtils.select_by_user_name_and_plan_name(user_id, plan_name)
+                if product_data_obj and product_data_obj.product_data:
+                    product_data = product_data_obj.product_data
+                    for product in product_data:
+                        if product.get("type") == "product":
+                            product_count += 1  # 单个产品，计数 +1
+                        elif product.get("type") == "group":
+                            # 产品组，统计组内产品数量
+                            products = product.get("products", [])
+                            product_count += len(products)
             except Exception as e:
                 logger.warning(f"获取计划产品条目数量失败: {e}, 将使用默认值0")
                 product_count = 0
@@ -1248,7 +1549,7 @@ async def _async_calculation_worker(type_id: int, plan_data: dict):
 
     try:
         # 创建操作中心对象
-        sub_op = await ConfigFlowOperateCenter.create(
+        sub_op = ConfigFlowOperateCenter(
             plan_data["user_name"],
             plan_data["plan_name"],
             plan_data["plan_settings"],
@@ -1256,6 +1557,7 @@ async def _async_calculation_worker(type_id: int, plan_data: dict):
             dm=[ndm, pdm, rdm, sdm]
         )
 
+        await sub_op._async_init(plan_data["user_name"], plan_data['real_plan_name'])
         op = sub_op
         await sub_op.init_at_begin()
 
@@ -1279,7 +1581,7 @@ async def _async_calculation_worker(type_id: int, plan_data: dict):
         node_dict = {
             node['type_id']: node for node in await NIU.get_user_plan_node_with_distance(op.user_name, op.plan_name, ndm=ndm)
         }
-        await MarketManager().update_jita_price(rdm=rdm)
+        # await MarketManager().update_jita_price(rdm=rdm)
         result = await get_plan_tableview_data(op, node_dict, subprocess=True, inrdm=rdm, sdm=sdm)
         return result
     finally:

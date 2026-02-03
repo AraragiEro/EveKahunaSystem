@@ -70,12 +70,12 @@ const handleSearchItemCount = async () => {
     const payload: any = {
         item_name: handleSearchItemCountForm.value.item_name
     }
-    
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
     }
-    
+
     const res = await http.post('/EVE/asset/searchContainerByItemNameAndQuantity', payload)
     const data = await res.json()
     console.log("handleSearchItemCount", data)
@@ -101,19 +101,38 @@ const handleAddIndustrypermision = async (row: any) => {
         return
     }
     console.log("handleSearchItemCountdialogLoading", handleSearchItemCountdialogLoading.value)
-    const payload: any = {
-        container: row.container,
-        asset: row.asset,
-        structure: row.structure,
-        system: row.system,
-        tag: row.container.tag
+
+    // 数据转换：兼容Station和Structure两种情况
+    // 处理container：确保有item_id字段（Station节点使用station_id）
+    const container: any = { ...row.container }
+    if (!container.item_id && container.station_id) {
+        container.item_id = container.station_id
     }
-    
+
+    // 处理structure：确保有structure_id字段（Station节点使用station_id）
+    const structure: any = { ...row.structure }
+    if (!structure.structure_id && structure.station_id) {
+        structure.structure_id = structure.station_id
+    }
+    // 同时确保structure_name字段存在（Station节点使用station_name）
+    if (!structure.structure_name && structure.station_name) {
+        structure.structure_name = structure.station_name
+    }
+
+    const payload: any = {
+        container: container,
+        asset: row.asset,
+        structure: structure,
+        system: row.system,
+        tag: row.container.tag,
+        location_flag: row.container.location_flag
+    }
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
     }
-    
+
     const res = await http.post('/EVE/industry/addIndustrypermision', payload)
     const data = await res.json()
     if (data.status !== 200) {
@@ -129,18 +148,18 @@ const handleAddIndustrypermision = async (row: any) => {
 
 const userContainerPermission = ref([])
 const userContainerPermissionLoading = ref(false)
-const getUserAllContainerPermission = async ( force_refresh = false ) => {
+const getUserAllContainerPermission = async (force_refresh = false) => {
     console.log("getUserAllContainerPermission in")
     userContainerPermissionLoading.value = true
     const payload: any = {
         force_refresh: force_refresh
     }
-    
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
     }
-    
+
     const res = await http.post('/EVE/industry/getUserAllContainerPermission', payload)
     const data = await res.json()
     console.log("getUserAllContainerPermission data", data)
@@ -159,12 +178,12 @@ const handleDeleteIndustrypermision = async (row: any) => {
         asset_owner_id: row.asset_owner_id,
         asset_container_id: row.asset_container_id
     }
-    
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
     }
-    
+
     const res = await http.post('/EVE/industry/deleteIndustrypermision', payload)
     const data = await res.json()
     if (data.status !== 200) {
@@ -196,19 +215,19 @@ const handleSaveTag = async () => {
     if (!editingRow.value) {
         return
     }
-    
+
     editTagLoading.value = true
     const payload: any = {
         asset_owner_id: editingRow.value.asset_owner_id,
         asset_container_id: editingRow.value.asset_container_id,
         tag: newTag.value
     }
-    
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
     }
-    
+
     try {
         const res = await http.post('/EVE/industry/updateContainerPermissionTag', payload)
         const data = await res.json()
@@ -231,12 +250,12 @@ const syncPermissionToPlanConfigLoading = ref(false)
 const handleSyncPermissionToPlanConfig = async () => {
     syncPermissionToPlanConfigLoading.value = true
     const payload: any = {}
-    
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
     }
-    
+
     try {
         const res = await http.post('/EVE/industry/syncPermissionToPlanConfig', payload)
         const data = await res.json()
@@ -244,13 +263,13 @@ const handleSyncPermissionToPlanConfig = async () => {
             ElMessage.error(data.message || '同步失败')
             return
         }
-        
+
         // 显示详细的同步结果
         const result = data.data || {}
         const created = result.created || 0
         const updated = result.updated || 0
         const deleted = result.deleted || 0
-        
+
         let message = '同步完成'
         if (created > 0 || updated > 0 || deleted > 0) {
             const parts: string[] = []
@@ -261,7 +280,7 @@ const handleSyncPermissionToPlanConfig = async () => {
         } else {
             message = '同步完成：无需更改'
         }
-        
+
         ElMessage.success(message)
         // 可选：刷新权限列表
         await getUserAllContainerPermission(true)
@@ -285,10 +304,54 @@ const fetchTypeSuggestions = async (queryString: string, cb: (suggestions: TypeI
 
     TypeSuggestions.value = data.data
     const results = queryString
-    ? TypeSuggestions.value
-    : []
+        ? TypeSuggestions.value
+        : []
 
     cb(results)
+}
+
+// locationflag設置
+const locationFlagList = ref<Array<{ value: string, label: string }>>([])
+const locationFlagListLoading = ref(false)
+const handleFocusLocationFlag = async (row: any) => {
+    locationFlagListLoading.value = true
+    const payload = {
+        asset_owner_id: row.asset_owner_id,
+        asset_container_id: row.asset_container_id
+    }
+    const res = await http.post('/EVE/industry/getLocationFlagList', payload)
+    const data = await res.json()
+    if (data.status !== 200) {
+        ElMessage.error(data.message)
+        locationFlagListLoading.value = false
+        return
+    }
+
+    locationFlagList.value = data.data
+    locationFlagListLoading.value = false
+}
+const locationFlagOptions = computed(() => {
+    return locationFlagList.value.map(item => ({
+        value: item.value,
+        label: item.label
+    }))
+})
+
+const handleChangeLocationFlag = async (row: any) => {
+    const payload: any = {
+        asset_owner_id: row.asset_owner_id,
+        asset_container_id: row.asset_container_id,
+        location_flag: row.location_flag
+    }
+    const res = await http.post('/EVE/industry/updateContainerPermissionLocationFlag', payload)
+    const data = await res.json()
+    if (data.status !== 200) {
+        ElMessage.error(data.message)
+        return
+    }
+    ElMessage.success(data.message)
+    await getUserAllContainerPermission(true)
+    console.log("handleChangeLocationFlag", row)
 }
 
 onMounted(async () => {
@@ -302,49 +365,42 @@ onMounted(async () => {
     <div style="display: flex; flex-direction: horizontal; gap: 10px;">
         <div style="min-width: 300px;">
             <!-- 管理员用户选择器 -->
-            <div v-if="haveAdminRole" style="margin-bottom: 16px; padding: 16px; background-color: #f5f7fa; border-radius: 4px; border: 1px solid #e4e7ed;">
+            <div v-if="haveAdminRole"
+                style="margin-bottom: 16px; padding: 16px; background-color: #f5f7fa; border-radius: 4px; border: 1px solid #e4e7ed;">
                 <el-form-item label="选择用户" style="margin-bottom: 0;">
-                    <el-select
-                        v-model="selectedUserName"
-                        placeholder="选择用户（留空显示当前用户）"
-                        filterable
-                        clearable
-                        :loading="userListLoading"
-                        style="width: 300px;"
-                    >
-                        <el-option
-                            v-for="user in userList"
-                            :key="user.userName"
-                            :label="user.userName"
-                            :value="user.userName"
-                        />
+                    <el-select v-model="selectedUserName" placeholder="选择用户（留空显示当前用户）" filterable clearable
+                        :loading="userListLoading" style="width: 300px;">
+                        <el-option v-for="user in userList" :key="user.userName" :label="user.userName"
+                            :value="user.userName" />
                     </el-select>
                 </el-form-item>
             </div>
             <el-button type="primary" @click="handleSearchItemCountdialog">搜索物品数目新增许可</el-button>
-            <el-button type="primary" @click="handleSearchContainer">检索容器新增许可</el-button>
-            <el-button type="primary" @click="handleSyncPermissionToPlanConfig" :loading="syncPermissionToPlanConfigLoading">同步许可到计划配置</el-button>
-            <el-table
-                :data="userContainerPermission"
-                border
-                v-loading="userContainerPermissionLoading"
-                show-overflow-tooltip
-            >
+            <el-button type="primary" @click="handleSearchContainer">刷新容器许可</el-button>
+            <el-button type="primary" @click="handleSyncPermissionToPlanConfig"
+                :loading="syncPermissionToPlanConfigLoading">同步许可到计划配置</el-button>
+            <el-table :data="userContainerPermission" border v-loading="userContainerPermissionLoading"
+                show-overflow-tooltip>
                 <el-table-column label="资产类型" prop="owner_type" />
-                <el-table-column label="所有者" prop="owner_name" width="200"/>
+                <el-table-column label="所有者" prop="owner_name" width="200" />
                 <el-table-column label="容器ID" prop="asset_container_id" />
-                <el-table-column label="建筑" prop="structure_name" width="250"/>
+                <el-table-column label="建筑" prop="structure_name" width="250" />
                 <el-table-column label="星系" prop="system_name" />
                 <el-table-column label="标签" prop="tag" width="200" sortable>
                     <template #default="scope">
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <span>{{ scope.row.tag }}</span>
-                            <el-button 
-                                size="small" 
-                                :icon="Edit"
-                                @click="handleEditTag(scope.row)"
-                            />
+                            <el-button size="small" :icon="Edit" @click="handleEditTag(scope.row)" />
                         </div>
+                    </template>
+                </el-table-column>
+                <el-table-column label="位置" prop="location_flag" width="200">
+                    <template #default="scope">
+                        <el-select v-model="scope.row.location_flag" :loading="locationFlagListLoading"
+                            @focus="handleFocusLocationFlag(scope.row)" @change="handleChangeLocationFlag(scope.row)">
+                            <el-option v-for="item in locationFlagOptions" :key="item.value" :label="item.label"
+                                :value="item.value" />
+                        </el-select>
                     </template>
                 </el-table-column>
                 <el-table-column label="操作" width="200">
@@ -357,34 +413,31 @@ onMounted(async () => {
         </div>
     </div>
 
-    <el-dialog
-        v-model="handleSearchItemCountdialogVisible"
-        title="搜索物品新增许可"
-        width="70%"
-    >
+    <el-dialog v-model="handleSearchItemCountdialogVisible" title="搜索物品新增许可" width="70%">
         <el-form :model="handleSearchItemCountForm" label-width="120px">
             <el-form-item label="物品名">
-                <el-autocomplete
-                    v-model="handleSearchItemCountForm.item_name"
-                    :fetch-suggestions="fetchTypeSuggestions"
-                    value-key="value"
-                />
+                <el-autocomplete v-model="handleSearchItemCountForm.item_name" :fetch-suggestions="fetchTypeSuggestions"
+                    value-key="value" />
             </el-form-item>
             <el-button type="primary" @click="handleSearchItemCount">
                 搜索
             </el-button>
             <el-form-item label="搜索结果">
-                <el-table
-                    :data="handleSearchItemCountForm.data"
-                    border
-                    v-loading="handleSearchItemCountdialogLoading"
-                    max-height="700px"
-                >
+                <el-table :data="handleSearchItemCountForm.data" border v-loading="handleSearchItemCountdialogLoading"
+                    max-height="700px">
                     <el-table-column label="名称" prop="asset.type_name" />
                     <el-table-column label="数量" prop="asset.quantity" />
-                    <el-table-column label="建筑" prop="structure.structure_name" />
-                    <el-table-column label="容器ID" prop="container.item_id" />
-                    <el-table-column label="容器位置" prop="container.location_flag" />
+                    <el-table-column label="建筑">
+                        <template #default="scope">
+                            {{ scope.row.structure?.structure_name || scope.row.structure?.station_name || '-' }}
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="容器ID">
+                        <template #default="scope">
+                            {{ scope.row.container?.item_id || scope.row.container?.station_id || '-' }}
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="容器位置" prop="asset.location_flag" />
                     <el-table-column label="标签" prop="container.tag">
                         <template #default="scope">
                             <el-input v-model="scope.row.container.tag" placeholder="请输入标签" />
@@ -400,29 +453,16 @@ onMounted(async () => {
         </el-form>
     </el-dialog>
 
-    <el-dialog
-        v-model="editTagDialogVisible"
-        title="修改标签"
-        width="400px"
-    >
+    <el-dialog v-model="editTagDialogVisible" title="修改标签" width="400px">
         <el-form :model="{ tag: newTag }" label-width="80px">
             <el-form-item label="标签">
-                <el-input 
-                    v-model="newTag" 
-                    placeholder="请输入标签"
-                    maxlength="100"
-                    show-word-limit
-                />
+                <el-input v-model="newTag" placeholder="请输入标签" maxlength="100" show-word-limit />
             </el-form-item>
         </el-form>
         <template #footer>
             <span class="dialog-footer">
                 <el-button @click="editTagDialogVisible = false">取消</el-button>
-                <el-button 
-                    type="primary" 
-                    @click="handleSaveTag"
-                    :loading="editTagLoading"
-                >
+                <el-button type="primary" @click="handleSaveTag" :loading="editTagLoading">
                     确定
                 </el-button>
             </span>

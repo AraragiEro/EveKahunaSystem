@@ -41,7 +41,9 @@ def permission_required(req_permissions: list[str]):
             # 检查权限
             if not permission_access:
                 logger.error(f"{f.__name__}: 用户 {user_id} 权限不足，缺少权限 {req_permissions}")
-                return jsonify({'error': '权限不足'}), 403
+                response = jsonify({'error': '权限不足'})
+                response.status_code = 403
+                return response
             
             return await f(*args, **kwargs)
         return decorated_function
@@ -77,11 +79,13 @@ def role_required(req_roles: list[str], res_code = 403, message: str = '权限�
             logger.info(f"all_roles: {all_roles}")
             logger.info(f"req_roles: {req_roles}")
             if not role_access:
+                response = jsonify({'message': message})
+                response.status_code = res_code
                 if "vip_alpha" in req_roles or "vip_omega" in req_roles:
-                    return jsonify({'message': message}), res_code
+                    return response
                 else:
                     logger.error(f"{f.__name__}: 用户 {user_id} 权限不足，缺少角色 {req_roles}")
-                    return jsonify({'message': message}), res_code
+                    return response
             return await f(*args, **kwargs)
         return decorated_function
     return decorator

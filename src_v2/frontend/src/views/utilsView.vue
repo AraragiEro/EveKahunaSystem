@@ -14,6 +14,12 @@ const utils = ref([
     icon: 'icon-2',
     url: 'https://seat.winterco.org/',
   },
+  {
+    name: '联盟合同',
+    description: '联盟合同',
+    icon: 'icon-3',
+    url: '/allianceContract',
+  }
 ])
 
 </script>

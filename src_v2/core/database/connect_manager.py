@@ -1,17 +1,15 @@
+import asyncio
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Type
-import asyncio
-import os
-from sqlalchemy import text
-from sqlalchemy.orm import DeclarativeMeta
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base
 
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import TransactionError
-
 from redis.asyncio import Redis
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import DeclarativeMeta, declarative_base, sessionmaker
 
 from ..config.config import config
 from ..log import logger
@@ -20,7 +18,6 @@ ConfigModel = declarative_base()
 CacheModel = declarative_base()
 PostgreModel = declarative_base()
 
-from . import model
 
 """
 需求：
@@ -30,6 +27,8 @@ from . import model
     若不存在，则创建
 3. self.session保存session
 """
+
+
 class PostgreDatabaseManager():
     def __init__(self):
         self.session = None
@@ -90,7 +89,7 @@ class PostgreDatabaseManager():
     def _get_postgresql_type(self, col_type):
         """将 SQLAlchemy 类型转换为 PostgreSQL 类型字符串"""
         from sqlalchemy.dialects import postgresql
-        
+
         # 尝试使用 SQLAlchemy 的类型编译功能（最可靠的方法）
         try:
             # 使用 PostgreSQL 方言编译类型
@@ -100,7 +99,7 @@ class PostgreDatabaseManager():
         except Exception:
             # 如果编译失败，使用简单的类型映射
             pass
-        
+
         # 简单的类型映射作为后备方案
         type_mapping = {
             'Integer': 'INTEGER',
@@ -115,7 +114,7 @@ class PostgreDatabaseManager():
             'Boolean': 'BOOLEAN',
             'LargeBinary': 'BYTEA',
         }
-        
+
         # 尝试通过类型名称匹配
         type_name = type(col_type).__name__
         if type_name in type_mapping:
@@ -124,7 +123,7 @@ class PostgreDatabaseManager():
                 base_type = self._get_postgresql_type(col_type.item_type)
                 return f'{base_type}[]'
             return type_mapping[type_name]
-        
+
         # 默认返回 TEXT
         return 'TEXT'
 
@@ -146,7 +145,8 @@ class PostgreDatabaseManager():
         """
         # 检查列数量
         if len(existing_structure) != len(model_structure):
-            logger.info(f"表结构不一致：列数量不同 (数据库: {len(existing_structure)}, 模型: {len(model_structure)})")
+            logger.info(
+                f"表结构不一致：列数量不同 (数据库: {len(existing_structure)}, 模型: {len(model_structure)})")
             return False
 
         # 检查每个列
@@ -172,30 +172,58 @@ class PostgreDatabaseManager():
     def _extract_column_default(self, column):
         """
         提取列的默认值，返回可用于SQL的默认值字符串
-        
+
         Args:
             column: SQLAlchemy Column 对象
-            
+
         Returns:
             tuple: (default_value_sql, has_default) 
                 - default_value_sql: SQL字符串，如果为None表示无默认值
                 - has_default: 是否有默认值
         """
+        import json
+
+        from sqlalchemy.dialects.postgresql import JSON, JSONB
         from sqlalchemy.schema import ColumnDefault
-        # FunctionElement 可能在不同的SQLAlchemy版本中位置不同
-        # 使用 hasattr 检查而不是直接导入
-        
+
+        # 检查列类型是否为JSON/JSONB
+        is_json_type = isinstance(column.type, (JSONB, JSON))
+
         # 检查 server_default（数据库层面的默认值）
         if column.server_default is not None:
             if hasattr(column.server_default, 'arg'):
                 # 处理 text() 包装的默认值
                 default_arg = column.server_default.arg
                 if isinstance(default_arg, str):
+                    # 如果是JSON类型，确保正确格式化
+                    if is_json_type:
+                        # 检查是否是原始JSON字符串（以{或[开头，且不包含引号）
+                        stripped = default_arg.strip()
+                        if stripped.startswith(('{', '[')) and not (stripped.startswith("'") or stripped.startswith('"')):
+                            # 原始JSON字符串，需要加引号和类型转换
+                            return f"'{default_arg}'::jsonb", True
+                        elif stripped.startswith(("'", '"')):
+                            # 已经有引号，只需要添加类型转换
+                            return f"{default_arg}::jsonb", True
                     return default_arg, True
                 elif hasattr(default_arg, 'text'):
-                    return default_arg.text, True
-            return str(column.server_default), True
-        
+                    text_value = default_arg.text
+                    if is_json_type:
+                        stripped = text_value.strip()
+                        if stripped.startswith(('{', '[')) and not (stripped.startswith("'") or stripped.startswith('"')):
+                            return f"'{text_value}'::jsonb", True
+                        elif stripped.startswith(("'", '"')):
+                            return f"{text_value}::jsonb", True
+                    return text_value, True
+            server_default_str = str(column.server_default)
+            if is_json_type:
+                stripped = server_default_str.strip()
+                if stripped.startswith(('{', '[')) and not (stripped.startswith("'") or stripped.startswith('"')):
+                    return f"'{server_default_str}'::jsonb", True
+                elif stripped.startswith(("'", '"')):
+                    return f"{server_default_str}::jsonb", True
+            return server_default_str, True
+
         # 检查 default（应用层面的默认值）
         if column.default is not None:
             default = column.default
@@ -224,6 +252,11 @@ class PostgreDatabaseManager():
                                 return f"'{value}'", True
                             elif isinstance(value, datetime):
                                 return f"'{value.isoformat()}'", True
+                            elif is_json_type and isinstance(value, (dict, list)):
+                                # JSON/JSONB类型，序列化为JSON字符串
+                                json_str = json.dumps(
+                                    value, ensure_ascii=False)
+                                return f"'{json_str}'::jsonb", True
                             else:
                                 return str(value), True
                         except Exception as e:
@@ -235,9 +268,13 @@ class PostgreDatabaseManager():
                             return f"'{arg}'", True
                         elif isinstance(arg, datetime):
                             return f"'{arg.isoformat()}'", True
+                        elif is_json_type and isinstance(arg, (dict, list)):
+                            # JSON/JSONB类型，序列化为JSON字符串
+                            json_str = json.dumps(arg, ensure_ascii=False)
+                            return f"'{json_str}'::jsonb", True
                         else:
                             return str(arg), True
-        
+
         return None, False
 
     async def _check_foreign_key_constraint_exists(self, conn, table_name: str, constraint_name: str) -> bool:
@@ -254,11 +291,11 @@ class PostgreDatabaseManager():
         })
         return result.scalar() > 0
 
-    async def _validate_foreign_key_data(self, conn, table_name: str, col_name: str, 
+    async def _validate_foreign_key_data(self, conn, table_name: str, col_name: str,
                                          ref_table: str, ref_col: str) -> tuple:
         """
         验证外键数据完整性
-        
+
         Returns:
             tuple: (is_valid, invalid_count, invalid_samples)
                 - is_valid: 是否有效
@@ -278,7 +315,7 @@ class PostgreDatabaseManager():
         """)
         result = await conn.execute(check_sql)
         invalid_samples = [row[0] for row in result]
-        
+
         # 获取总数
         count_sql = text(f"""
             SELECT COUNT(*) 
@@ -291,11 +328,11 @@ class PostgreDatabaseManager():
         """)
         count_result = await conn.execute(count_sql)
         invalid_count = count_result.scalar() or 0
-        
+
         return invalid_count == 0, invalid_count, invalid_samples
 
-    def _get_foreign_key_constraint_sql(self, table_name: str, col_name: str, 
-                                        ref_table: str, ref_col: str, 
+    def _get_foreign_key_constraint_sql(self, table_name: str, col_name: str,
+                                        ref_table: str, ref_col: str,
                                         constraint_name: str, on_delete=None, on_update=None) -> str:
         """生成外键约束SQL语句"""
         sql = (
@@ -304,18 +341,18 @@ class PostgreDatabaseManager():
             f'FOREIGN KEY ("{col_name}") '
             f'REFERENCES "{ref_table}" ("{ref_col}")'
         )
-        
+
         if on_delete:
             sql += f' ON DELETE {on_delete}'
         if on_update:
             sql += f' ON UPDATE {on_update}'
-        
+
         return sql
 
     async def _fix_sequence_for_table(self, conn, table_name: str, model_class):
         """
         检查并修复表的自增主键序列
-        
+
         Args:
             conn: 数据库连接对象
             table_name: 表名
@@ -326,21 +363,22 @@ class PostgreDatabaseManager():
             col for col in model_class.__table__.columns
             if col.primary_key and col.autoincrement
         ]
-        
+
         if not autoincrement_pk_cols:
             return
-        
+
         for col in autoincrement_pk_cols:
             col_name = col.name
             # 检查列类型，只有整数类型才需要序列
-            from sqlalchemy import Integer, BigInteger, SmallInteger
+            from sqlalchemy import BigInteger, Integer, SmallInteger
             if not isinstance(col.type, (Integer, BigInteger, SmallInteger)):
                 # 跳过非整数类型的主键（如 Text 类型的主键）
-                logger.debug(f"跳过非整数类型的主键列 {table_name}.{col_name} (类型: {col.type})")
+                logger.debug(
+                    f"跳过非整数类型的主键列 {table_name}.{col_name} (类型: {col.type})")
                 continue
-                
+
             sequence_name = f"{table_name}_{col_name}_seq"
-            
+
             # 使用保存点来隔离序列修复操作，避免影响主事务
             # 保存点名称使用简化的格式，避免特殊字符问题
             savepoint_name = f"sp_{table_name[:20]}_{col_name}"
@@ -349,7 +387,7 @@ class PostgreDatabaseManager():
                 # 创建保存点
                 await conn.execute(text(f"SAVEPOINT {savepoint_name}"))
                 savepoint_created = True
-                
+
                 # 检查序列是否存在
                 check_sequence_query = text("""
                     SELECT EXISTS (
@@ -359,7 +397,7 @@ class PostgreDatabaseManager():
                 """)
                 result = await conn.execute(check_sequence_query, {"seq_name": sequence_name})
                 sequence_exists = result.scalar()
-                
+
                 # 检查列的默认值是否使用序列
                 check_default_query = text("""
                     SELECT column_default 
@@ -371,27 +409,30 @@ class PostgreDatabaseManager():
                     "col_name": col_name
                 })
                 default_value = result.scalar()
-                
+
                 # 检查默认值是否包含 nextval（PostgreSQL 序列函数）
-                has_sequence_default = default_value and 'nextval' in str(default_value).lower()
-                
+                has_sequence_default = default_value and 'nextval' in str(
+                    default_value).lower()
+
                 # 如果序列不存在或默认值不正确，需要修复
                 if not sequence_exists or not has_sequence_default:
                     # 创建序列
                     if not sequence_exists:
                         # 获取当前最大值
-                        max_val_query = text(f'SELECT COALESCE(MAX("{col_name}"), 0) FROM "{table_name}"')
+                        max_val_query = text(
+                            f'SELECT COALESCE(MAX("{col_name}"), 0) FROM "{table_name}"')
                         max_result = await conn.execute(max_val_query)
                         max_val = max_result.scalar() or 0
-                        
+
                         # 创建序列，起始值为当前最大值+1
                         create_seq_sql = text(
                             f"CREATE SEQUENCE IF NOT EXISTS {sequence_name} "
                             f"START WITH {max_val + 1}"
                         )
                         await conn.execute(create_seq_sql)
-                        logger.info(f"已为表 {table_name} 的列 {col_name} 创建序列 {sequence_name}")
-                    
+                        logger.info(
+                            f"已为表 {table_name} 的列 {col_name} 创建序列 {sequence_name}")
+
                     # 设置列的默认值为序列的 nextval
                     alter_col_sql = text(
                         f'ALTER TABLE "{table_name}" '
@@ -400,34 +441,37 @@ class PostgreDatabaseManager():
                     )
                     await conn.execute(alter_col_sql)
                     logger.info(f"已为表 {table_name} 的列 {col_name} 设置序列默认值")
-                    
+
                     # 确保序列拥有者为表
-                    owner_sql = text(f"ALTER SEQUENCE {sequence_name} OWNED BY \"{table_name}\".\"{col_name}\"")
+                    owner_sql = text(
+                        f"ALTER SEQUENCE {sequence_name} OWNED BY \"{table_name}\".\"{col_name}\"")
                     await conn.execute(owner_sql)
                     logger.info(f"已设置序列 {sequence_name} 的拥有者")
-                
+
                 # 释放保存点
                 if savepoint_created:
                     await conn.execute(text(f"RELEASE SAVEPOINT {savepoint_name}"))
-                
+
             except Exception as e:
                 # 回滚到保存点，不影响主事务
                 if savepoint_created:
                     try:
                         await conn.execute(text(f"ROLLBACK TO SAVEPOINT {savepoint_name}"))
-                        logger.warning(f"修复表 {table_name} 的列 {col_name} 序列失败，已回滚: {e}")
+                        logger.warning(
+                            f"修复表 {table_name} 的列 {col_name} 序列失败，已回滚: {e}")
                     except Exception as rollback_error:
                         # 如果回滚也失败，记录错误但不抛出异常
                         logger.error(f"回滚保存点失败: {rollback_error}")
                 else:
                     # 如果保存点创建失败，只记录警告
-                    logger.warning(f"无法创建保存点修复表 {table_name} 的列 {col_name} 序列: {e}")
+                    logger.warning(
+                        f"无法创建保存点修复表 {table_name} 的列 {col_name} 序列: {e}")
                 # 不抛出异常，允许继续执行其他表的处理
 
     async def _migrate_table_incremental(self, conn, table_name: str, model_class):
         """
         生产环境增量迁移：使用 ALTER TABLE 进行增量迁移，不删除表
-        
+
         Args:
             conn: 数据库连接对象
             table_name: 表名
@@ -436,32 +480,38 @@ class PostgreDatabaseManager():
         is_dev = self._is_development_mode()
         existing_structure = await self._get_existing_table_structure(conn, table_name)
         model_structure = self._get_model_table_structure(model_class)
-        
+
         # 1. 处理新增列
         for col_name, col_info in model_structure.items():
             if col_name not in existing_structure:
                 col = model_class.__table__.columns[col_name]
                 col_type = self._get_postgresql_type(col.type)
-                
+
                 # 步骤1：先添加为可空列
-                add_col_sql = text(f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type}')
+                add_col_sql = text(
+                    f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type}')
                 await conn.execute(add_col_sql)
                 logger.info(f"已添加可空列 {table_name}.{col_name}")
-                
+
                 # 步骤2：处理默认值
-                default_value_sql, has_default = self._extract_column_default(col)
+                default_value_sql, has_default = self._extract_column_default(
+                    col)
                 if has_default and default_value_sql:
                     # 填充现有数据的默认值
-                    update_sql = text(f'UPDATE "{table_name}" SET "{col_name}" = {default_value_sql} WHERE "{col_name}" IS NULL')
+                    update_sql = text(
+                        f'UPDATE "{table_name}" SET "{col_name}" = {default_value_sql} WHERE "{col_name}" IS NULL')
                     result = await conn.execute(update_sql)
-                    row_count = result.rowcount if hasattr(result, 'rowcount') else 0
-                    logger.info(f"已为 {row_count} 行数据填充默认值 {table_name}.{col_name}")
-                
+                    row_count = result.rowcount if hasattr(
+                        result, 'rowcount') else 0
+                    logger.info(
+                        f"已为 {row_count} 行数据填充默认值 {table_name}.{col_name}")
+
                 # 步骤3：数据完整性验证
-                check_null_sql = text(f'SELECT COUNT(*) FROM "{table_name}" WHERE "{col_name}" IS NULL')
+                check_null_sql = text(
+                    f'SELECT COUNT(*) FROM "{table_name}" WHERE "{col_name}" IS NULL')
                 result = await conn.execute(check_null_sql)
                 null_count = result.scalar() or 0
-                
+
                 if null_count > 0:
                     if not col.nullable:
                         # 需要NOT NULL但没有默认值
@@ -473,13 +523,16 @@ class PostgreDatabaseManager():
                                 f"- 请先手动填充数据或添加默认值后再迁移"
                             )
                             if is_dev:
-                                logger.warning(f"[开发模式] {error_msg}，将跳过NOT NULL约束")
+                                logger.warning(
+                                    f"[开发模式] {error_msg}，将跳过NOT NULL约束")
                             else:
                                 raise ValueError(error_msg)
                         else:
                             # 有默认值但未正确应用
-                            logger.warning(f"列 {col_name} 仍有 {null_count} 行NULL值，但已设置默认值，将尝试重新填充")
-                            update_sql = text(f'UPDATE "{table_name}" SET "{col_name}" = {default_value_sql} WHERE "{col_name}" IS NULL')
+                            logger.warning(
+                                f"列 {col_name} 仍有 {null_count} 行NULL值，但已设置默认值，将尝试重新填充")
+                            update_sql = text(
+                                f'UPDATE "{table_name}" SET "{col_name}" = {default_value_sql} WHERE "{col_name}" IS NULL')
                             await conn.execute(update_sql)
                             # 再次检查
                             result = await conn.execute(check_null_sql)
@@ -487,45 +540,50 @@ class PostgreDatabaseManager():
                             if null_count > 0:
                                 error_msg = f"列 {col_name} 仍有 {null_count} 行NULL值，无法添加NOT NULL约束"
                                 if is_dev:
-                                    logger.warning(f"[开发模式] {error_msg}，将跳过NOT NULL约束")
+                                    logger.warning(
+                                        f"[开发模式] {error_msg}，将跳过NOT NULL约束")
                                 else:
                                     raise ValueError(error_msg)
-                
+
                 # 步骤4：添加NOT NULL约束（如果需要）
                 if not col.nullable and null_count == 0:
-                    alter_not_null_sql = text(f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" SET NOT NULL')
+                    alter_not_null_sql = text(
+                        f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" SET NOT NULL')
                     await conn.execute(alter_not_null_sql)
                     logger.info(f"已为列 {col_name} 添加 NOT NULL 约束")
-                
+
                 # 步骤5：设置数据库默认值（如果有server_default）
                 if col.server_default is not None:
                     default_value_sql, _ = self._extract_column_default(col)
                     if default_value_sql:
-                        alter_default_sql = text(f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" SET DEFAULT {default_value_sql}')
+                        alter_default_sql = text(
+                            f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" SET DEFAULT {default_value_sql}')
                         await conn.execute(alter_default_sql)
                         logger.info(f"已设置列 {col_name} 的数据库默认值")
-        
+
         # 2. 添加外键约束
         for col in model_class.__table__.columns:
             for fk in col.foreign_keys:
                 fk_name = f'fk_{table_name}_{col.name}'
                 ref_table = fk.column.table.name
                 ref_col = fk.column.name
-                
+
                 # 检查约束是否已存在
                 if await self._check_foreign_key_constraint_exists(conn, table_name, fk_name):
                     logger.info(f"外键约束 {fk_name} 已存在，跳过")
                     continue
-                
+
                 # 检查引用表是否存在
                 ref_table_exists = await self._check_table_exists(conn, ref_table)
                 if not ref_table_exists:
                     if is_dev:
-                        logger.warning(f"[开发模式] 引用表 {ref_table} 不存在，跳过外键约束 {fk_name}")
+                        logger.warning(
+                            f"[开发模式] 引用表 {ref_table} 不存在，跳过外键约束 {fk_name}")
                         continue
                     else:
-                        raise ValueError(f"无法添加外键约束 {fk_name}：引用表 {ref_table} 不存在")
-                
+                        raise ValueError(
+                            f"无法添加外键约束 {fk_name}：引用表 {ref_table} 不存在")
+
                 # 检查引用列是否存在
                 ref_col_check = text("""
                     SELECT COUNT(*) FROM information_schema.columns 
@@ -536,17 +594,19 @@ class PostgreDatabaseManager():
                     "ref_col": ref_col
                 })
                 ref_col_exists = ref_col_result.scalar() > 0
-                
+
                 if not ref_col_exists:
-                    raise ValueError(f"无法添加外键约束 {fk_name}：引用列 {ref_table}.{ref_col} 不存在")
-                
+                    raise ValueError(
+                        f"无法添加外键约束 {fk_name}：引用列 {ref_table}.{ref_col} 不存在")
+
                 # 验证数据完整性
-                skip_validation = os.getenv("POSTGRE_FK_SKIP_VALIDATION", "false").lower() == "true"
+                skip_validation = os.getenv(
+                    "POSTGRE_FK_SKIP_VALIDATION", "false").lower() == "true"
                 if not skip_validation:
                     is_valid, invalid_count, invalid_samples = await self._validate_foreign_key_data(
                         conn, table_name, col.name, ref_table, ref_col
                     )
-                    
+
                     if not is_valid:
                         error_msg = (
                             f"无法添加外键约束 {fk_name}：\n"
@@ -559,25 +619,27 @@ class PostgreDatabaseManager():
                             continue
                         else:
                             raise ValueError(error_msg)
-                
+
                 # 添加外键约束
                 try:
                     fk_sql = self._get_foreign_key_constraint_sql(
                         table_name, col.name, ref_table, ref_col, fk_name
                     )
                     await conn.execute(text(fk_sql))
-                    logger.info(f"已为表 {table_name} 的列 {col.name} 添加外键约束 {fk_name}")
+                    logger.info(
+                        f"已为表 {table_name} 的列 {col.name} 添加外键约束 {fk_name}")
                 except Exception as e:
                     if is_dev:
                         logger.warning(f"[开发模式] 添加外键约束失败: {e}")
                     else:
                         raise
-        
+
         # 3. 添加索引
         for idx in model_class.__table__.indexes:
             if idx.name and not idx.unique:
                 try:
-                    idx_cols = ', '.join([f'"{col.name}"' for col in idx.columns])
+                    idx_cols = ', '.join(
+                        [f'"{col.name}"' for col in idx.columns])
                     create_idx_sql = text(
                         f'CREATE INDEX IF NOT EXISTS "{idx.name}" '
                         f'ON "{table_name}" ({idx_cols})'
@@ -586,7 +648,7 @@ class PostgreDatabaseManager():
                     logger.info(f"已为表 {table_name} 添加索引 {idx.name}")
                 except Exception as e:
                     logger.warning(f"添加索引失败: {e}")
-        
+
         # 4. 处理隐式索引
         for col in model_class.__table__.columns:
             if hasattr(col, 'index') and col.index and not col.primary_key:
@@ -595,7 +657,7 @@ class PostgreDatabaseManager():
                     if any(c.name == col.name for c in idx.columns):
                         has_explicit_idx = True
                         break
-                
+
                 if not has_explicit_idx:
                     implicit_idx_name = f"{table_name}_{col.name}_idx"
                     try:
@@ -607,10 +669,10 @@ class PostgreDatabaseManager():
                         logger.info(f"已为表 {table_name} 的列 {col.name} 添加隐式索引")
                     except Exception as e:
                         logger.warning(f"添加隐式索引失败: {e}")
-        
+
         # 5. 修复序列
         await self._fix_sequence_for_table(conn, table_name, model_class)
-        
+
         logger.info(f"表 {table_name} 增量迁移完成")
 
     async def create_default_table(self, conn, base_class: Type[DeclarativeMeta]):
@@ -623,8 +685,9 @@ class PostgreDatabaseManager():
         """
         is_dev = self._is_development_mode()
         is_prod = self._is_production_mode()
-        force_rebuild = os.getenv("POSTGRE_FORCE_REBUILD", "false").lower() == "true"
-        
+        force_rebuild = os.getenv(
+            "POSTGRE_FORCE_REBUILD", "false").lower() == "true"
+
         # 获取所有继承自该基类的模型
         tables_to_create = []
         tables_to_recreate = []
@@ -646,23 +709,25 @@ class PostgreDatabaseManager():
 
                 if not self._compare_table_structures(existing_structure, model_structure):
                     logger.info(f"表 {table_name} 结构不一致")
-                    
+
                     # 开发环境：如果表无数据，直接删除重建
                     if is_dev:
-                        has_rows_query = text(f'SELECT EXISTS (SELECT 1 FROM "{table_name}" LIMIT 1)')
+                        has_rows_query = text(
+                            f'SELECT EXISTS (SELECT 1 FROM "{table_name}" LIMIT 1)')
                         has_rows_result = await conn.execute(has_rows_query)
                         has_rows = bool(has_rows_result.scalar())
-                        
+
                         if not has_rows:
                             logger.info(f"[开发模式] 表 {table_name} 无数据，将直接删除重建")
                             await self._drop_table(conn, table_name)
                             tables_to_create.append((table_name, model_class))
                             continue
-                    
+
                     # 生产环境或开发环境有数据：使用增量迁移
                     if is_prod or (is_dev and not force_rebuild):
                         logger.info(f"表 {table_name} 将使用增量迁移")
-                        tables_to_migrate_incremental.append((table_name, model_class))
+                        tables_to_migrate_incremental.append(
+                            (table_name, model_class))
                     else:
                         # 开发环境且允许强制重建
                         logger.info(f"表 {table_name} 将重建（强制重建模式）")
@@ -700,7 +765,8 @@ class PostgreDatabaseManager():
                         )
 
                 # 检查旧表是否有数据
-                has_rows_query = text(f'SELECT EXISTS (SELECT 1 FROM "{table_name}" LIMIT 1)')
+                has_rows_query = text(
+                    f'SELECT EXISTS (SELECT 1 FROM "{table_name}" LIMIT 1)')
                 has_rows_result = await conn.execute(has_rows_query)
                 has_rows = bool(has_rows_result.scalar())
 
@@ -720,11 +786,11 @@ class PostgreDatabaseManager():
                         if not col.nullable and not col.primary_key:
                             col_def += ' NOT NULL'
                         columns_def.append(col_def)
-                    
+
                     # 创建表（不包含外键和索引）
                     create_sql = f'CREATE TABLE "{temp_table_name}" ({", ".join(columns_def)})'
                     await conn.execute(text(create_sql))
-                
+
                 await _create_temp_table_without_fk()
 
                 if has_rows:
@@ -733,7 +799,8 @@ class PostgreDatabaseManager():
                         col for col in model_structure.keys() if col in existing_structure
                     ]
                     if common_columns:
-                        cols_csv = ', '.join([f'"{c}"' for c in common_columns])
+                        cols_csv = ', '.join(
+                            [f'"{c}"' for c in common_columns])
                         insert_sql = text(
                             f'INSERT INTO "{temp_table_name}" ({cols_csv})\n'
                             f'SELECT {cols_csv} FROM "{table_name}"'
@@ -761,7 +828,8 @@ class PostgreDatabaseManager():
                                 f'REFERENCES "{ref_table}" ("{ref_col}")'
                             )
                             await conn.execute(alter_sql)
-                            logger.info(f"已为表 {table_name} 的列 {col.name} 添加外键约束")
+                            logger.info(
+                                f"已为表 {table_name} 的列 {col.name} 添加外键约束")
                         except Exception as e:
                             logger.warning(f"添加外键约束失败（可能已存在）: {e}")
 
@@ -770,7 +838,8 @@ class PostgreDatabaseManager():
                     # 跳过主键索引和唯一约束（已在列定义中处理）
                     if idx.name and not idx.unique:
                         try:
-                            idx_cols = ', '.join([f'"{col.name}"' for col in idx.columns])
+                            idx_cols = ', '.join(
+                                [f'"{col.name}"' for col in idx.columns])
                             create_idx_sql = text(
                                 f'CREATE INDEX IF NOT EXISTS "{idx.name}" '
                                 f'ON "{table_name}" ({idx_cols})'
@@ -779,7 +848,7 @@ class PostgreDatabaseManager():
                             logger.info(f"已为表 {table_name} 添加索引 {idx.name}")
                         except Exception as e:
                             logger.warning(f"添加索引失败: {e}")
-                
+
                 # 处理列上的 index=True（隐式索引）
                 for col in model_class.__table__.columns:
                     # 检查列是否有 index=True 但不在 table.indexes 中
@@ -791,7 +860,7 @@ class PostgreDatabaseManager():
                             if any(c.name == col.name for c in idx.columns):
                                 has_explicit_idx = True
                                 break
-                        
+
                         if not has_explicit_idx:
                             # 创建隐式索引（SQLAlchemy 通常命名为 {table_name}_{column_name}_idx）
                             implicit_idx_name = f"{table_name}_{col.name}_idx"
@@ -801,7 +870,8 @@ class PostgreDatabaseManager():
                                     f'ON "{table_name}" ("{col.name}")'
                                 )
                                 await conn.execute(create_idx_sql)
-                                logger.info(f"已为表 {table_name} 的列 {col.name} 添加隐式索引")
+                                logger.info(
+                                    f"已为表 {table_name} 的列 {col.name} 添加隐式索引")
                             except Exception as e:
                                 logger.warning(f"添加隐式索引失败: {e}")
 
@@ -876,13 +946,19 @@ class PostgreDatabaseManager():
 
         # 从配置中获取数据库连接信息（优先使用环境变量，然后是配置文件）
         try:
-            host = os.getenv('POSTGRES_HOST') or config.get('POSTGREDB', 'Host', fallback='localhost')
-            port = int(os.getenv('POSTGRES_PORT', 0)) or config.getint('POSTGREDB', 'Port', fallback=5432)
-            database = os.getenv('POSTGRES_DB') or config.get('POSTGREDB', 'Database', fallback='kahunabot')
-            user = os.getenv('POSTGRES_USER') or config.get('POSTGREDB', 'User', fallback='kahunabot')
-            password = os.getenv('POSTGRES_PASSWORD') or config.get('POSTGREDB', 'Password', fallback='kahunabot')
+            host = os.getenv('POSTGRES_HOST') or config.get(
+                'POSTGREDB', 'Host', fallback='localhost')
+            port = int(os.getenv('POSTGRES_PORT', 0)) or config.getint(
+                'POSTGREDB', 'Port', fallback=5432)
+            database = os.getenv('POSTGRES_DB') or config.get(
+                'POSTGREDB', 'Database', fallback='kahunabot')
+            user = os.getenv('POSTGRES_USER') or config.get(
+                'POSTGREDB', 'User', fallback='kahunabot')
+            password = os.getenv('POSTGRES_PASSWORD') or config.get(
+                'POSTGREDB', 'Password', fallback='kahunabot')
 
-            logger.info(f"PostgreSQL 配置: {host}:{port}/{database} (用户: {user})")
+            logger.info(
+                f"PostgreSQL 配置: {host}:{port}/{database} (用户: {user})")
         except Exception as e:
             logger.warning(f"读取 PostgreSQL 配置失败，使用默认值: {e}")
             host = 'localhost'
@@ -942,14 +1018,17 @@ class PostgreDatabaseManager():
             await self.engine.dispose()
             logger.info("PostgreSQL 数据库连接已关闭")
 
+
 class RedisDatabaseManager():
     def __init__(self):
         self._redis = None
-    
+
     async def init(self):
         try:
-            host = os.getenv('REDIS_HOST') or config.get('REDIS', 'Host', fallback='localhost')
-            port = int(os.getenv('REDIS_PORT', 0)) or config.getint('REDIS', 'Port', fallback=6379)
+            host = os.getenv('REDIS_HOST') or config.get(
+                'REDIS', 'Host', fallback='localhost')
+            port = int(os.getenv('REDIS_PORT', 0)) or config.getint(
+                'REDIS', 'Port', fallback=6379)
         except Exception as e:
             logger.error(f"读取 Redis 配置失败: {e}")
             host = 'localhost'
@@ -963,7 +1042,7 @@ class RedisDatabaseManager():
 
         # 删除forever:开头的key之外的数据
         # await self._redis.flushall()
-        
+
         logger.info(f"Redis 连接成功: {host}:{port}")
 
     async def close(self):
@@ -990,32 +1069,37 @@ class RedisDatabaseManager():
         """根据模式删除 key（推荐方式）"""
         deleted_count = 0
         cursor = 0
-        
+
         while True:
             # SCAN 返回 (cursor, [keys])
             cursor, keys = await redis.scan(cursor, match=pattern, count=100)
-            
+
             if keys:
                 # 批量删除
                 deleted = await redis.delete(*keys)
                 deleted_count += deleted
-            
+
             # cursor 为 0 表示扫描完成
             if cursor == 0:
                 break
-        
+
         return deleted_count
+
 
 class Neo4jDatabaseManager():
     def __init__(self):
         self._neo4j = None
         self.semaphore = asyncio.Semaphore(50)
-    
+
     async def init(self, subprocess=False):
-        host = os.getenv('NEO4J_HOST') or config.get('NEO4J', 'Host', fallback='localhost')
-        port = int(os.getenv('NEO4J_PORT', 0)) or config.getint('NEO4J', 'Port', fallback=7687)
-        username = os.getenv('NEO4J_USERNAME') or config.get('NEO4J', 'Username', fallback='neo4j')
-        password = os.getenv('NEO4J_PASSWORD') or config.get('NEO4J', 'Password', fallback='neo4j')
+        host = os.getenv('NEO4J_HOST') or config.get(
+            'NEO4J', 'Host', fallback='localhost')
+        port = int(os.getenv('NEO4J_PORT', 0)) or config.getint(
+            'NEO4J', 'Port', fallback=7687)
+        username = os.getenv('NEO4J_USERNAME') or config.get(
+            'NEO4J', 'Username', fallback='neo4j')
+        password = os.getenv('NEO4J_PASSWORD') or config.get(
+            'NEO4J', 'Password', fallback='neo4j')
 
         # 根据是否为子进程调整连接池大小
         # 子进程通常只需要少量连接，避免多进程时连接数过多
@@ -1032,10 +1116,11 @@ class Neo4jDatabaseManager():
             max_connection_pool_size=max_connection_pool_size,
             connection_acquisition_timeout=120  # 增加连接获取超时时间到120秒
         )
-        
+
         # 验证连接
         await self.verify_connectivity()
-        logger.info(f"Neo4j 连接成功: {host}:{port} (subprocess={subprocess}, pool_size={max_connection_pool_size})")
+        logger.info(
+            f"Neo4j 连接成功: {host}:{port} (subprocess={subprocess}, pool_size={max_connection_pool_size})")
 
         if not subprocess:
             # 初始化数据库模式（创建索引和约束）
@@ -1063,7 +1148,7 @@ class Neo4jDatabaseManager():
         """获取 Neo4j 会话（异步上下文管理器）"""
         if not self._neo4j:
             raise RuntimeError("Neo4j 未初始化，请先调用 init() 方法")
-        
+
         session = self._neo4j.session()
         try:
             yield session
@@ -1154,17 +1239,17 @@ class Neo4jDatabaseManager():
             # 获取所有约束
             query = "SHOW CONSTRAINTS"
             result = await session.run(query)
-            
+
             constraints = []
             async for record in result:
                 constraint_name = record.get("name")
                 if constraint_name:
                     constraints.append(constraint_name)
-            
+
             if not constraints:
                 logger.info("Neo4j 没有找到需要删除的约束")
                 return 0
-            
+
             # 删除所有约束
             async with self.get_transaction() as tx:
                 deleted_count = 0
@@ -1175,30 +1260,30 @@ class Neo4jDatabaseManager():
                         logger.info(f"删除约束: {constraint_name}")
                     except Exception as e:
                         logger.warning(f"删除约束失败 {constraint_name}: {e}")
-                
+
                 logger.info(f"Neo4j 已删除 {deleted_count} 个约束")
                 return deleted_count
 
     async def clean_all(self):
         """清理所有数据、约束和索引（谨慎使用）"""
         logger.warning("开始清理 Neo4j 数据库的所有数据、索引和约束...")
-        
+
         # 1. 清理所有数据
         deleted_nodes = await self.clean_all_data()
-        
+
         # 2. 清理所有约束（先删除约束，再删除剩余索引）
         deleted_constraints = await self.clean_all_constraints()
 
         # 3. 清理所有独立索引
         deleted_indexes = await self.clean_all_indexes()
-        
+
         logger.warning(
             f"Neo4j 数据库清理完成："
             f"删除 {deleted_nodes} 个节点, "
             f"删除 {deleted_indexes} 个索引, "
             f"删除 {deleted_constraints} 个约束"
         )
-        
+
         return {
             "nodes_deleted": deleted_nodes,
             "indexes_deleted": deleted_indexes,
@@ -1213,9 +1298,11 @@ class Neo4jDatabaseManager():
 # postgres_manager = PostgreDatabaseManager()
 # redis_manager = RedisDatabaseManager()
 
+
 _neo4j_manager = None
 _postgres_manager = None
 _redis_manager = None
+
 
 def get_neo4j_manager():
     global _neo4j_manager
@@ -1223,11 +1310,13 @@ def get_neo4j_manager():
         _neo4j_manager = Neo4jDatabaseManager()
     return _neo4j_manager
 
+
 def get_postgres_manager():
     global _postgres_manager
     if _postgres_manager is None:
         _postgres_manager = PostgreDatabaseManager()
     return _postgres_manager
+
 
 def get_redis_manager():
     global _redis_manager
@@ -1235,11 +1324,14 @@ def get_redis_manager():
         _redis_manager = RedisDatabaseManager()
     return _redis_manager
 
+
 def get_new_neo4j_manager():
     return Neo4jDatabaseManager()
 
+
 def get_new_postgres_manager():
     return PostgreDatabaseManager()
+
 
 def get_new_redis_manager():
     return RedisDatabaseManager()

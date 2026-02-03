@@ -15,7 +15,7 @@ class MarketOrderRefreshTimer(metaclass=SingletonMeta):
     """
     
     REDIS_FLAG_KEY = "market_update_flag:jita"
-    CHECK_INTERVAL_SECONDS = 1800  # 30分钟检查一次
+    CHECK_INTERVAL_SECONDS = 300  # 15分钟检查一次
     
     def __init__(self):
         self._running = False

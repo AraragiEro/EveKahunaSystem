@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { setupAuthGuards } from './guards'
 import { getEnterpriseRoutes } from './enterprise'
+import TodoListView from '../views/TodoListView.vue'
 import HomeView from '../views/HomeView.vue'
 
 // 条件加载企业版路由
@@ -27,10 +28,29 @@ const baseRoutes = [
       redirect: '/landing'
     },
     {
+      path: '/todolist',
+      name: 'todolist',
+      component: TodoListView,
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/home',
       name: 'home',
       component: HomeView,
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true , roles: ['vip_alpha', 'vip_omega'] },
+      redirect: '/home/overview',
+      children: [
+        {
+          path: 'overview',
+          name: 'homeOverview',
+          component: () => import('../views/home/overview.vue'),
+        },
+        {
+          path: 'history',
+          name: 'homeHistory',
+          component: () => import('../views/home/history.vue'),
+        },
+      ],
     },
     {
       path: '/setting',
@@ -61,6 +81,7 @@ const baseRoutes = [
     {
       path: '/industry',
       name: 'industry',
+      redirect: '/industry/industryPlan',
       component: () => import('../views/industryView.vue'),
       children: [
         {

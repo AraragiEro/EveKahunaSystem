@@ -168,7 +168,25 @@ export const useAuthStore = defineStore('auth', () => {
       const response = await http.get('/auth/me')
 
       // 解析后端返回的数据
-      const data = await response.json()
+      let data: any
+      try {
+        data = await response.json()
+      } catch (parseError) {
+        // 如果解析失败，尝试获取文本
+        await response.text()
+        logout()
+        lastAuthCheckAtMs.value = Date.now()
+        lastAuthCheckResult.value = false
+        return false
+      }
+
+      // 检查 data 是否为对象且包含 status
+      if (!data || typeof data !== 'object' || !('status' in data)) {
+        logout()
+        lastAuthCheckAtMs.value = Date.now()
+        lastAuthCheckResult.value = false
+        return false
+      }
 
       // 检查 status 是否为 200
       if (data.status === 200) {

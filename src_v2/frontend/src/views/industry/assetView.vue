@@ -91,8 +91,8 @@ const handleAllowPullPersonalAsset = async () => {
   const data = await response.json()
 }
 
-const handleAllowPullCorporationAsset = async () => {}
-  
+const handleAllowPullCorporationAsset = async () => { }
+
 const fetchMissions = async () => {
   missionsLoading.value = true
   try {
@@ -219,11 +219,11 @@ const pollPullStatus = async (row: Mission) => {
     if (data?.status === 200 && data?.data) {
       // 成功获取进度，重置重试计数器
       pollingRetries.value.delete(missionKey)
-      
+
       const status = data.data.status
       const stepProgress = data.data.step_progress
       const isIndeterminate = data.data.is_indeterminate
-      
+
       // 处理成功完成的情况
       if (status === 'success') {
         stopPolling(row)
@@ -232,7 +232,7 @@ const pollPullStatus = async (row: Mission) => {
         fetchMissions()
         return
       }
-      
+
       // 处理失败的情况
       if (status === 'failed') {
         stopPolling(row)
@@ -241,16 +241,16 @@ const pollPullStatus = async (row: Mission) => {
         fetchMissions()
         return
       }
-      
+
       // 处理正在拉取中的情况
       if (stepProgress !== undefined && stepProgress !== null) {
         // step_progress 是字符串格式，需要转换为数字
         const progress = parseFloat(stepProgress)
         // 将 0-1 的进度转换为 0-100 的百分比
         const progressPercent = Math.round(progress * 100)
-        
+
         // 更新对应任务的进度和步骤名称
-        const mission = missions.value.find(m => 
+        const mission = missions.value.find(m =>
           m.subject_type === row.subject_type && m.subject_id === row.subject_id
         )
         if (mission) {
@@ -265,18 +265,18 @@ const pollPullStatus = async (row: Mission) => {
             // 如果没有传入 is_indeterminate，默认为 false（显示具体进度）
             mission.is_indeterminate = false
           }
-          
+
           // 如果是无限进度条，不更新百分比（保持为 0 或之前的值）
           // 如果不是无限进度条，更新百分比
           if (!mission.is_indeterminate) {
             mission.pull_status = progressPercent
           }
-          
+
           if (data.data.step_name) {
             mission.step_name = data.data.step_name
           }
         }
-        
+
         // 如果进度达到 100%，停止轮询（备用检查）
         if (progress >= 1) {
           stopPolling(row)
@@ -299,17 +299,17 @@ const pollPullStatus = async (row: Mission) => {
 const handlePollingError = (row: Mission, errorMessage: string) => {
   const missionKey = getMissionKey(row)
   const currentRetries = pollingRetries.value.get(missionKey) || 0
-  
+
   if (currentRetries >= MAX_RETRY_COUNT) {
     // 达到最大重试次数，停止轮询
     stopPolling(row)
     ElMessage.error(`${errorMessage}，已重试 ${MAX_RETRY_COUNT} 次，停止轮询`)
     return
   }
-  
+
   // 增加重试次数
   pollingRetries.value.set(missionKey, currentRetries + 1)
-  
+
   // 延时后重试
   setTimeout(() => {
     // 检查任务是否仍在拉取中（可能已被停止）
@@ -317,7 +317,7 @@ const handlePollingError = (row: Mission, errorMessage: string) => {
       pollPullStatus(row)
     }
   }, RETRY_DELAY)
-  
+
   // 只在第一次失败时提示用户
   if (currentRetries === 0) {
     ElMessage.warning(`${errorMessage}，将在 ${RETRY_DELAY / 1000} 秒后重试（最多重试 ${MAX_RETRY_COUNT} 次）`)
@@ -326,12 +326,12 @@ const handlePollingError = (row: Mission, errorMessage: string) => {
 
 const handlePullMission = async (row: Mission) => {
   const missionKey = getMissionKey(row)
-  
+
   // 如果已经在拉取中，不重复操作
   if (pullingMissions.value.has(missionKey)) {
     return
   }
-  
+
   try {
     const res = await http.post(`/EVE/asset/pullAssetNow`, {
       asset_owner_type: row.subject_type,
@@ -345,24 +345,24 @@ const handlePullMission = async (row: Mission) => {
 
     // 标记任务为正在拉取
     pullingMissions.value.add(missionKey)
-    
+
     // 初始化进度为 0
-    const mission = missions.value.find(m => 
+    const mission = missions.value.find(m =>
       m.subject_type === row.subject_type && m.subject_id === row.subject_id
     )
     if (mission) {
       mission.pull_status = 0
     }
-    
+
     // 启动轮询，每 2 秒查询一次进度
     const intervalId = window.setInterval(() => {
       pollPullStatus(row)
     }, 2000)
     pollingIntervals.value.set(missionKey, intervalId)
-    
+
     // 立即执行一次查询
     pollPullStatus(row)
-    
+
     ElMessage.success('已开始拉取任务')
   } catch (e) {
     ElMessage.error('拉取任务失败')
@@ -437,7 +437,7 @@ const canPullNow = (row: Mission): boolean => {
   if (pullingMissions.value.has(missionKey)) {
     return false
   }
-  
+
   const lastPullTime = row.last_pull_time
   if (!lastPullTime) {
     return true // 从未拉取过，可以立刻拉取
@@ -445,20 +445,20 @@ const canPullNow = (row: Mission): boolean => {
   try {
     const lastPull = new Date(lastPullTime).getTime()
     const now = currentTime.value // 使用响应式的时间戳
-    
+
     // 如果解析失败或时间无效，允许拉取
     if (isNaN(lastPull)) {
       return true
     }
-    
+
     // 如果 lastPull 是未来时间（可能是时区问题），允许拉取
     if (lastPull > now) {
       return true
     }
-    
-    const fiveMinutes = 1 * 60 * 1000
+
+    const fifteenMinutes = 15 * 60 * 1000
     const elapsed = now - lastPull
-    return elapsed >= fiveMinutes
+    return elapsed >= fifteenMinutes
   } catch (e) {
     // 解析失败，允许拉取
     return true
@@ -473,26 +473,26 @@ const getRemainingSeconds = (lastPullTime: string | null | undefined): number =>
   try {
     const lastPull = new Date(lastPullTime).getTime()
     const now = currentTime.value // 使用响应式的时间戳
-    
+
     // 如果解析失败或时间无效，返回0（可以拉取）
     if (isNaN(lastPull)) {
       return 0
     }
-    
+
     // 如果 lastPull 是未来时间（可能是时区问题），返回0（可以拉取）
     if (lastPull > now) {
       return 0
     }
-    
-    const fiveMinutes = 5 * 60 * 1000
+
+    const fifteenMinutes = 15 * 60 * 1000
     const elapsed = now - lastPull
-    const remaining = fiveMinutes - elapsed
-    
-    // 如果已经超过5分钟，返回0
+    const remaining = fifteenMinutes - elapsed
+
+    // 如果已经超过15分钟，返回0
     if (remaining <= 0) {
       return 0
     }
-    
+
     return Math.ceil(remaining / 1000)
   } catch (e) {
     // 解析失败，返回0（可以拉取）
@@ -550,7 +550,7 @@ const formatBeijingTime = (timeStr: string | null | undefined): string => {
 onMounted(async () => {
   getIsEditCorpSettingAllowed()
   fetchMissions()
-  
+
   // 每秒更新一次当前时间，用于实时刷新倒计时
   timeUpdateInterval = window.setInterval(() => {
     currentTime.value = Date.now()
@@ -563,7 +563,7 @@ onUnmounted(() => {
     clearInterval(timeUpdateInterval)
     timeUpdateInterval = null
   }
-  
+
   // 清理所有轮询定时器
   pollingIntervals.value.forEach((intervalId) => {
     clearInterval(intervalId)
@@ -576,132 +576,122 @@ onUnmounted(() => {
 </script>
 
 <template>
-<el-tabs>
-  <el-tab-pane label="资产浏览">
-    <AssetViewViewList />
-  </el-tab-pane>
-  <el-tab-pane label="访问许可">
-    <AssetViewIndustrypermision />
-  </el-tab-pane>
-  <el-tab-pane label="资产拉取状态">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-      <div style="font-weight: 600;">{{ isAdmin ? '所有任务' : '当前用户可见任务' }}</div>
-      <el-button type="primary" size="small" @click="fetchMissions">
-        <el-icon style="margin-right:4px"><Refresh /></el-icon>
-        刷新
-      </el-button>
-      <el-button type="primary" size="small" @click="openCreateDialog">
-        <el-icon style="margin-right:4px"><Plus /></el-icon>
-        新增拉取任务
-      </el-button>
-    </div>
-    <el-table :data="missions" v-loading="missionsLoading" size="small" border>
-      <el-table-column label="主体类型" prop="subject_type" width="100">
-        <template #default="{ row }">
-          <el-tag type="info" v-if="row.subject_type === 'character'">character</el-tag>
-          <el-tag type="warning" v-else>corp</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="主体名称" prop="subject_name" min-width="auto" />
-      <el-table-column v-if="isAdmin" label="创建者" prop="user_name" width="120" />
-      <el-table-column label="上次拉取时间" prop="last_pull_time" width="190px">
-        <template #default="{ row }">
-          <span>{{ formatBeijingTime(row.last_pull_time) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="拉取状态" prop="pull_status" width="250px">
-        <template #default="{ row }">
-          <div>
-            <el-progress 
-              :percentage="row.is_indeterminate ? 50 : (row.pull_status ?? 0)" 
-              :indeterminate="row.is_indeterminate === true"
-              :striped="!row.is_indeterminate"
-              :striped-flow="!row.is_indeterminate"
-            />
-            <div v-if="row.step_name" style="font-size: 12px; color: #909399; margin-top: 4px;">
-              {{ row.step_name }}
+  <el-tabs>
+    <el-tab-pane label="资产浏览">
+      <AssetViewViewList />
+    </el-tab-pane>
+    <el-tab-pane label="访问许可">
+      <AssetViewIndustrypermision />
+    </el-tab-pane>
+    <el-tab-pane label="资产拉取状态">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="font-weight: 600;">{{ isAdmin ? '所有任务' : '当前用户可见任务' }}</div>
+        <el-button type="primary" size="small" @click="fetchMissions">
+          <el-icon style="margin-right:4px">
+            <Refresh />
+          </el-icon>
+          刷新
+        </el-button>
+        <el-button type="primary" size="small" @click="openCreateDialog">
+          <el-icon style="margin-right:4px">
+            <Plus />
+          </el-icon>
+          新增拉取任务
+        </el-button>
+      </div>
+      <el-table :data="missions" v-loading="missionsLoading" size="small" border>
+        <el-table-column label="主体类型" prop="subject_type" width="100">
+          <template #default="{ row }">
+            <el-tag type="info" v-if="row.subject_type === 'character'">character</el-tag>
+            <el-tag type="warning" v-else>corp</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="主体名称" prop="subject_name" min-width="auto" />
+        <el-table-column v-if="isAdmin" label="创建者" prop="user_name" width="120" />
+        <el-table-column label="上次拉取时间" prop="last_pull_time" width="190px">
+          <template #default="{ row }">
+            <span>{{ formatBeijingTime(row.last_pull_time) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="拉取状态" prop="pull_status" width="250px">
+          <template #default="{ row }">
+            <div>
+              <el-progress :percentage="row.is_indeterminate ? 50 : (row.pull_status ?? 0)"
+                :indeterminate="row.is_indeterminate === true" :striped="!row.is_indeterminate"
+                :striped-flow="!row.is_indeterminate" />
+              <div v-if="row.step_name" style="font-size: 12px; color: #909399; margin-top: 4px;">
+                {{ row.step_name }}
+              </div>
             </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="300px" fixed="right">
+          <template #default="{ row }">
+            <!-- 立刻拉取 -->
+            <!-- 如果上次拉取时间超过5分钟，或者从未拉取过，则可点击 -->
+            <el-tooltip
+              :content="canPullNow(row) ? '可以立刻拉取' : (isPulling(row) ? '正在拉取中...' : formatRemainingTime(getRemainingSeconds(row.last_pull_time)))"
+              placement="top">
+              <el-button size="small" type="primary" plain @click="handlePullMission(row)">
+                <el-icon style="margin-right:4px">
+                  <Refresh />
+                </el-icon>
+                立刻拉取
+              </el-button>
+            </el-tooltip>
+            <el-button size="small" type="danger" plain @click="handleDeleteMission(row)">
+              <el-icon style="margin-right:4px">
+                <Delete />
+              </el-icon>
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-dialog v-model="createDialogVisible" title="新增拉取任务" width="420px">
+        <el-form :model="createForm" label-width="96px">
+          <el-form-item label="主体类型">
+            <el-segmented v-model="createForm.subject_type"
+              :options="form.is_edit_corp_setting_allowed ? ['character', 'corp'] : ['character']" />
+          </el-form-item>
+          <el-form-item :label="createForm.subject_type === 'character' ? '角色名' : '公司名'">
+            <el-select v-model="createForm.subject_name" placeholder="请选择" filterable :loading="ownersLoading"
+              :disabled="createForm.subject_type === 'corp' && !form.is_edit_corp_setting_allowed"
+              @change="handleOwnerSelect" style="width:100%">
+              <el-option v-for="item in filteredOwnerOptions" :key="item.owner_type + ':' + item.owner_name"
+                :label="item.owner_name" :value="item.owner_name" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="创建即启动">
+            <el-switch v-model="createForm.start_immediately" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <div style="display:flex; justify-content:flex-end; gap:8px;">
+            <el-button @click="createDialogVisible = false">取消</el-button>
+            <el-button type="primary" @click="handleCreateMission">创建</el-button>
           </div>
         </template>
-      </el-table-column>
-      <el-table-column label="操作" width="300px" fixed="right">
-        <template #default="{ row }">
-          <!-- 立刻拉取 -->
-          <!-- 如果上次拉取时间超过5分钟，或者从未拉取过，则可点击 -->
-          <el-tooltip :content="canPullNow(row) ? '可以立刻拉取' : (isPulling(row) ? '正在拉取中...' : formatRemainingTime(getRemainingSeconds(row.last_pull_time)))" placement="top">
-            <el-button
-              size="small" 
-              type="primary" 
-              plain 
-              @click="handlePullMission(row)"
-            >
-              <el-icon style="margin-right:4px"><Refresh /></el-icon>
-              立刻拉取
-            </el-button>
-          </el-tooltip>
-          <el-button size="small" type="danger" plain @click="handleDeleteMission(row)">
-            <el-icon style="margin-right:4px"><Delete /></el-icon>
-            删除
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <el-dialog v-model="createDialogVisible" title="新增拉取任务" width="420px">
-      <el-form :model="createForm" label-width="96px">
-        <el-form-item label="主体类型">
-          <el-segmented 
-            v-model="createForm.subject_type" 
-            :options="form.is_edit_corp_setting_allowed ? ['character','corp'] : ['character']" 
-          />
-        </el-form-item>
-        <el-form-item :label="createForm.subject_type === 'character' ? '角色名' : '公司名'">
-          <el-select 
-            v-model="createForm.subject_name" 
-            placeholder="请选择" 
-            filterable 
-            :loading="ownersLoading" 
-            :disabled="createForm.subject_type === 'corp' && !form.is_edit_corp_setting_allowed"
-            @change="handleOwnerSelect"
-            style="width:100%"
-          >
-            <el-option
-              v-for="item in filteredOwnerOptions"
-              :key="item.owner_type + ':' + item.owner_name"
-              :label="item.owner_name"
-              :value="item.owner_name"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="创建即启动">
-          <el-switch v-model="createForm.start_immediately" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <div style="display:flex; justify-content:flex-end; gap:8px;">
-          <el-button @click="createDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleCreateMission">创建</el-button>
-        </div>
-      </template>
-    </el-dialog>
-  </el-tab-pane>
-  <el-tab-pane label="配置">
-    <el-form :model="form" label-width="auto">
+      </el-dialog>
+    </el-tab-pane>
+    <el-tab-pane label="配置">
+      <el-form :model="form" label-width="auto">
         <el-form-item label="允许拉取公司资产" v-if="form.is_edit_corp_setting_allowed">
-          <el-switch
-            v-model="form.allow_corporation_asset"
-            @change="handleAllowPullCorporationAsset"
-          />
+          <el-switch v-model="form.allow_corporation_asset" @change="handleAllowPullCorporationAsset" />
         </el-form-item>
         <el-form-item label="公司资产拉取许可" v-if="!form.is_edit_corp_setting_allowed">
-          <el-icon color="green" size="18" v-if="form.allow_corporation_asset"><SuccessFilled /></el-icon>
-          <el-icon color="red" size="18" v-if="!form.allow_corporation_asset"><CircleCloseFilled /></el-icon>
+          <el-icon color="green" size="18" v-if="form.allow_corporation_asset">
+            <SuccessFilled />
+          </el-icon>
+          <el-icon color="red" size="18" v-if="!form.allow_corporation_asset">
+            <CircleCloseFilled />
+          </el-icon>
         </el-form-item>
-    </el-form>
-  </el-tab-pane>
-</el-tabs>
+      </el-form>
+    </el-tab-pane>
+  </el-tabs>
 
 </template>
 
-<style scoped>
-</style>
+<style scoped></style>

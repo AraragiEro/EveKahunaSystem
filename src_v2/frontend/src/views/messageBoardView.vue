@@ -101,6 +101,7 @@ const replyLoadingMore = ref(false)
 const replyContent = ref('')
 const replySubmitting = ref(false)
 const updatingStatus = ref(false)
+const updatingType = ref(false)
 const togglingHidden = ref(false)
 
 // 卡片列表与回复列表直接透传后端结果（隐藏规则由后端控制）
@@ -511,6 +512,49 @@ const handleChangeStatus = async (newStatus: 'created' | 'in_progress' | 'closed
   await updateCardStatus(newStatus)
 }
 
+const updateCardType = async (newType: 'bug' | 'feat' | 'chat') => {
+  if (!activeCard.value) return
+  if (updatingType.value) return
+  if (activeCard.value.type === newType) return
+
+  updatingType.value = true
+  try {
+    const res = await (http as any).patch(`/message-board/cards/${activeCard.value.id}`, {
+      type: newType
+    })
+    const data = await res.json()
+    if (data.status !== 200) {
+      ElMessage.error(data.message || '更新留言类型失败')
+      return
+    }
+
+    const updated = data.data
+    if (!updated) {
+      ElMessage.error('更新留言类型失败')
+      return
+    }
+
+    // 更新详情中的类型
+    activeCard.value.type = updated.type
+
+    // 同步更新列表中的对应卡片
+    const idx = cards.value.findIndex((c) => c.id === updated.id)
+    if (idx !== -1) {
+      cards.value[idx] = {
+        ...cards.value[idx],
+        type: updated.type
+      }
+    }
+
+    ElMessage.success('更新留言类型成功')
+  } catch (err) {
+    console.error(err)
+    ElMessage.error('更新留言类型失败')
+  } finally {
+    updatingType.value = false
+  }
+}
+
 const refreshList = async () => {
   pagination.value.page = 1
   await resetAndLoad()
@@ -805,9 +849,31 @@ onMounted(async () => {
       <template #header>
         <div class="detail-header" v-if="activeCard">
           <div class="detail-title">
-            <el-tag :class="getTypeTagConfig(activeCard.type).type" class="message-tag message-tag-type" size="default">
-              {{ getTypeTagConfig(activeCard.type).label }}
-            </el-tag>
+            <div class="detail-type-section">
+              <el-dropdown v-if="isAdmin || activeCard.author.id === authStore.user?.username" trigger="click"
+                @click.stop>
+                <el-tag :class="getTypeTagConfig(activeCard.type).type"
+                  class="message-tag message-tag-type type-tag-with-dropdown" size="default">
+                  {{ getTypeTagConfig(activeCard.type).label }}
+                  <el-icon class="type-dropdown-icon">
+                    <ArrowDown />
+                  </el-icon>
+                </el-tag>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-for="opt in typeOptions" :key="opt.value"
+                      :disabled="updatingType || activeCard.type === opt.value"
+                      @click="updateCardType(opt.value as 'bug' | 'feat' | 'chat')">
+                      {{ opt.label }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <el-tag v-else :class="getTypeTagConfig(activeCard.type).type" class="message-tag message-tag-type"
+                size="default">
+                {{ getTypeTagConfig(activeCard.type).label }}
+              </el-tag>
+            </div>
             <span class="detail-title-text">{{ activeCard.title }}</span>
           </div>
         </div>
@@ -1297,6 +1363,34 @@ onMounted(async () => {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.detail-type-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.type-tag-with-dropdown {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.type-tag-with-dropdown:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.type-dropdown-icon {
+  font-size: 12px;
+  transition: transform 0.2s ease;
+}
+
+.type-tag-with-dropdown:hover .type-dropdown-icon {
+  transform: rotate(180deg);
 }
 
 .detail-title-text {

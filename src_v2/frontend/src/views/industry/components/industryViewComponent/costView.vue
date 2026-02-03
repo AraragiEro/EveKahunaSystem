@@ -42,32 +42,34 @@ const loadingPrices = ref(false)
 // 数据预处理：将传入的数据标准化为topProduct数组
 const topProducts = computed<topProduct[]>(() => {
     const data = props.PlanCalculateEIVCostTableView
-    
+
     if (!data) {
         return []
     }
+
+    let result: topProduct[] = []
     
     // 如果是数组，直接返回
     if (Array.isArray(data)) {
         // 如果数组元素是对象且包含topProducts属性
         if (data.length > 0 && data[0] && typeof data[0] === 'object' && 'topProducts' in data[0]) {
-            return data[0].topProducts || []
+            result = data[0].topProducts || []
+        } else {
+            // 如果数组元素本身就是topProduct格式
+            result = data as topProduct[]
         }
-        // 如果数组元素本身就是topProduct格式
-        return data as topProduct[]
-    }
-    
-    // 如果是对象（字典），转换为数组
-    if (typeof data === 'object') {
+    } else if (typeof data === 'object') {
+        // 如果是对象（字典），转换为数组
         // 如果对象包含topProducts属性
         if ('topProducts' in data && Array.isArray(data.topProducts)) {
-            return data.topProducts
+            result = data.topProducts
+        } else {
+            // 如果是字典格式（key为type_id），转换为数组
+            result = Object.values(data) as topProduct[]
         }
-        // 如果是字典格式（key为type_id），转换为数组
-        return Object.values(data) as topProduct[]
     }
     
-    return []
+    return result
 })
 
 // 维度1：最终产品维度汇总
@@ -88,40 +90,106 @@ const productCostSummary = computed<ProductCostSummary[]>(() => {
     if (!products || products.length === 0) {
         return []
     }
-    
-    // 计算每个产品的总成本
-    const summaries: ProductCostSummary[] = products.map(product => {
+
+    // 按 type_id 分组，合并相同产品
+    const productMap = new Map<number, {
+        type_id: number
+        type_name: string
+        product_num: number
+        eiv_cost: number
+        children: Map<number, childMaterial> // 使用 Map 按 type_id 合并相同材料
+    }>()
+
+    // 遍历所有产品，按 type_id 分组并合并
+    products.forEach(product => {
+        const typeId = product.type_id
+        const existing = productMap.get(typeId)
+
+        if (existing) {
+            // 如果已存在相同 type_id 的产品，合并数据
+            const newProductNum = Number(product.product_num) || 0
+            existing.product_num = Number(existing.product_num) + newProductNum
+            existing.eiv_cost += product.eiv_cost || 0
+
+            // 合并 children 材料
+            if (product.children && product.children.length > 0) {
+                product.children.forEach(child => {
+                    // 使用 type_id 作为唯一标识，因为成本视图关注的是材料类型和总数量
+                    const childKey = child.type_id
+                    const existingChild = existing.children.get(childKey)
+
+                    if (existingChild) {
+                        // 如果材料已存在，累加数量
+                        existingChild.quantity = (existingChild.quantity || 0) + (child.quantity || 0)
+                    } else {
+                        // 如果材料不存在，添加新材料（需要深拷贝避免引用问题）
+                        existing.children.set(childKey, {
+                            ...child,
+                            quantity: child.quantity || 0
+                        })
+                    }
+                })
+            }
+        } else {
+            // 如果不存在，创建新条目
+            const childrenMap = new Map<number, childMaterial>()
+            if (product.children && product.children.length > 0) {
+                product.children.forEach(child => {
+                    // 使用 type_id 作为唯一标识
+                    const childKey = child.type_id
+                    childrenMap.set(childKey, {
+                        ...child,
+                        quantity: child.quantity || 0
+                    })
+                })
+            }
+
+            productMap.set(typeId, {
+                type_id: typeId,
+                type_name: product.type_name || '',
+                product_num: Number(product.product_num) || 0,
+                eiv_cost: product.eiv_cost || 0,
+                children: childrenMap
+            })
+        }
+    })
+
+    // 将合并后的数据转换为 ProductCostSummary 数组
+    const summaries: ProductCostSummary[] = Array.from(productMap.values()).map(mergedProduct => {
+        // 将 children Map 转换为数组
+        const childrenArray = Array.from(mergedProduct.children.values())
+
         // 计算children的总成本
-        const childrenCost = (product.children || []).reduce((sum, child) => {
+        const childrenCost = childrenArray.reduce((sum, child) => {
             const quantity = child.quantity || 0
             const price = child.jita_buy_price || 0
             return sum + (quantity * price)
         }, 0)
-        
+
         // 总成本 = children成本 + eiv_cost
-        const totalCost = childrenCost + (product.eiv_cost || 0)
-        
+        const totalCost = childrenCost + mergedProduct.eiv_cost
+
         return {
-            type_id: product.type_id,
-            type_name: product.type_name || '',
+            type_id: mergedProduct.type_id,
+            type_name: mergedProduct.type_name,
             total_cost: totalCost,
             children_cost: childrenCost,
-            eiv_cost: product.eiv_cost || 0,
-            product_num: product.product_num || 0,
+            eiv_cost: mergedProduct.eiv_cost,
+            product_num: mergedProduct.product_num,
             percentage: 0 // 稍后计算
         }
     })
-    
+
     // 计算总成本
     const totalCost = summaries.reduce((sum, item) => sum + item.total_cost, 0)
-    
+
     // 计算每个产品的比例
     if (totalCost > 0) {
         summaries.forEach(item => {
             item.percentage = (item.total_cost / totalCost) * 100
         })
     }
-    
+
     // 计算预期利润（仅omega用户）
     if (hasOmegaSubscription.value) {
         summaries.forEach(item => {
@@ -143,9 +211,38 @@ const productCostSummary = computed<ProductCostSummary[]>(() => {
             }
         })
     }
-    
+
     // 按总成本降序排序
     return summaries.sort((a, b) => b.total_cost - a.total_cost)
+})
+
+// 计算汇总值
+const expectedProfitTotal = computed(() => {
+    if (!hasOmegaSubscription.value) {
+        return 0
+    }
+    return productCostSummary.value.reduce((sum, row) => {
+        if (row.expected_profit !== undefined && !isNaN(row.expected_profit)) {
+            return sum + row.expected_profit
+        }
+        return sum
+    }, 0)
+})
+
+const totalCostSum = computed(() => {
+    return productCostSummary.value.reduce((sum, row) => sum + (row.total_cost || 0), 0)
+})
+
+const childrenCostSum = computed(() => {
+    return productCostSummary.value.reduce((sum, row) => sum + (row.children_cost || 0), 0)
+})
+
+const eivCostSum = computed(() => {
+    return productCostSummary.value.reduce((sum, row) => sum + (row.eiv_cost || 0), 0)
+})
+
+const productNumSum = computed(() => {
+    return productCostSummary.value.reduce((sum, row) => sum + (row.product_num || 0), 0)
 })
 
 // 获取产品价格
@@ -153,29 +250,29 @@ const fetchProductPrices = async () => {
     if (!hasOmegaSubscription.value) {
         return
     }
-    
+
     const products = topProducts.value
     if (!products || products.length === 0) {
         return
     }
-    
+
     // 提取所有产品的type_id
     const typeIds = products.map(p => p.type_id).filter(id => id > 0)
     if (typeIds.length === 0) {
         return
     }
-    
+
     loadingPrices.value = true
     try {
         const res = await http.post('/enterprise/market/product_prices', {
             type_ids: typeIds
         })
-        
+
         if (!res.ok) {
             console.error('获取产品价格失败:', res.status)
             return
         }
-        
+
         const data = await res.json()
         if (data.status === 200 && data.data) {
             productPrices.value = data.data
@@ -199,21 +296,21 @@ const categoryCostSummary = computed<CategoryCostSummary[]>(() => {
     if (!products || products.length === 0) {
         return []
     }
-    
+
     // 按material_type_node分类汇总
     const categoryMap = new Map<string, number>()
     let totalEivCost = 0
-    
+
     products.forEach(product => {
         // 汇总eiv_cost
         totalEivCost += product.eiv_cost || 0
-        
+
         // 汇总children按material_type_node分类
         if (product.children && product.children.length > 0) {
             product.children.forEach(child => {
                 const category = child.material_type_node || '未知分类'
                 const cost = (child.quantity || 0) * (child.jita_buy_price || 0)
-                
+
                 if (categoryMap.has(category)) {
                     categoryMap.set(category, categoryMap.get(category)! + cost)
                 } else {
@@ -222,10 +319,10 @@ const categoryCostSummary = computed<CategoryCostSummary[]>(() => {
             })
         }
     })
-    
+
     // 转换为数组
     const summaries: CategoryCostSummary[] = []
-    
+
     // 添加material_type_node分类
     categoryMap.forEach((cost, category) => {
         summaries.push({
@@ -234,7 +331,7 @@ const categoryCostSummary = computed<CategoryCostSummary[]>(() => {
             percentage: 0 // 稍后计算
         })
     })
-    
+
     // 添加eiv_cost分类
     if (totalEivCost > 0) {
         summaries.push({
@@ -243,17 +340,17 @@ const categoryCostSummary = computed<CategoryCostSummary[]>(() => {
             percentage: 0 // 稍后计算
         })
     }
-    
+
     // 计算总成本
     const totalCost = summaries.reduce((sum, item) => sum + item.total_cost, 0)
-    
+
     // 计算每个分类的比例
     if (totalCost > 0) {
         summaries.forEach(item => {
             item.percentage = (item.total_cost / totalCost) * 100
         })
     }
-    
+
     // 按总成本降序排序
     return summaries.sort((a, b) => b.total_cost - a.total_cost)
 })
@@ -277,6 +374,42 @@ const formatPercentage = (value: number): string => {
     return `${value.toFixed(2)}%`
 }
 
+// 表格汇总方法
+const getSummaries = (param: { columns: Array<{ property?: string; label?: string }>, data: ProductCostSummary[] }) => {
+    const { columns } = param
+    const sums: string[] = []
+
+    columns.forEach((column, index) => {
+        if (index === 0) {
+            // 第一列：产品名称，显示"合计"
+            sums.push('合计')
+        } else if (column.property === 'total_cost' && column.label === '数量') {
+            // 数量列：显示总数量
+            sums.push(String(productNumSum.value))
+        } else if (column.property === 'expected_profit') {
+            // 预期利润列：计算总和
+            if (hasOmegaSubscription.value) {
+                sums.push(formatNumber(expectedProfitTotal.value))
+            } else {
+                sums.push('')
+            }
+        } else if (column.property === 'total_cost' && column.label === '总成本') {
+            // 总成本列：计算总和
+            sums.push(formatNumber(totalCostSum.value))
+        } else if (column.property === 'children_cost') {
+            // 材料成本列：计算总和
+            sums.push(formatNumber(childrenCostSum.value))
+        } else if (column.property === 'eiv_cost') {
+            // EIV成本列：计算总和
+            sums.push(formatNumber(eivCostSum.value))
+        } else {
+            sums.push('')
+        }
+    })
+
+    return sums
+}
+
 // 图表引用
 const productChartRef = ref<HTMLElement>()
 const categoryChartRef = ref<HTMLElement>()
@@ -286,7 +419,7 @@ let categoryChartInstance: echarts.ECharts | null = null
 // 初始化产品维度饼图
 const initProductChart = () => {
     if (!productChartRef.value) return
-    
+
     const data = productCostSummary.value
     if (!data || data.length === 0) {
         if (productChartInstance) {
@@ -295,18 +428,18 @@ const initProductChart = () => {
         }
         return
     }
-    
+
     if (!productChartInstance) {
         productChartInstance = echarts.init(productChartRef.value)
     }
-    
+
     const chartData = data.map(item => ({
         name: item.type_name,
         value: item.total_cost
     }))
-    
+
     const total = data.reduce((sum, item) => sum + item.total_cost, 0)
-    
+
     const option: EChartsOption = {
         title: {
             text: '最终产品成本占比',
@@ -356,7 +489,7 @@ const initProductChart = () => {
             }
         ]
     }
-    
+
     productChartInstance.setOption(option, true) // 使用 notMerge=true 确保完全更新
     // 确保图表正确渲染
     productChartInstance.resize()
@@ -365,7 +498,7 @@ const initProductChart = () => {
 // 初始化分类维度饼图
 const initCategoryChart = () => {
     if (!categoryChartRef.value) return
-    
+
     const data = categoryCostSummary.value
     if (!data || data.length === 0) {
         if (categoryChartInstance) {
@@ -374,18 +507,18 @@ const initCategoryChart = () => {
         }
         return
     }
-    
+
     if (!categoryChartInstance) {
         categoryChartInstance = echarts.init(categoryChartRef.value)
     }
-    
+
     const chartData = data.map(item => ({
         name: item.category,
         value: item.total_cost
     }))
-    
+
     const total = data.reduce((sum, item) => sum + item.total_cost, 0)
-    
+
     const option: EChartsOption = {
         title: {
             text: '材料分类成本占比',
@@ -435,7 +568,7 @@ const initCategoryChart = () => {
             }
         ]
     }
-    
+
     categoryChartInstance.setOption(option, true) // 使用 notMerge=true 确保完全更新
     // 确保图表正确渲染
     categoryChartInstance.resize()
@@ -447,7 +580,7 @@ const updateCharts = async () => {
     if (productChartRef.value && categoryChartRef.value) {
         const productContainer = productChartRef.value
         const categoryContainer = categoryChartRef.value
-        
+
         if (productContainer.offsetWidth > 0 && categoryContainer.offsetWidth > 0) {
             initProductChart()
             initCategoryChart()
@@ -500,10 +633,10 @@ const observeContainer = () => {
                 categoryChartInstance.resize()
             }
         })
-        
+
         observer.observe(productChartRef.value)
         observer.observe(categoryChartRef.value)
-        
+
         return observer
     }
     return null
@@ -523,22 +656,22 @@ onMounted(async () => {
     // 等待多个 nextTick 确保 DOM 完全渲染
     await nextTick()
     await nextTick()
-    
+
     // 设置 ResizeObserver 监听容器尺寸变化
     setTimeout(() => {
         containerObserver = observeContainer()
     }, 100)
-    
+
     // 延迟初始化图表，确保容器有尺寸
     setTimeout(() => {
         updateCharts()
     }, 300)
-    
+
     // 如果是omega用户，获取产品价格
     if (hasOmegaSubscription.value) {
         fetchProductPrices()
     }
-    
+
     // 响应式调整图表大小
     window.addEventListener('resize', handleResize)
 })
@@ -550,7 +683,7 @@ onUnmounted(() => {
         containerObserver.disconnect()
         containerObserver = null
     }
-    
+
     // 清理图表实例
     if (productChartInstance) {
         productChartInstance.dispose()
@@ -602,27 +735,18 @@ onUnmounted(() => {
                             <span>最终产品成本汇总</span>
                         </div>
                     </template>
-                    <el-table
-                        :data="productCostSummary"
-                        stripe
-                        border
-                        style="width: 100%"
-                        show-overflow-tooltip
-                    >
+                    <el-table :data="productCostSummary" stripe border style="width: 100%" show-overflow-tooltip
+                        show-summary :summary-method="getSummaries">
                         <el-table-column prop="type_name" label="产品名称" width="100" />
                         <el-table-column prop="total_cost" label="数量" width="75">
                             <template #default="{ row }">
                                 <strong>{{ row.product_num }}</strong>
                             </template>
                         </el-table-column>
-                        <el-table-column 
-                            v-if="hasOmegaSubscription" 
-                            prop="expected_profit" 
-                            label="预期利润" 
-                            width="150"
-                        >
+                        <el-table-column v-if="hasOmegaSubscription" prop="expected_profit" label="预期利润" width="150">
                             <template #default="{ row }">
-                                <div v-if="row.expected_profit !== undefined" :style="{ color: row.expected_profit > 0 ? '#008000' : '#FF0000' }">
+                                <div v-if="row.expected_profit !== undefined"
+                                    :style="{ color: row.expected_profit > 0 ? '#008000' : '#FF0000' }">
                                     <div>
                                         <strong>{{ formatNumber(row.expected_profit) }}</strong>
                                     </div>
@@ -633,23 +757,34 @@ onUnmounted(() => {
                                 </div>
                                 <div v-else style="color: #999;">加载中...</div>
                             </template>
+                            <template #summary>
+                                <div v-if="hasOmegaSubscription"
+                                    :style="{ color: expectedProfitTotal > 0 ? '#008000' : expectedProfitTotal < 0 ? '#FF0000' : '#666', fontWeight: 'bold' }">
+                                    {{ formatNumber(expectedProfitTotal) }}
+                                </div>
+                                <div v-else></div>
+                            </template>
                         </el-table-column>
                         <el-table-column prop="total_cost" label="总成本" width="150">
                             <template #default="{ row }">
-                                <div><strong>{{ formatNumber(row.total_cost) }}</strong> ({{ formatPercentage(row.percentage) }}) </div>
-                                <div v-if="row.product_num > 1" style="color: #888;">{{ formatNumber(row.total_cost / row.product_num)}}/per</div>
+                                <div><strong>{{ formatNumber(row.total_cost) }}</strong> ({{
+                                    formatPercentage(row.percentage) }}) </div>
+                                <div v-if="row.product_num > 1" style="color: #888;">{{ formatNumber(row.total_cost /
+                                    row.product_num) }}/per</div>
                             </template>
                         </el-table-column>
                         <el-table-column prop="children_cost" label="材料成本" width="160">
                             <template #default="{ row }">
                                 <div>{{ formatNumber(row.children_cost) }}</div>
-                                <div v-if="row.product_num > 1" style="color: #888;">{{ formatNumber(row.children_cost / row.product_num)}}/per</div>
+                                <div v-if="row.product_num > 1" style="color: #888;">{{ formatNumber(row.children_cost /
+                                    row.product_num) }}/per</div>
                             </template>
                         </el-table-column>
                         <el-table-column prop="eiv_cost" label="EIV成本" width="150">
                             <template #default="{ row }">
                                 <div>{{ formatNumber(row.eiv_cost) }}</div>
-                                <div v-if="row.product_num > 1" style="color: #888;">{{ formatNumber(row.eiv_cost / row.product_num)}}/per</div>
+                                <div v-if="row.product_num > 1" style="color: #888;">{{ formatNumber(row.eiv_cost /
+                                    row.product_num) }}/per</div>
                             </template>
                         </el-table-column>
                     </el-table>
@@ -664,13 +799,7 @@ onUnmounted(() => {
                             <span>材料分类成本汇总</span>
                         </div>
                     </template>
-                    <el-table
-                        :data="categoryCostSummary"
-                        stripe
-                        border
-                        style="width: 100%"
-                        show-overflow-tooltip
-                    >
+                    <el-table :data="categoryCostSummary" stripe border style="width: 100%" show-overflow-tooltip>
                         <el-table-column prop="category" label="分类" width="100" />
                         <el-table-column prop="total_cost" label="总成本" width="170">
                             <template #default="{ row }">
@@ -685,7 +814,7 @@ onUnmounted(() => {
                     </el-table>
                 </el-card>
             </el-col>
-        
+
 
         </el-row>
     </div>

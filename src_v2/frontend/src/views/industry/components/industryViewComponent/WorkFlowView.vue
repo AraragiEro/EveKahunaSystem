@@ -228,6 +228,17 @@ const totalEIV = computed(() => {
                 </div>
             </template>
         </el-table-column>
+        <el-table-column label="线" prop="runs_count" width="120" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)">
+            <template #default="{ row }">
+                <div 
+                    class="copyable-cell" 
+                    @click="copyCellContent(row.runs_count, 'Runs Count')"
+                    :title="`点击复制: ${row.runs_count || ''}`"
+                >
+                    {{ formatAccounting(row.runs_count) }}
+                </div>
+            </template>
+        </el-table-column>
         <el-table-column label="流程" prop="runs" width="100" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)">
             <template #default="{ row }">
                 <div 
@@ -239,14 +250,38 @@ const totalEIV = computed(() => {
                 </div>
             </template>
         </el-table-column>
-        <el-table-column label="线" prop="runs_count" width="120" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)">
+        <el-table-column label="材料满足" prop="avaliable" width="75">
+            <template #header>
+                <span>有材料</span>
+                <el-switch
+                    v-model="materialUnavailable"
+                    inline-prompt
+                    active-text="有材料"
+                    inactive-text="所有"
+                />
+            </template>
             <template #default="{ row }">
-                <div 
-                    class="copyable-cell" 
-                    @click="copyCellContent(row.runs_count, 'Runs Count')"
-                    :title="`点击复制: ${row.runs_count || ''}`"
-                >
-                    {{ formatAccounting(row.runs_count) }}
+                <div style="display: flex; align-items: center; justify-content: center;">
+                <el-icon v-if="row.avaliable" size="20" style="color: #67c23a;"><CircleCheckFilled /></el-icon>
+                <el-icon v-else size="20" style="color: #f56c6c;"><CircleCloseFilled /></el-icon>
+                <!-- {{ row.avaliable ? '是' : '否' }} -->
+                </div>
+            </template>
+        </el-table-column>
+        <el-table-column label="分配蓝图" prop="fake" width="75">
+            <template #header>
+                <span>有蓝图</span>
+                <el-switch
+                    v-model="showFake"
+                    inline-prompt
+                    active-text="没蓝图"
+                    inactive-text="所有"
+                />
+            </template>
+            <template #default="{ row }">
+                <div style="display: flex; align-items: center; justify-content: center;">
+                <el-icon v-if="row.fake" size="20" style="color: #f56c6c;"><CircleCloseFilled /></el-icon>
+                <el-icon v-else size="20" style="color: #67c23a;"><CircleCheckFilled /></el-icon>
                 </div>
             </template>
         </el-table-column>
@@ -310,41 +345,6 @@ const totalEIV = computed(() => {
                     :title="`点击复制: ${row.active_time || ''}秒`"
                 >
                     {{ formatDuration(row.active_time) }}
-                </div>
-            </template>
-        </el-table-column>
-        <el-table-column label="材料满足" prop="avaliable" width="75">
-            <template #header>
-                <span>有材料</span>
-                <el-switch
-                    v-model="materialUnavailable"
-                    inline-prompt
-                    active-text="有材料"
-                    inactive-text="所有"
-                />
-            </template>
-            <template #default="{ row }">
-                <div style="display: flex; align-items: center; justify-content: center;">
-                <el-icon v-if="row.avaliable" size="20" style="color: #67c23a;"><CircleCheckFilled /></el-icon>
-                <el-icon v-else size="20" style="color: #f56c6c;"><CircleCloseFilled /></el-icon>
-                <!-- {{ row.avaliable ? '是' : '否' }} -->
-                </div>
-            </template>
-        </el-table-column>
-        <el-table-column label="分配蓝图" prop="fake" width="75">
-            <template #header>
-                <span>有蓝图</span>
-                <el-switch
-                    v-model="showFake"
-                    inline-prompt
-                    active-text="没蓝图"
-                    inactive-text="所有"
-                />
-            </template>
-            <template #default="{ row }">
-                <div style="display: flex; align-items: center; justify-content: center;">
-                <el-icon v-if="row.fake" size="20" style="color: #f56c6c;"><CircleCloseFilled /></el-icon>
-                <el-icon v-else size="20" style="color: #67c23a;"><CircleCheckFilled /></el-icon>
                 </div>
             </template>
         </el-table-column>

@@ -32,7 +32,7 @@ class EsiReqManager:
         # 令牌池管理
         self.token_pool = 0.0  # 当前可用令牌数（初始为0）
         self.token_generation_rate = 300  # 每秒产生300个令牌
-        self.max_token_pool = 600  # 令牌池最大容量
+        self.max_token_pool = 1200  # 令牌池最大容量
         self.last_token_update_time = time.time()  # 上次更新令牌的时间戳
         self.lock = asyncio.Lock()  # 保护令牌池操作的锁
         

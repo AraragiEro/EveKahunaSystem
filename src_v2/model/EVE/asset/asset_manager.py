@@ -1056,7 +1056,7 @@ class AssetManager(metaclass=SingletonMeta):
         
         # 构建容器-所有者对列表
         container_owner_pairs = [
-            [item["container_id"], item["owner_id"]] 
+            [item["container_id"], item["owner_id"], item.get("location_flag")]
             for item in container_list
         ]
         
@@ -1113,7 +1113,7 @@ class AssetManager(metaclass=SingletonMeta):
         else:
             return "杂货"
 
-    async def get_asset_statistics_data(self, sid: str):
+    async def get_asset_statistics_data(self, user_name: str, sid: str):
         asset_view = await EveAssetViewDBUtils.select_by_sid(sid)
         if not asset_view:
             raise KahunaException('资产视图不存在')
@@ -1129,21 +1129,23 @@ class AssetManager(metaclass=SingletonMeta):
         for item in container_list:
             container_id = item["container_id"]
             owner_id = item["owner_id"]
-            pull_permission = await EveIndustryAssetContainerPermissionDBUtils.select_by_container_id_and_owner_id(container_id, owner_id)
+            location_flag = item.get("location_flag")
+            pull_permission = await EveIndustryAssetContainerPermissionDBUtils.select_by_container_id_owner_id_user_name_location_flag(
+                container_id, owner_id, user_name, location_flag)
             if not pull_permission:
                 raise KahunaException(f"容器 {container_id} 没有权限")
-            container_owner_pairs.append([container_id, owner_id, pull_permission.tag])
+            container_owner_pairs.append([container_id, owner_id, pull_permission.tag, location_flag])
         
         asset_dict = {
             container_id: {
                 'container_id': container_id,
                 'name': name,
                 'assets': {}
-            } for container_id, _, name in container_owner_pairs
+            } for container_id, _, name, _ in container_owner_pairs
         }
-        for container_id, owner_id, _ in container_owner_pairs:
+        for container_id, owner_id, _, location_flag in container_owner_pairs:
             container_asset_d = asset_dict[container_id]['assets']
-            asset_data = await NAU.get_asset_in_container_owner_list([[container_id, owner_id]])
+            asset_data = await NAU.get_asset_in_container_owner_list([[container_id, owner_id, location_flag]])
             for asset in asset_data:
                 type_id = asset['type_id']
                 price_data = await rdm().r.hgetall(f"market_price:jita:{type_id}")
@@ -1274,7 +1276,7 @@ class AssetManager(metaclass=SingletonMeta):
             
             # 构建 asset_container_id_list，存储 {container_id, owner_id} 组合
             asset_container_id_list = [
-                {"container_id": item["container_id"], "owner_id": item["owner_id"]}
+                {"container_id": item["container_id"], "owner_id": item["owner_id"], "location_flag": item.get("location_flag")}
                 for item in container_list
             ]
             asset_view.asset_container_id_list = asset_container_id_list

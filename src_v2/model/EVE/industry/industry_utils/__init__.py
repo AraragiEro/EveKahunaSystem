@@ -33,6 +33,8 @@ from .permission_utils import (
     delete_industrypermision,
     get_user_all_container_permission,
     update_container_permission_tag,
+    get_location_flag_list,
+    update_container_permission_location_flag
 )
 from .plan_utils import get_plan_tableview_data, update_plan_status
 from .structure_utils import get_structure_assign_keyword_suggestions, get_structure_list
@@ -71,4 +73,6 @@ __all__ = [
     'get_type_list',
     'update_plan_status',
     'get_plan_tableview_data',
+    'get_location_flag_list',
+    'update_container_permission_location_flag',
 ]

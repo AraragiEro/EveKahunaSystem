@@ -23,13 +23,17 @@ def auth_required(f):
         token = request.headers.get('Authorization')
 
         if not token or not token.startswith('Bearer '):
-            return jsonify({'error': '缺少认证token'}), 401
+            response = jsonify({'error': '缺少认证token'})
+            response.status_code = 401
+            return response
 
         token = token.split(' ')[1]
         payload = verify_token(token)
 
         if not payload:
-            return jsonify({'error': '无效的token'}), 401
+            response = jsonify({'error': '无效的token'})
+            response.status_code = 401
+            return response
 
         g.current_user = payload
         return await f(*args, **kwargs)

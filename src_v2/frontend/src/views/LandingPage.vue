@@ -3,6 +3,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { Cpu, TrendCharts, Money, ShoppingCart, DataAnalysis, Setting, ZoomIn, ArrowLeft, ArrowRight, Tools } from '@element-plus/icons-vue'
 import { ref, computed } from 'vue'
+import VipPricingPlans from '@/components/VipPricingPlans.vue'
 import mainViewImage from '@/assets/landing-page-mainView.png'
 import githubIconWhite from '@/assets/github-mark-white.svg'
 import aifadianLogo from '@/assets/横版-黑底-透明背景.png'
@@ -141,80 +142,6 @@ const highlights = [
   }
 ]
 
-// 定价方案
-const pricingPlans = [
-  {
-    name: '免费用户',
-    price: '免费',
-    priceUnit: '',
-    color: '#909399',
-    features: [
-      {
-        category: '完整的工业流程计算相关功能',
-        items: [
-          '完整的计划功能',
-          '除esi库存读取外的计划配置功能',
-          '报表解锁',
-          '  • 流程视图：详细的蓝图分解',
-          '  • 材料视图：原材料的缺失情况',
-          '  • 工作流：可执行的工作方案',
-          '  • 采购视图：可进行一键采购的清单'
-        ]
-      }
-    ],
-    isPopular: false
-  },
-  {
-    name: 'Alpha订阅',
-    price: '500M',
-    priceUnit: 'Isk/月',
-    color: '#409eff',
-    note: '注意：需要有总监权限才可以添加公司库存',
-    features: [
-      {
-        category: '免费用户的所有功能',
-        items: []
-      },
-      {
-        category: '工业流程计算功能附加esi读取能力',
-        items: [
-          '可以配置想要读取的目标容器',
-          '流程视图根据库存判断工作进度',
-          '工作流根据库存判断原材料是否满足与蓝图是否缺失',
-          '+ 成本视图：分析成本分布比例判断盈利空间',
-          '+ 劳动力视图：提供输出向计划容器的所有正在进行的工作者信息，提供合作利益分配手段',
-          '+ 物流视图：提供材料满足但是需要运输时的可执行方案',
-          '+ 化矿视图：对矿石配平求解'
-        ]
-      }
-    ],
-    isPopular: true
-  },
-  {
-    name: 'Omega订阅',
-    price: '2B',
-    priceUnit: 'Isk/月',
-    color: '#e6a23c',
-    hasTrial: true,
-    trialText: '可领取7天试用',
-    features: [
-      {
-        category: '免费用户与alpha订阅的全部功能',
-        items: []
-      },
-      {
-        category: '市场分析与利润分析',
-        items: [
-          '创建自选type的市场监控界面',
-          '可选jita与FRT市场的价格拉取',
-          '根据你的计划配置计算type成本与利润',
-          '对单个type或清单内全量type的交易量、流水等分析（开发中）'
-        ]
-      }
-    ],
-    isPopular: false
-  }
-]
 </script>
 
 <template>
@@ -398,42 +325,7 @@ const pricingPlans = [
         <p class="pricing-notice">
           收费策略可能会根据服务器资源、联盟政策等因素变动，暂不接受年卡等长期订阅
         </p>
-        <div class="pricing-grid">
-          <el-card
-            v-for="(plan, index) in pricingPlans"
-            :key="index"
-            shadow="hover"
-            :class="['pricing-card', { 'pricing-card-popular': plan.isPopular }]"
-          >
-            <div class="pricing-header" :style="{ borderTopColor: plan.color }">
-              <h3 class="pricing-name">{{ plan.name }}</h3>
-              <div class="pricing-price">
-                <span class="price-amount">{{ plan.price }}</span>
-                <span class="price-unit" v-if="plan.priceUnit">{{ plan.priceUnit }}</span>
-              </div>
-              <div v-if="plan.hasTrial" class="pricing-trial">
-                {{ plan.trialText }}
-              </div>
-              <div v-if="plan.note" class="pricing-note">
-                {{ plan.note }}
-              </div>
-            </div>
-            <div class="pricing-features">
-              <div
-                v-for="(feature, featureIndex) in plan.features"
-                :key="featureIndex"
-                class="feature-group"
-              >
-                <h4 class="feature-category">{{ feature.category }}</h4>
-                <ul v-if="feature.items && feature.items.length > 0" class="feature-list">
-                  <li v-for="(item, itemIndex) in feature.items" :key="itemIndex" class="feature-item">
-                    {{ item }}
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </el-card>
-        </div>
+        <VipPricingPlans />
       </div>
     </section>
 
@@ -947,147 +839,6 @@ const pricingPlans = [
   font-style: italic;
 }
 
-.pricing-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 32px;
-  margin-top: 40px;
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.pricing-card {
-  border-radius: 16px;
-  transition: all 0.3s ease;
-  overflow: hidden;
-  background: white;
-  border: 2px solid transparent;
-  position: relative;
-}
-
-.pricing-card:hover {
-  transform: translateY(-8px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
-}
-
-.pricing-card-popular {
-  border-color: #409eff;
-  box-shadow: 0 8px 24px rgba(64, 158, 255, 0.2);
-}
-
-.pricing-card-popular::before {
-  content: '推荐';
-  position: absolute;
-  top: 16px;
-  right: -32px;
-  background: #409eff;
-  color: white;
-  padding: 4px 40px;
-  font-size: 12px;
-  font-weight: 600;
-  transform: rotate(45deg);
-  z-index: 10;
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
-}
-
-.pricing-header {
-  padding: 32px 24px;
-  text-align: center;
-  border-top: 4px solid;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.85));
-}
-
-.pricing-name {
-  font-size: 24px;
-  font-weight: 600;
-  color: #2c3e50;
-  margin: 0 0 16px 0;
-}
-
-.pricing-price {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.price-amount {
-  font-size: 42px;
-  font-weight: 700;
-  color: #2c3e50;
-  line-height: 1;
-}
-
-.price-unit {
-  font-size: 16px;
-  color: #64748b;
-  font-weight: 500;
-}
-
-.pricing-trial {
-  display: inline-block;
-  background: linear-gradient(135deg, #e6a23c 0%, #f0c674 100%);
-  color: white;
-  padding: 6px 16px;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 600;
-  margin-top: 8px;
-  box-shadow: 0 2px 8px rgba(230, 162, 60, 0.3);
-}
-
-.pricing-note {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 12px;
-  line-height: 1.5;
-}
-
-.pricing-features {
-  padding: 24px;
-}
-
-.feature-group {
-  margin-bottom: 24px;
-}
-
-.feature-group:last-child {
-  margin-bottom: 0;
-}
-
-.feature-category {
-  font-size: 16px;
-  font-weight: 600;
-  color: #2c3e50;
-  margin: 0 0 12px 0;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #e4e7ed;
-}
-
-.feature-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.feature-item {
-  font-size: 14px;
-  color: #64748b;
-  line-height: 1.8;
-  padding: 6px 0;
-  padding-left: 20px;
-  position: relative;
-}
-
-.feature-item::before {
-  content: '✓';
-  position: absolute;
-  left: 0;
-  color: #67c23a;
-  font-weight: 600;
-}
 
 /* 技术栈展示 */
 .tech-section {
@@ -1214,40 +965,12 @@ const pricingPlans = [
     max-height: 60vh;
   }
 
-  .pricing-grid {
-    grid-template-columns: 1fr;
-    gap: 24px;
-  }
-
-  .pricing-card-popular::before {
-    top: 12px;
-    right: -28px;
-    padding: 3px 35px;
-    font-size: 11px;
-  }
-
-  .price-amount {
-    font-size: 36px;
-  }
-
-  .pricing-header {
-    padding: 24px 20px;
-  }
-
-  .pricing-features {
-    padding: 20px;
-  }
 }
 
 @media (max-width: 1024px) {
   .features-grid {
     grid-template-columns: 1fr;
     gap: 32px;
-  }
-
-  .pricing-grid {
-    grid-template-columns: 1fr;
-    gap: 28px;
   }
 }
 </style>

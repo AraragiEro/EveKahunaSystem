@@ -48,3 +48,6 @@ config.toml
 
 # 版本标识
 .edition
+
+#uiux文件
+.shared/**/*

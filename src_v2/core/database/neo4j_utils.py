@@ -3,12 +3,14 @@ Neo4j CRUD 操作工具类
 """
 import asyncio
 import stat
-from typing import Optional, List, Dict, Any, TYPE_CHECKING, Tuple
 from datetime import datetime
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
 from neo4j.exceptions import TransientError
-from .neo4j_models import NodeModel, RelationshipType
-from .connect_manager import get_neo4j_manager
+
 from ..log import logger
+from .connect_manager import get_neo4j_manager
+from .neo4j_models import NodeModel, RelationshipType
 
 if TYPE_CHECKING:
     from .neo4j_models import Asset
@@ -22,7 +24,7 @@ class Neo4jAssetUtils:
         async with get_neo4j_manager().get_session() as session:
             owner_label = "Character" if owner_type == "character" else "Corporation"
             owner_prop = "character_id" if owner_type == "character" else "corporation_id"
-            
+
             query = f"""
             MATCH path = (owner:{owner_label} {{{owner_prop}: $owner_id}})
                   <-[:OWNED_BY]-(asset:Asset)
@@ -31,32 +33,32 @@ class Neo4jAssetUtils:
             ORDER BY length(path) DESC
             LIMIT 100
             """
-            
+
             result = await session.run(query, {"owner_id": owner_id})
             paths = []
             async for record in result:
                 paths.append(record["path"])
             return paths
-    
+
     @staticmethod
     async def batch_create_assets(assets: List[Dict[str, Any]]):
         """批量创建资产节点并建立位置关系
-        
+
         Args:
             assets: 资产数据列表，每个元素是一个包含资产属性的字典
             owner_id: 所有者ID
-            
+
         功能：
             1. 创建asset节点，填充dict的数据
             2. 创建当前asset节点到item_id==location_id的asset节点的LOCATED_IN边
             3. 若目标节点不存在则新建一个填充item_id=location_id和owner_id的节点
-            
+
         Returns:
             创建的资产节点数量
         """
         if not assets:
             return 0
-        
+
         async with get_neo4j_manager().get_transaction() as tx:
             # 第一步：创建所有asset节点
             create_query = """
@@ -75,13 +77,13 @@ class Neo4jAssetUtils:
                 a.type_name = asset_data.type_name
             RETURN count(a) AS created_count
             """
-            
+
             result = await tx.run(create_query, {
                 "assets": assets
             })
             record = await result.single()
             created_count = record["created_count"] if record else 0
-            
+
             # 第二步：为有location_id的资产创建LOCATED_IN关系
             relationship_query = """
             UNWIND $assets AS asset_data
@@ -96,21 +98,21 @@ class Neo4jAssetUtils:
             MERGE (a)-[:LOCATED_IN]->(target)
             RETURN count(a) AS relationship_count
             """
-            
+
             result = await tx.run(relationship_query, {
                 "assets": assets
             })
-            
+
             return created_count
 
     @staticmethod
     async def merge_asset_to_structure_if_exists(asset_dict: Dict, structure_dict: Dict):
         """插入asset，如果找到structure则插入asset->structure的关系
-        
+
         Args:
             asset_dict: 资产数据字典
             structure_dict: 结构数据字典，必须包含 structure_id
-            
+
         Returns:
             bool: 是否成功创建了asset->structure的关系
         """
@@ -271,10 +273,10 @@ class Neo4jAssetUtils:
     @staticmethod
     async def get_forbidden_structure_node_list(owner_id: int) -> List[Dict]:
         """查找没有出边的 Structure 节点（通常是位置信息不完整的结构）
-        
+
         Args:
             owner_id: 所有者ID
-            
+
         Returns:
             没有出边关系的 Structure 节点列表（字典格式）
         """
@@ -296,10 +298,10 @@ class Neo4jAssetUtils:
     @staticmethod
     async def get_forbidden_structure_nodes_by_owner(owner_id: int) -> List[Dict]:
         """查找该owner的asset连接的所有forbidden_structure_node（structure_name为"Forbidden unknown"）
-        
+
         Args:
             owner_id: 所有者ID
-            
+
         Returns:
             Structure节点列表（字典格式），每个节点包含structure_id和连接的asset信息
         """
@@ -322,18 +324,19 @@ class Neo4jAssetUtils:
                     structure_map[structure_id] = structure_dict
                 asset_dict = dict(asset_node)
                 asset_dict['labels'] = list(asset_node.labels)
-                structure_map[structure_id]['connected_assets'].append(asset_dict)
+                structure_map[structure_id]['connected_assets'].append(
+                    asset_dict)
             return list(structure_map.values())
 
     @staticmethod
     async def update_forbidden_structure_node(structure_id: int, structure_dict: Dict, solar_system_dict: Dict):
         """更新forbidden_structure_node：删除连接到unknown system的边，更新节点信息，创建到正确星系的连接
-        
+
         Args:
             structure_id: Structure节点ID
             structure_dict: Structure节点属性字典
             solar_system_dict: SolarSystem节点属性字典
-            
+
         Returns:
             bool: 是否成功更新
         """
@@ -378,7 +381,7 @@ class Neo4jAssetUtils:
             })
             record = await result.single()
             return record is not None
-            
+
     @staticmethod
     async def delete_assets_by_owner_id(owner_id: int):
         async with get_neo4j_manager().get_transaction() as tx:
@@ -387,7 +390,7 @@ class Neo4jAssetUtils:
             DETACH DELETE a
             """
             await tx.run(query, {"owner_id": owner_id})
-    
+
     @staticmethod
     async def search_container_by_item_name(owner_ids: List[int], type_id: int):
         async with get_neo4j_manager().get_session() as session:
@@ -469,7 +472,7 @@ class Neo4jAssetUtils:
             return record is not None
 
     @staticmethod
-    async def get_structure_nodes(ndm = None) -> List[Dict]:
+    async def get_structure_nodes(ndm=None) -> List[Dict]:
         query = """
         match (a:Structure) return a
         """
@@ -485,7 +488,7 @@ class Neo4jAssetUtils:
             return nodes
 
     @staticmethod
-    async def get_structure_node_by_structure_id(structure_id: int, ndm = None) -> Dict:
+    async def get_structure_node_by_structure_id(structure_id: int, ndm=None) -> Dict:
         query = """
         match (a:Structure {structure_id: $structure_id}) return a
         """
@@ -501,10 +504,24 @@ class Neo4jAssetUtils:
             return {}
 
     @staticmethod
-    async def get_asset_by_type_id_in_container_owner_list(type_id: int, container_owner_list: List[List[int]], ndm = None) -> List[Dict]:
+    async def get_asset_by_type_id_in_container_owner_list(type_id: int, container_owner_list: List[List[int]], ndm=None) -> List[Dict]:
+        """
+        根据type_id和容器列表获取资产
+        
+        Args:
+            type_id: 资产类型ID
+            container_owner_list: [[container_id, owner_id, location_flag(str | None)], ...]容器列表
+            ndm: Neo4j数据库管理器实例
+        Returns:
+            List[Dict]: 资产列表
+        """
         query = """
         MATCH (a:Asset {type_id: $type_id}) 
-        WHERE ANY(x IN $container_owner_list WHERE a.location_id = x[0] AND a.owner_id = x[1])
+        WHERE ANY(x IN $container_owner_list WHERE 
+            a.location_id = x[0] AND 
+            a.owner_id = x[1] AND 
+            (x[2] IS NULL OR a.location_flag = x[2])
+        )
         RETURN a
         """
         if ndm:
@@ -519,11 +536,11 @@ class Neo4jAssetUtils:
             return assets
 
     @staticmethod
-    async def get_asset_in_container_owner_list(container_owner_list: List[List[int]], ndm = None) -> List[Dict]:
+    async def get_asset_in_container_owner_list(container_owner_list: List[List[int]], ndm=None) -> List[Dict]:
         """
-        
+
         Args:
-            container_owner_list: 容器列表
+            container_owner_list: [[container_id, owner_id, location_flag(str | None)], ...]容器列表
         Returns:
             List[Dict]: 资产列表
             {
@@ -541,7 +558,11 @@ class Neo4jAssetUtils:
         """
         query = """
         MATCH (a:Asset) 
-        WHERE ANY(x IN $container_owner_list WHERE a.location_id = x[0] AND a.owner_id = x[1])
+        WHERE ANY(x IN $container_owner_list WHERE 
+            a.location_id = x[0] AND 
+            a.owner_id = x[1] AND 
+            (x[2] IS NULL OR a.location_flag = x[2])
+        )
         RETURN a
         """
         if ndm:
@@ -550,30 +571,29 @@ class Neo4jAssetUtils:
             m = get_neo4j_manager()
         async with m.get_session() as session:
             result = await session.run(query, {"container_owner_list": container_owner_list})
-            assets = []
-            async for record in result:
-                assets.append(dict(record["a"]))
+            assets = [dict(record["a"]) async for record in result]
             return assets
+
 
 class Neo4jIndustryUtils:
     """工业制造相关的 CRUD 操作"""
     @staticmethod
     async def delete_tree(root_label: str, root_index: Dict[str, Any], relation_label: str, ndm=None) -> int:
         """根据根节点属性和边属性删除整棵树
-        
+
         Args:
             root_label: 根节点的标签（如 "Asset", "Structure"）
             root_index: 根节点的属性字典，用于匹配根节点（如 {"owner_id": 123, "item_id": 456}）
             relation_label: 关系的标签（如 "LOCATED_IN", "CONTAINS"）
-            
+
         Returns:
             int: 删除的节点数量
-            
+
         功能说明：
             1. 根据 root_label 和 root_index 找到根节点
             2. 找到所有通过 relation_label 关系连接的子树节点（包括根节点）
             3. 删除整棵树及其所有关系
-            
+
         示例：
             # 删除以 owner_id=123, item_id=456 的 Asset 为根，通过 LOCATED_IN 关系连接的整棵树
             await Neo4jIndustryUtils.delete_tree(
@@ -585,7 +605,7 @@ class Neo4jIndustryUtils:
         if not root_index:
             logger.warning("root_index 不能为空")
             return 0
-        
+
         if ndm:
             m = ndm
         else:
@@ -597,9 +617,9 @@ class Neo4jIndustryUtils:
             for key, value in root_index.items():
                 root_conditions.append(f"root.{key} = ${key}")
                 params[key] = value
-            
+
             root_where = " AND ".join(root_conditions)
-            
+
             # 构建查询：找到根节点及其所有通过指定关系连接的子树节点
             query = f"""
             MATCH (root:{root_label})
@@ -614,37 +634,37 @@ class Neo4jIndustryUtils:
             DETACH DELETE n
             RETURN count(n) AS deleted_count
             """
-            
+
             result = await tx.run(query, params)
             record = await result.single()
             deleted_count = record["deleted_count"] if record else 0
-            
+
             logger.info(
                 f"删除树完成: root_label={root_label}, root_index={root_index}, "
                 f"relation_label={relation_label}, deleted_count={deleted_count}"
             )
-            
+
             return deleted_count
 
     @staticmethod
     async def merge_node(node_label: str, node_index: Dict[str, Any], node_properties: Dict[str, Any], max_retries: int = 50, ndm=None) -> bool:
         """通用的新建或更新节点函数
-        
+
         Args:
             node_label: 节点的标签（如 "Asset", "Structure", "Station"）
             node_index: 用于匹配节点的属性字典，作为 MERGE 的唯一键（如 {"owner_id": 123, "item_id": 456}）
             node_properties: 要设置的所有属性字典（包括 node_index 中的属性）
             max_retries: 最大重试次数（用于处理死锁错误，默认50次）
-            
+
         Returns:
             bool: 是否成功创建或更新了节点
-            
+
         功能说明：
             1. 根据 node_label 和 node_index 查找节点，如果不存在则创建
             2. 如果节点是新创建的，使用 ON CREATE SET 设置所有属性
             3. 如果节点已存在，使用 ON MATCH SET 更新所有属性
             4. 自动处理死锁错误，使用指数退避策略重试
-            
+
         示例：
             # 创建或更新一个 Asset 节点
             await Neo4jIndustryUtils.merge_node(
@@ -662,11 +682,11 @@ class Neo4jIndustryUtils:
         if not node_index:
             logger.warning("node_index 不能为空")
             return False
-        
+
         if not node_properties:
             logger.warning("node_properties 不能为空")
             return False
-        
+
         # 重试逻辑：处理死锁错误
         for attempt in range(max_retries):
             try:
@@ -681,24 +701,25 @@ class Neo4jIndustryUtils:
                     for key, value in node_index.items():
                         merge_conditions.append(f"{key}: ${key}_index")
                         params[f"{key}_index"] = value
-                    
+
                     merge_where = ", ".join(merge_conditions)
-                    
+
                     # 构建 ON CREATE SET 和 ON MATCH SET 的属性设置
                     create_props = []
                     match_props = []
-                    
+
                     for key, value in node_properties.items():
                         param_key = f"prop_{key}"
                         params[param_key] = value
-                        
+
                         # 使用 COALESCE 处理 null 值：新建时使用新值，更新时如果新值为 null 则保留旧值
                         create_props.append(f"n.{key} = ${param_key}")
-                        match_props.append(f"n.{key} = COALESCE(${param_key}, n.{key})")
-                    
+                        match_props.append(
+                            f"n.{key} = COALESCE(${param_key}, n.{key})")
+
                     create_set = ", ".join(create_props)
                     match_set = ", ".join(match_props)
-                    
+
                     # 构建查询
                     query = f"""
                     MERGE (n:{node_label} {{{merge_where}}})
@@ -706,10 +727,10 @@ class Neo4jIndustryUtils:
                     ON MATCH SET {match_set}
                     RETURN n
                     """
-                    
+
                     result = await tx.run(query, params)
                     record = await result.single()
-                    
+
                     if record:
                         logger.debug(
                             f"节点合并成功: node_label={node_label}, node_index={node_index}"
@@ -724,7 +745,7 @@ class Neo4jIndustryUtils:
                 # 检查是否是死锁错误
                 error_code = getattr(e, 'code', '') or ''
                 is_deadlock = (
-                    'DeadlockDetected' in str(e) or 
+                    'DeadlockDetected' in str(e) or
                     'Neo.TransientError.Transaction.DeadlockDetected' in error_code or
                     error_code == 'Neo.TransientError.Transaction.DeadlockDetected'
                 )
@@ -753,7 +774,7 @@ class Neo4jIndustryUtils:
                     f"节点合并时发生未预期的错误: {node_label}{node_index}, 错误: {str(e)}"
                 )
                 raise
-        
+
         # 理论上不应该到达这里（所有重试都失败会抛出异常）
         # 但为了满足类型检查，添加此返回
         logger.error(
@@ -768,23 +789,23 @@ class Neo4jIndustryUtils:
         ndm=None
     ) -> int:
         """批量合并节点（创建或更新）
-        
+
         Args:
             node_label: 节点的标签（如 "PlanBlueprint", "Asset"）
             nodes_data: 节点数据列表，每个元素是一个字典，包含：
                 - "index": 用于匹配节点的属性字典，作为 MERGE 的唯一键
                 - "properties": 要设置的所有属性字典（包括 index 中的属性）
             ndm: Neo4j管理器实例（可选）
-            
+
         Returns:
             int: 成功处理的节点数量
-            
+
         功能说明：
             1. 使用 UNWIND 批量处理所有节点
             2. 根据 index 查找节点，如果不存在则创建
             3. 如果节点是新创建的，使用 ON CREATE SET 设置所有属性
             4. 如果节点已存在，使用 ON MATCH SET 更新所有属性（使用 COALESCE 处理 null 值）
-            
+
         示例：
             nodes_data = [
                 {
@@ -800,50 +821,52 @@ class Neo4jIndustryUtils:
         """
         if not nodes_data:
             return 0
-        
+
         if ndm:
             m = ndm
         else:
             m = get_neo4j_manager()
-        
+
         try:
             async with m.get_transaction() as tx:
                 # 获取第一个节点的index键，用于构建MERGE条件
                 # 假设所有节点使用相同的index键结构
                 first_index = nodes_data[0]["index"]
                 index_keys = list(first_index.keys())
-                
+
                 # 获取所有可能的属性键（从所有节点的properties中收集）
                 all_property_keys = set()
                 for node_data in nodes_data:
                     all_property_keys.update(node_data["properties"].keys())
-                
+
                 # 构建MERGE的匹配条件（使用index键）
                 merge_conditions = []
                 for key in index_keys:
                     merge_conditions.append(f"{key}: node_data.{key}")
-                
+
                 merge_where = ", ".join(merge_conditions)
-                
+
                 # 构建ON CREATE SET和ON MATCH SET的属性设置
                 create_props = []
                 match_props = []
-                
+
                 for key in all_property_keys:
                     # 使用COALESCE处理null值：新建时使用新值，更新时如果新值为null则保留旧值
                     create_props.append(f"n.{key} = node_data.{key}")
-                    match_props.append(f"n.{key} = COALESCE(node_data.{key}, n.{key})")
-                
+                    match_props.append(
+                        f"n.{key} = COALESCE(node_data.{key}, n.{key})")
+
                 create_set = ", ".join(create_props)
                 match_set = ", ".join(match_props)
-                
+
                 # 将nodes_data转换为扁平结构：合并index和properties
                 flat_nodes_data = []
                 for node_data in nodes_data:
                     # 合并index和properties，properties中的值会覆盖index中的值（如果有重复）
-                    flat_node = {**node_data["index"], **node_data["properties"]}
+                    flat_node = {**node_data["index"],
+                                 **node_data["properties"]}
                     flat_nodes_data.append(flat_node)
-                
+
                 # 构建查询
                 query = f"""
                 UNWIND $nodes_data AS node_data
@@ -852,15 +875,15 @@ class Neo4jIndustryUtils:
                 ON MATCH SET {match_set}
                 RETURN count(n) AS merged_count
                 """
-                
+
                 result = await tx.run(query, {"nodes_data": flat_nodes_data})
                 record = await result.single()
                 merged_count = record["merged_count"] if record else 0
-                
+
                 logger.debug(
                     f"批量节点合并成功: node_label={node_label}, count={merged_count}"
                 )
-                
+
                 return merged_count
         except Exception as e:
             logger.error(
@@ -883,7 +906,7 @@ class Neo4jIndustryUtils:
         ndm=None
     ) -> bool:
         """使用指定关系连接两个节点，并设置节点和关系的属性
-        
+
         Args:
             node_label: 源节点的标签（如 "Asset", "Structure", "Station"）
             node_index: 用于匹配源节点的属性字典，作为 MERGE 的唯一键（如 {"owner_id": 123, "item_id": 456}）
@@ -899,10 +922,10 @@ class Neo4jIndustryUtils:
             target_node_index: 用于匹配目标节点的属性字典，作为 MERGE 的唯一键（如 {"owner_id": 123, "item_id": 456}）
             target_node_properties: 目标节点的属性字典，用于设置节点的所有属性
             max_retries: 最大重试次数（用于处理死锁错误，默认50次）
-            
+
         Returns:
             bool: 是否成功创建了关系
-            
+
         功能说明：
             1. 根据 node_label 和 node_index 找到或创建源节点，并设置 node_properties
             2. 根据 target_node_label 和 target_node_index 找到或创建目标节点，并设置 target_node_properties
@@ -911,7 +934,7 @@ class Neo4jIndustryUtils:
                 - 只有当所有 relation_index 属性都匹配时才会匹配到现有关系，否则创建新关系
             4. 如果关系已存在，则更新关系的属性
             5. 自动处理死锁错误，使用指数退避策略重试
-            
+
         示例：
             # 连接两个 Asset 节点，创建 LOCATED_IN 关系（不提供 relation_index，两个节点之间只能有一条关系）
             await Neo4jIndustryUtils.link_node(
@@ -925,7 +948,7 @@ class Neo4jIndustryUtils:
                 {"owner_id": 123, "item_id": 789},  # 目标节点索引
                 {"owner_id": 123, "item_id": 789, "type_id": 67890, "quantity": 50}  # 目标节点属性
             )
-            
+
             # 创建 PLAN_BP_DEPEND_ON 关系（提供 relation_index，允许创建多条不同属性的关系）
             await Neo4jIndustryUtils.link_node(
                 "PlanBlueprint",
@@ -942,17 +965,17 @@ class Neo4jIndustryUtils:
         if not node_index:
             logger.warning("node_index 不能为空")
             return False
-        
+
         if not target_node_index:
             logger.warning("target_node_index 不能为空")
             return False
-        
+
         # 确保 node_properties 和 target_node_properties 不为 None
         node_properties = node_properties or {}
         target_node_properties = target_node_properties or {}
         relation_properties = relation_properties or {}
         relation_index = relation_index or {}
-        
+
         # 重试逻辑：处理死锁错误
         for attempt in range(max_retries):
             try:
@@ -967,48 +990,56 @@ class Neo4jIndustryUtils:
                     for key, value in node_index.items():
                         source_conditions.append(f"{key}: ${key}_source_index")
                         params[f"{key}_source_index"] = value
-                    
+
                     source_where = ", ".join(source_conditions)
-                    
+
                     # 构建源节点的属性设置
                     source_create_props = []
                     source_match_props = []
                     for key, value in node_properties.items():
                         param_key = f"source_prop_{key}"
                         params[param_key] = value
-                        source_create_props.append(f"source.{key} = ${param_key}")
-                        source_match_props.append(f"source.{key} = COALESCE(${param_key}, source.{key})")
-                    
-                    source_create_set = ", ".join(source_create_props) if source_create_props else ""
-                    source_match_set = ", ".join(source_match_props) if source_match_props else ""
-                    
+                        source_create_props.append(
+                            f"source.{key} = ${param_key}")
+                        source_match_props.append(
+                            f"source.{key} = COALESCE(${param_key}, source.{key})")
+
+                    source_create_set = ", ".join(
+                        source_create_props) if source_create_props else ""
+                    source_match_set = ", ".join(
+                        source_match_props) if source_match_props else ""
+
                     # 构建目标节点的 MERGE 条件
                     target_conditions = []
                     for key, value in target_node_index.items():
                         target_conditions.append(f"{key}: ${key}_target_index")
                         params[f"{key}_target_index"] = value
-                    
+
                     target_where = ", ".join(target_conditions)
-                    
+
                     # 构建目标节点的属性设置
                     target_create_props = []
                     target_match_props = []
                     for key, value in target_node_properties.items():
                         param_key = f"target_prop_{key}"
                         params[param_key] = value
-                        target_create_props.append(f"target.{key} = ${param_key}")
-                        target_match_props.append(f"target.{key} = COALESCE(${param_key}, target.{key})")
-                    
-                    target_create_set = ", ".join(target_create_props) if target_create_props else ""
-                    target_match_set = ", ".join(target_match_props) if target_match_props else ""
-                    
+                        target_create_props.append(
+                            f"target.{key} = ${param_key}")
+                        target_match_props.append(
+                            f"target.{key} = COALESCE(${param_key}, target.{key})")
+
+                    target_create_set = ", ".join(
+                        target_create_props) if target_create_props else ""
+                    target_match_set = ", ".join(
+                        target_match_props) if target_match_props else ""
+
                     # 将 relation_index 的属性合并到 relation_properties 中（如果存在）
                     # 这样可以在创建关系时设置这些属性
                     if relation_index:
                         for key, value in relation_index.items():
                             if key not in relation_properties:
                                 relation_properties[key] = value
-                    
+
                     # 构建关系的属性设置
                     relation_create_props = []
                     relation_match_props = []
@@ -1016,11 +1047,14 @@ class Neo4jIndustryUtils:
                         param_key = f"rel_prop_{key}"
                         params[param_key] = value
                         relation_create_props.append(f"r.{key} = ${param_key}")
-                        relation_match_props.append(f"r.{key} = COALESCE(${param_key}, r.{key})")
-                    
-                    relation_create_set = ", ".join(relation_create_props) if relation_create_props else ""
-                    relation_match_set = ", ".join(relation_match_props) if relation_match_props else ""
-                    
+                        relation_match_props.append(
+                            f"r.{key} = COALESCE(${param_key}, r.{key})")
+
+                    relation_create_set = ", ".join(
+                        relation_create_props) if relation_create_props else ""
+                    relation_match_set = ", ".join(
+                        relation_match_props) if relation_match_props else ""
+
                     # 构建关系的 MERGE 匹配条件（如果 relation_index 不为空，则在 MERGE 中包含属性匹配）
                     relation_merge_conditions = []
                     if relation_index:
@@ -1029,51 +1063,57 @@ class Neo4jIndustryUtils:
                         for key, value in relation_index.items():
                             param_key = f"rel_index_{key}"
                             params[param_key] = value
-                            relation_merge_conditions.append(f"{key}: ${param_key}")
-                    
-                    relation_merge_where = ", ".join(relation_merge_conditions) if relation_merge_conditions else ""
+                            relation_merge_conditions.append(
+                                f"{key}: ${param_key}")
+
+                    relation_merge_where = ", ".join(
+                        relation_merge_conditions) if relation_merge_conditions else ""
                     relation_merge_pattern = f"[r:{relation_label}]" if not relation_merge_where else f"[r:{relation_label} {{{relation_merge_where}}}]"
-                    
+
                     # 构建查询：MERGE 源节点、目标节点，然后创建关系
                     query_parts = [
                         f"// 找到或创建源节点",
                         f"MERGE (source:{node_label} {{{source_where}}})"
                     ]
-                    
+
                     if source_create_set:
-                        query_parts.append(f"ON CREATE SET {source_create_set}")
+                        query_parts.append(
+                            f"ON CREATE SET {source_create_set}")
                     if source_match_set:
                         query_parts.append(f"ON MATCH SET {source_match_set}")
-                    
+
                     query_parts.extend([
                         f"// 找到或创建目标节点",
                         f"WITH source",
                         f"MERGE (target:{target_node_label} {{{target_where}}})"
                     ])
-                    
+
                     if target_create_set:
-                        query_parts.append(f"ON CREATE SET {target_create_set}")
+                        query_parts.append(
+                            f"ON CREATE SET {target_create_set}")
                     if target_match_set:
                         query_parts.append(f"ON MATCH SET {target_match_set}")
-                    
+
                     query_parts.extend([
                         f"// 创建或更新关系",
                         f"WITH source, target",
                         f"MERGE (source)-{relation_merge_pattern}->(target)"
                     ])
-                    
+
                     if relation_create_set:
-                        query_parts.append(f"ON CREATE SET {relation_create_set}")
+                        query_parts.append(
+                            f"ON CREATE SET {relation_create_set}")
                     if relation_match_set:
-                        query_parts.append(f"ON MATCH SET {relation_match_set}")
-                    
+                        query_parts.append(
+                            f"ON MATCH SET {relation_match_set}")
+
                     query_parts.append("RETURN r")
-                    
+
                     query = "\n".join(query_parts)
-                    
+
                     result = await tx.run(query, params)
                     record = await result.single()
-                    
+
                     if record:
                         logger.debug(
                             f"节点连接成功: {node_label}{node_index} -[{relation_label}]-> "
@@ -1090,7 +1130,7 @@ class Neo4jIndustryUtils:
                 # 检查是否是死锁错误
                 error_code = getattr(e, 'code', '') or ''
                 is_deadlock = (
-                    'DeadlockDetected' in str(e) or 
+                    'DeadlockDetected' in str(e) or
                     'Neo.TransientError.Transaction.DeadlockDetected' in error_code or
                     error_code == 'Neo.TransientError.Transaction.DeadlockDetected'
                 )
@@ -1122,7 +1162,7 @@ class Neo4jIndustryUtils:
                     f"{target_node_label}{target_node_index}, 错误: {str(e)}"
                 )
                 raise
-        
+
         # 如果所有重试都失败了（不应该到达这里，因为会在循环中抛出异常）
         return False
 
@@ -1135,7 +1175,7 @@ class Neo4jIndustryUtils:
         ndm=None
     ) -> int:
         """批量创建关系（连接节点）
-        
+
         Args:
             source_node_label: 源节点的标签（如 "PlanBlueprint"）
             target_node_label: 目标节点的标签（如 "PlanBlueprint"）
@@ -1148,16 +1188,16 @@ class Neo4jIndustryUtils:
                 - "relation_index": 关系的索引属性字典（可选，用于匹配已存在的关系）
                 - "relation_properties": 关系的属性字典
             ndm: Neo4j管理器实例（可选）
-            
+
         Returns:
             int: 成功处理的关系数量
-            
+
         功能说明：
             1. 使用 UNWIND 批量处理所有关系
             2. MERGE 源节点和目标节点（如果不存在则创建）
             3. MERGE 关系（如果提供了 relation_index，则在匹配时包含这些属性）
             4. 设置节点和关系的属性（使用 COALESCE 处理 null 值）
-            
+
         示例：
             relationships_data = [
                 {
@@ -1173,48 +1213,53 @@ class Neo4jIndustryUtils:
         """
         if not relationships_data:
             return 0
-        
+
         if ndm:
             m = ndm
         else:
             m = get_neo4j_manager()
-        
+
         try:
             async with m.get_transaction() as tx:
                 # 获取第一个关系的数据结构，用于构建查询
                 first_rel = relationships_data[0]
                 source_index_keys = list(first_rel["source_index"].keys())
                 target_index_keys = list(first_rel["target_index"].keys())
-                relation_index_keys = list(first_rel.get("relation_index", {}).keys())
-                
+                relation_index_keys = list(
+                    first_rel.get("relation_index", {}).keys())
+
                 # 收集所有可能的属性键
                 all_source_property_keys = set()
                 all_target_property_keys = set()
                 all_relation_property_keys = set()
-                
+
                 for rel_data in relationships_data:
-                    source_props = rel_data.get("source_properties") or rel_data["source_index"]
-                    target_props = rel_data.get("target_properties") or rel_data["target_index"]
+                    source_props = rel_data.get(
+                        "source_properties") or rel_data["source_index"]
+                    target_props = rel_data.get(
+                        "target_properties") or rel_data["target_index"]
                     relation_props = rel_data.get("relation_properties", {})
-                    
+
                     all_source_property_keys.update(source_props.keys())
                     all_target_property_keys.update(target_props.keys())
                     all_relation_property_keys.update(relation_props.keys())
-                
+
                 # 将relationships_data转换为扁平结构（使用前缀区分不同属性）
                 flat_relationships_data = []
                 for rel_data in relationships_data:
-                    source_props = rel_data.get("source_properties") or rel_data["source_index"]
-                    target_props = rel_data.get("target_properties") or rel_data["target_index"]
+                    source_props = rel_data.get(
+                        "source_properties") or rel_data["source_index"]
+                    target_props = rel_data.get(
+                        "target_properties") or rel_data["target_index"]
                     relation_props = rel_data.get("relation_properties", {})
                     relation_index = rel_data.get("relation_index", {})
-                    
+
                     # 将relation_index的属性合并到relation_properties中（如果存在）
                     if relation_index:
                         for key, value in relation_index.items():
                             if key not in relation_props:
                                 relation_props[key] = value
-                    
+
                     # 创建扁平结构：所有属性都在顶层，使用前缀区分
                     flat_rel = {}
                     # 源节点索引和属性（使用source_前缀）
@@ -1226,104 +1271,119 @@ class Neo4jIndustryUtils:
                     # 关系属性（使用rel_前缀）
                     for key, value in relation_props.items():
                         flat_rel[f"rel_{key}"] = value
-                    
+
                     flat_relationships_data.append(flat_rel)
-                
+
                 # 构建源节点的MERGE条件（使用source_前缀）
                 source_merge_conditions = []
                 for key in source_index_keys:
-                    source_merge_conditions.append(f"{key}: rel_data.source_{key}")
+                    source_merge_conditions.append(
+                        f"{key}: rel_data.source_{key}")
                 source_merge_where = ", ".join(source_merge_conditions)
-                
+
                 # 构建目标节点的MERGE条件（使用target_前缀）
                 target_merge_conditions = []
                 for key in target_index_keys:
-                    target_merge_conditions.append(f"{key}: rel_data.target_{key}")
+                    target_merge_conditions.append(
+                        f"{key}: rel_data.target_{key}")
                 target_merge_where = ", ".join(target_merge_conditions)
-                
+
                 # 构建源节点的属性设置
                 source_create_props = []
                 source_match_props = []
                 for key in all_source_property_keys:
-                    source_create_props.append(f"source.{key} = rel_data.source_{key}")
-                    source_match_props.append(f"source.{key} = COALESCE(rel_data.source_{key}, source.{key})")
-                source_create_set = ", ".join(source_create_props) if source_create_props else ""
-                source_match_set = ", ".join(source_match_props) if source_match_props else ""
-                
+                    source_create_props.append(
+                        f"source.{key} = rel_data.source_{key}")
+                    source_match_props.append(
+                        f"source.{key} = COALESCE(rel_data.source_{key}, source.{key})")
+                source_create_set = ", ".join(
+                    source_create_props) if source_create_props else ""
+                source_match_set = ", ".join(
+                    source_match_props) if source_match_props else ""
+
                 # 构建目标节点的属性设置
                 target_create_props = []
                 target_match_props = []
                 for key in all_target_property_keys:
-                    target_create_props.append(f"target.{key} = rel_data.target_{key}")
-                    target_match_props.append(f"target.{key} = COALESCE(rel_data.target_{key}, target.{key})")
-                target_create_set = ", ".join(target_create_props) if target_create_props else ""
-                target_match_set = ", ".join(target_match_props) if target_match_props else ""
-                
+                    target_create_props.append(
+                        f"target.{key} = rel_data.target_{key}")
+                    target_match_props.append(
+                        f"target.{key} = COALESCE(rel_data.target_{key}, target.{key})")
+                target_create_set = ", ".join(
+                    target_create_props) if target_create_props else ""
+                target_match_set = ", ".join(
+                    target_match_props) if target_match_props else ""
+
                 # 构建关系的MERGE条件（如果提供了relation_index）
                 relation_merge_conditions = []
                 if relation_index_keys:
                     for key in relation_index_keys:
-                        relation_merge_conditions.append(f"{key}: rel_data.rel_{key}")
+                        relation_merge_conditions.append(
+                            f"{key}: rel_data.rel_{key}")
                     relation_merge_where = ", ".join(relation_merge_conditions)
                     relation_merge_pattern = f"[r:{relation_label} {{{relation_merge_where}}}]"
                 else:
                     relation_merge_pattern = f"[r:{relation_label}]"
-                
+
                 # 构建关系的属性设置
                 relation_create_props = []
                 relation_match_props = []
                 for key in all_relation_property_keys:
-                    relation_create_props.append(f"r.{key} = rel_data.rel_{key}")
-                    relation_match_props.append(f"r.{key} = COALESCE(rel_data.rel_{key}, r.{key})")
-                relation_create_set = ", ".join(relation_create_props) if relation_create_props else ""
-                relation_match_set = ", ".join(relation_match_props) if relation_match_props else ""
-                
+                    relation_create_props.append(
+                        f"r.{key} = rel_data.rel_{key}")
+                    relation_match_props.append(
+                        f"r.{key} = COALESCE(rel_data.rel_{key}, r.{key})")
+                relation_create_set = ", ".join(
+                    relation_create_props) if relation_create_props else ""
+                relation_match_set = ", ".join(
+                    relation_match_props) if relation_match_props else ""
+
                 # 构建查询
                 query_parts = [
                     "UNWIND $relationships_data AS rel_data",
                     f"// 找到或创建源节点",
                     f"MERGE (source:{source_node_label} {{{source_merge_where}}})"
                 ]
-                
+
                 if source_create_set:
                     query_parts.append(f"ON CREATE SET {source_create_set}")
                 if source_match_set:
                     query_parts.append(f"ON MATCH SET {source_match_set}")
-                
+
                 query_parts.extend([
                     f"// 找到或创建目标节点",
                     "WITH source, rel_data",
                     f"MERGE (target:{target_node_label} {{{target_merge_where}}})"
                 ])
-                
+
                 if target_create_set:
                     query_parts.append(f"ON CREATE SET {target_create_set}")
                 if target_match_set:
                     query_parts.append(f"ON MATCH SET {target_match_set}")
-                
+
                 query_parts.extend([
                     f"// 创建或更新关系",
                     "WITH source, target, rel_data",
                     f"MERGE (source)-{relation_merge_pattern}->(target)"
                 ])
-                
+
                 if relation_create_set:
                     query_parts.append(f"ON CREATE SET {relation_create_set}")
                 if relation_match_set:
                     query_parts.append(f"ON MATCH SET {relation_match_set}")
-                
+
                 query_parts.append("RETURN count(r) AS linked_count")
-                
+
                 query = "\n".join(query_parts)
-                
+
                 result = await tx.run(query, {"relationships_data": flat_relationships_data})
                 record = await result.single()
                 linked_count = record["linked_count"] if record else 0
-                
+
                 logger.debug(
                     f"批量关系创建成功: {source_node_label} -[{relation_label}]-> {target_node_label}, count={linked_count}"
                 )
-                
+
                 return linked_count
         except Exception as e:
             logger.error(
@@ -1352,34 +1412,36 @@ class Neo4jIndustryUtils:
             """
             # 存储所有节点和关系
             nodes_dict = {}  # {type_id: node_properties}
-            relationships_list = []  # [(parent_type_id, child_type_id, rel_properties)]
+            # [(parent_type_id, child_type_id, rel_properties)]
+            relationships_list = []
             result = await session.run(query, {"type_id": type_id})
             async for record in result:
                 node = record["node"]
                 if node is None:
                     continue
-                    
+
                 node_type_id = node.get("type_id")
                 if node_type_id is None:
                     continue
-                
+
                 # 存储节点属性
                 nodes_dict[node_type_id] = dict(node.items())
-                
+
                 # 处理关系
                 rels = record.get("relationships", [])
                 for rel_data in rels:
                     if rel_data.get("rel") is None or rel_data.get("child") is None:
                         continue
-                    
+
                     rel = rel_data["rel"]
                     child = rel_data["child"]
                     child_type_id = child.get("type_id")
-                    
+
                     if child_type_id is not None:
                         # 存储关系属性
                         rel_props = dict(rel.items())
-                        relationships_list.append((node_type_id, child_type_id, rel_props))
+                        relationships_list.append(
+                            (node_type_id, child_type_id, rel_props))
 
             return nodes_dict, relationships_list
 
@@ -1391,10 +1453,10 @@ class Neo4jIndustryUtils:
         source_index: Optional[Dict[str, Any]] = None,
         target_label: Optional[str] = None,
         target_index: Optional[Dict[str, Any]] = None,
-        ndm = None
+        ndm=None
     ) -> List[Dict[str, Any]]:
         """通用的查询边（关系）方法
-        
+
         Args:
             relation_label: 关系的标签（如 "LOCATED_IN", "PLAN_BP_DEPEND_ON", "BP_DEPEND_ON"）
             relation_index: 用于匹配关系的属性字典（如 {"user_name": "user1", "plan_name": "plan1", "index_id": 1}）
@@ -1402,26 +1464,26 @@ class Neo4jIndustryUtils:
             source_index: 用于筛选源节点的属性字典（可选，如 {"owner_id": 123, "item_id": 456}）
             target_label: 目标节点的标签（可选，如 "Asset", "PlanBlueprint"）
             target_index: 用于筛选目标节点的属性字典（可选，如 {"type_id": 12345}）
-            
+
         Returns:
             List[Dict[str, Any]]: 匹配的关系列表，每个元素包含：
                 - "relation": 关系的属性字典
                 - "source": 源节点的属性字典（如果提供了 source_label）
                 - "target": 目标节点的属性字典（如果提供了 target_label）
-            
+
         功能说明：
             1. 根据 relation_label 和 relation_index 匹配关系
             2. 如果提供了 source_label 和 source_index，则同时筛选源节点
             3. 如果提供了 target_label 和 target_index，则同时筛选目标节点
             4. 返回所有匹配的关系及其关联的节点信息
-            
+
         示例：
             # 查询所有满足关系索引的 PLAN_BP_DEPEND_ON 关系
             relations = await Neo4jIndustryUtils.get_relations(
                 "PLAN_BP_DEPEND_ON",
                 {"user_name": "user1", "plan_name": "plan1", "index_id": 1}
             )
-            
+
             # 查询指定源节点的关系
             relations = await Neo4jIndustryUtils.get_relations(
                 "PLAN_BP_DEPEND_ON",
@@ -1429,7 +1491,7 @@ class Neo4jIndustryUtils:
                 source_label="PlanBlueprint",
                 source_index={"user_name": "user1", "plan_name": "plan1", "type_id": 12345}
             )
-            
+
             # 查询指定源节点和目标节点的关系
             relations = await Neo4jIndustryUtils.get_relations(
                 "LOCATED_IN",
@@ -1454,10 +1516,11 @@ class Neo4jIndustryUtils:
                 source_match = f"(source:{source_label})"
                 if source_index:
                     for key, value in source_index.items():
-                        source_conditions.append(f"source.{key} = $source_{key}")
+                        source_conditions.append(
+                            f"source.{key} = $source_{key}")
             else:
                 source_match = "(source)"
-            
+
             # 构建目标节点的匹配条件
             target_match = ""
             target_conditions = []
@@ -1465,27 +1528,28 @@ class Neo4jIndustryUtils:
                 target_match = f"(target:{target_label})"
                 if target_index:
                     for key, value in target_index.items():
-                        target_conditions.append(f"target.{key} = $target_{key}")
+                        target_conditions.append(
+                            f"target.{key} = $target_{key}")
             else:
                 target_match = "(target)"
-            
+
             # 构建关系的 WHERE 条件
             relation_conditions = []
             params = {}
             for key, value in relation_index.items():
                 relation_conditions.append(f"r.{key} = $rel_{key}")
                 params[f"rel_{key}"] = value
-            
+
             # 添加源节点的参数
             if source_index:
                 for key, value in source_index.items():
                     params[f"source_{key}"] = value
-            
+
             # 添加目标节点的参数
             if target_index:
                 for key, value in target_index.items():
                     params[f"target_{key}"] = value
-            
+
             # 构建 WHERE 子句
             where_parts = []
             if relation_conditions:
@@ -1494,75 +1558,75 @@ class Neo4jIndustryUtils:
                 where_parts.append(" AND ".join(source_conditions))
             if target_conditions:
                 where_parts.append(" AND ".join(target_conditions))
-            
+
             where_clause = " AND ".join(where_parts) if where_parts else "1=1"
-            
+
             # 构建 RETURN 子句
             return_parts = ["r AS relation"]
             if source_label:
                 return_parts.append("source AS source_node")
             if target_label:
                 return_parts.append("target AS target_node")
-            
+
             return_clause = ", ".join(return_parts)
-            
+
             # 构建查询
             query = f"""
             MATCH {source_match}-[r:{relation_label}]->{target_match}
             WHERE {where_clause}
             RETURN {return_clause}
             """
-            
+
             result = await session.run(query, params)
             relations = []
             async for record in result:
                 relation_dict = {}
-                
+
                 # 获取关系属性
                 rel = record.get("relation")
                 if rel:
                     relation_dict["relation"] = dict(rel.items())
                 else:
                     relation_dict["relation"] = {}
-                
+
                 # 获取源节点属性（如果提供了 source_label）
                 if source_label and "source_node" in record:
                     source_node = record.get("source_node")
                     if source_node:
                         relation_dict["source"] = dict(source_node.items())
-                
+
                 # 获取目标节点属性（如果提供了 target_label）
                 if target_label and "target_node" in record:
                     target_node = record.get("target_node")
                     if target_node:
                         relation_dict["target"] = dict(target_node.items())
-                
+
                 relations.append(relation_dict)
-            
+
             logger.debug(
                 f"查询关系完成: relation_label={relation_label}, relation_index={relation_index}, "
                 f"source_label={source_label}, target_label={target_label}, "
                 f"found_count={len(relations)}"
             )
-            
+
             return relations
 
     @staticmethod
     async def get_node_properties(node_label: str, node_index: Dict[str, Any]) -> Dict[str, Any]:
         """获取已存在节点的所有属性
-        
+
         Args:
             node_label: 节点的标签（如 "Asset", "Structure", "Station"）
             node_index: 用于匹配节点的属性字典（如 {"owner_id": 123, "item_id": 456}）
-            
+
         Returns:
             Dict[str, Any]: 节点的所有属性字典，如果节点不存在则返回空字典
-            
+
         功能说明：
             1. 根据 node_label 和 node_index 匹配节点
             2. 返回节点的所有属性
             3. 如果节点不存在，返回空字典
-            
+
         示例：
             # 获取一个 Asset 节点的所有属性
             properties = await Neo4jIndustryUtils.get_node_properties(
@@ -1575,7 +1639,7 @@ class Neo4jIndustryUtils:
         if not node_index:
             logger.warning("node_index 不能为空")
             return {}
-        
+
         async with get_neo4j_manager().get_session() as session:
             # 构建 MATCH 的 WHERE 条件
             where_conditions = []
@@ -1583,19 +1647,19 @@ class Neo4jIndustryUtils:
             for key, value in node_index.items():
                 where_conditions.append(f"n.{key} = ${key}_index")
                 params[f"{key}_index"] = value
-            
+
             where_clause = " AND ".join(where_conditions)
-            
+
             # 构建查询
             query = f"""
             MATCH (n:{node_label})
             WHERE {where_clause}
             RETURN n
             """
-            
+
             result = await session.run(query, params)
             record = await result.single()
-            
+
             if record and record["n"]:
                 node = record["n"]
                 # 将 Neo4j Node 对象转换为字典
@@ -1617,7 +1681,7 @@ class Neo4jIndustryUtils:
         raise NotImplementedError("get_relation_properties 方法尚未实现")
 
     @staticmethod
-    async def get_user_plan_node(user_name: str, plan_name: str, ndm = None) -> List[Dict[str, Any]]:
+    async def get_user_plan_node(user_name: str, plan_name: str, ndm=None) -> List[Dict[str, Any]]:
         """获取用户计划的所有节点"""
         if ndm:
             m = ndm
@@ -1680,11 +1744,11 @@ class Neo4jIndustryUtils:
     @staticmethod
     async def get_user_plan_relation(user_name: str, plan_name: str) -> List[Dict[str, Any]]:
         """获取用户计划的所有关系
-        
+
         Args:
             user_name: 用户名
             plan_name: 计划名称
-            
+
         Returns:
             List[Dict[str, Any]]: 匹配的所有 PLAN_BP_DEPEND_ON 关系列表，每个关系以字典形式返回
         """
@@ -1705,20 +1769,20 @@ class Neo4jIndustryUtils:
     @staticmethod
     async def update_node_properties(node_label: str, node_index: Dict[str, Any], node_properties: Dict[str, Any]) -> int:
         """更新已存在节点的属性
-        
+
         Args:
             node_label: 节点的标签（如 "Asset", "Structure", "Station"）
             node_index: 用于匹配节点的属性字典（如 {"owner_id": 123, "item_id": 456}）
             node_properties: 要更新的属性字典
-            
+
         Returns:
             int: 更新的节点数量
-            
+
         功能说明：
             1. 根据 node_label 和 node_index 匹配节点
             2. 使用 SET 更新节点的所有属性（使用 node_properties 中的值）
             3. 只更新已存在的节点，如果节点不存在则不进行任何操作
-            
+
         示例：
             # 更新一个 Asset 节点的属性
             updated_count = await Neo4jIndustryUtils.update_node_properties(
@@ -1730,11 +1794,11 @@ class Neo4jIndustryUtils:
         if not node_index:
             logger.warning("node_index 不能为空")
             return 0
-        
+
         if not node_properties:
             logger.warning("node_properties 不能为空")
             return 0
-        
+
         async with get_neo4j_manager().get_transaction() as tx:
             # 构建 MATCH 的 WHERE 条件
             where_conditions = []
@@ -1742,18 +1806,18 @@ class Neo4jIndustryUtils:
             for key, value in node_index.items():
                 where_conditions.append(f"n.{key} = ${key}_index")
                 params[f"{key}_index"] = value
-            
+
             where_clause = " AND ".join(where_conditions)
-            
+
             # 构建 SET 的属性设置
             set_props = []
             for key, value in node_properties.items():
                 param_key = f"prop_{key}"
                 params[param_key] = value
                 set_props.append(f"n.{key} = ${param_key}")
-            
+
             set_clause = ", ".join(set_props)
-            
+
             # 构建查询
             query = f"""
             MATCH (n:{node_label})
@@ -1761,35 +1825,35 @@ class Neo4jIndustryUtils:
             SET {set_clause}
             RETURN count(n) AS updated_count
             """
-            
+
             result = await tx.run(query, params)
             record = await result.single()
             updated_count = record["updated_count"] if record else 0
-            
+
             logger.debug(
                 f"节点属性更新完成: node_label={node_label}, node_index={node_index}, "
                 f"updated_count={updated_count}"
             )
-            
+
             return updated_count
 
     @staticmethod
     async def update_relation_properties(relation_label: str, relation_index: Dict[str, Any], relation_properties: Dict[str, Any], max_retries: int = 50) -> int:
         """更新已存在关系的属性
-        
+
         Args:
             relation_label: 关系的标签（如 "LOCATED_IN", "PLAN_BP_DEPEND_ON", "BP_DEPEND_ON"）
             relation_index: 用于匹配关系的属性字典（如 {"user_name": "user1", "plan_name": "plan1", "index_id": 1}）
             relation_properties: 要更新的关系属性字典
-            
+
         Returns:
             int: 更新的关系数量
-            
+
         功能说明：
             1. 根据 relation_label 和 relation_index 匹配关系
             2. 使用 SET 更新关系的所有属性（使用 relation_properties 中的值）
             3. 只更新已存在的关系，如果关系不存在则不进行任何操作
-            
+
         示例：
             # 更新一个 PLAN_BP_DEPEND_ON 关系的属性
             updated_count = await Neo4jIndustryUtils.update_relation_properties(
@@ -1801,29 +1865,29 @@ class Neo4jIndustryUtils:
         if not relation_index:
             logger.warning("relation_index 不能为空")
             return 0
-        
+
         if not relation_properties:
             logger.warning("relation_properties 不能为空")
             return 0
-        
+
         # 构建查询参数（在循环外构建，避免重复计算）
         where_conditions = []
         base_params = {}
         for key, value in relation_index.items():
             where_conditions.append(f"r.{key} = ${key}_index")
             base_params[f"{key}_index"] = value
-        
+
         where_clause = " AND ".join(where_conditions)
-        
+
         # 构建 SET 的属性设置
         set_props = []
         for key, value in relation_properties.items():
             param_key = f"prop_{key}"
             base_params[param_key] = value
             set_props.append(f"r.{key} = ${param_key}")
-        
+
         set_clause = ", ".join(set_props)
-        
+
         # 构建查询：匹配关系并更新属性
         query = f"""
         MATCH ()-[r:{relation_label}]->()
@@ -1831,7 +1895,7 @@ class Neo4jIndustryUtils:
         SET {set_clause}
         RETURN count(r) AS updated_count
         """
-        
+
         # 重试逻辑处理死锁
         for attempt in range(max_retries):
             try:
@@ -1839,18 +1903,18 @@ class Neo4jIndustryUtils:
                     result = await tx.run(query, base_params)
                     record = await result.single()
                     updated_count = record["updated_count"] if record else 0
-                    
+
                     logger.debug(
                         f"关系属性更新完成: relation_label={relation_label}, relation_index={relation_index}, "
                         f"updated_count={updated_count}"
                     )
-                    
+
                     return updated_count
             except TransientError as e:
                 # 检查是否是死锁错误
                 error_code = getattr(e, 'code', '') or ''
                 is_deadlock = (
-                    'DeadlockDetected' in str(e) or 
+                    'DeadlockDetected' in str(e) or
                     'Neo.TransientError.Transaction.DeadlockDetected' in error_code or
                     error_code == 'Neo.TransientError.Transaction.DeadlockDetected'
                 )
@@ -1878,7 +1942,7 @@ class Neo4jIndustryUtils:
                 # 非死锁错误，直接抛出
                 logger.error(f"关系属性更新失败: {e}")
                 raise
-        
+
         # 理论上不应该到达这里（所有重试都应该抛出异常或返回），但为了类型检查添加
         return 0
 

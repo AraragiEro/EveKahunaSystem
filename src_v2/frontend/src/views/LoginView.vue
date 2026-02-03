@@ -231,7 +231,12 @@ const handleLogin = async () => {
       ElMessage.success('登录成功')
       // 等待下一个 tick，确保状态更新完成
       await nextTick()
-      router.push('/home')
+      //如果是alpha或以上，跳转home，否则todolist
+      if (authStore.user?.roles.includes('vip_alpha') || authStore.user?.roles.includes('vip_omega')) {
+        router.push('/home')
+      } else {
+        router.push('/todolist')
+      }
     } else {
       ElMessage.error(result.error || '登录失败')
     }

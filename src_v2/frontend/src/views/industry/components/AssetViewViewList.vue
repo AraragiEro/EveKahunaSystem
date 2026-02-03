@@ -149,9 +149,9 @@ const assetViewLastUpdateTime = ref<number>(Date.now())
 // 刷新资产视图数据（强制刷新，跳过缓存）
 const refreshAssetView = async () => {
     if (!AssetViewDialogSid.value) return
-    
+
     assetViewDialogLoading.value = true
-    
+
     try {
         // 强制刷新，从API获取数据
         const res = await http.get('/EVE/asset/getAssetViewData', {
@@ -159,12 +159,12 @@ const refreshAssetView = async () => {
         })
         const data = await res.json()
         assetViewDialogLoading.value = false
-        
+
         if (data.status !== 200) {
             ElMessage.error(data.message)
             return
         }
-        
+
         // 处理数据格式
         let processedData: any
         // 统计视图保持对象格式，其他视图转换为数组
@@ -176,16 +176,16 @@ const refreshAssetView = async () => {
             processedData = Object.values(data.data || {})
             assetView.value = processedData
         }
-        
+
         AssetViewDialogType.value = data.view_type
         AssetViewDialogConfig.value = data.config
-        
+
         // 更新最后更新时间
         assetViewLastUpdateTime.value = Date.now()
-        
+
         // 保存到缓存
         saveAssetViewCache(AssetViewDialogSid.value, processedData, data.view_type, data.config)
-        
+
         ElMessage.success('刷新成功')
     } catch (error) {
         assetViewDialogLoading.value = false
@@ -208,8 +208,8 @@ const handleViewAssetView = async (assetViewItem: any) => {
             assetView.value = cachedData.data || {}
         } else {
             // 如果缓存的数据已经是数组，直接使用；否则转换为数组
-            assetView.value = Array.isArray(cachedData.data) 
-                ? cachedData.data 
+            assetView.value = Array.isArray(cachedData.data)
+                ? cachedData.data
                 : Object.values(cachedData.data || {})
         }
         AssetViewDialogType.value = cachedData.view_type
@@ -231,7 +231,7 @@ const handleViewAssetView = async (assetViewItem: any) => {
         return
     }
     console.log("handleViewAssetView data", data)
-    
+
     // 处理数据格式
     let processedData: any
     // 统计视图保持对象格式，其他视图转换为数组
@@ -243,14 +243,14 @@ const handleViewAssetView = async (assetViewItem: any) => {
         processedData = Object.values(data.data || {})
         assetView.value = processedData
     }
-    
+
     AssetViewDialogType.value = data.view_type
     AssetViewDialogConfig.value = data.config
     AssetViewDialogSid.value = assetViewItem.sid
-    
+
     // 更新最后更新时间
     assetViewLastUpdateTime.value = Date.now()
-    
+
     // 保存到缓存
     saveAssetViewCache(assetViewItem.sid, processedData, data.view_type, data.config)
 }
@@ -283,7 +283,7 @@ const assetViewSetForm = ref({
             filter_value: ''
         }
     ],
-    asset_container_id_list: [] as Array<{container_id: number, owner_id: number}>
+    asset_container_id_list: [] as Array<{ container_id: number, owner_id: number, location_flag: string | null }>
 })
 
 // ============== 过滤类型选项 ==============
@@ -293,7 +293,6 @@ const filterTypeOptions = ref([
     { value: 'marketGroup', label: 'marketGroup' },
     { value: 'category', label: 'category' },
     { value: 'type_id', label: 'type_id' },
-    { value: 'location_flag', label: 'location_flag' }
 ])
 
 // ============== location_flag 固定选项列表 ==============
@@ -323,7 +322,7 @@ const fetchFilterSuggestions = async (queryString: string, cb: (suggestions: Typ
     if (current_filter_type.value === 'location_flag') {
         // location_flag 使用固定选项列表
         const results = queryString
-            ? locationFlagOptions.value.filter(item => 
+            ? locationFlagOptions.value.filter(item =>
                 item.value.toLowerCase().indexOf(queryString.toLowerCase()) === 0
             ).map(item => ({ value: item.value }))
             : locationFlagOptions.value.map(item => ({ value: item.value }))
@@ -386,7 +385,7 @@ const handleSetAssetView = (assetViewItem: any) => {
         price_base: "jita_sell",
         percent: 1.0
     }
-    
+
     // 将后端返回的 filter 数组转换为 filter_groups 格式
     const filters = assetViewItem.filter || []
     if (filters.length === 0) {
@@ -402,7 +401,7 @@ const handleSetAssetView = (assetViewItem: any) => {
             filter_value: f.value || ''
         }))
     }
-    
+
     // 设置容器ID列表
     assetViewSetForm.value.asset_container_id_list = assetViewItem.asset_container_id_list || []
 }
@@ -424,7 +423,7 @@ const saveAssetViewConfig = async () => {
         view_type: assetViewSetForm.value.view_type,
         config: assetViewSetForm.value.config
     }
-    
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
@@ -444,7 +443,7 @@ const saveAssetViewConfig = async () => {
 // ============== 复制公开链接 ==============
 const copyPublicLink = async (assetViewItem: any) => {
     const publicUrl = `${window.location.origin}/storage/${assetViewItem.sid}`
-    
+
     try {
         await navigator.clipboard.writeText(publicUrl)
         ElMessage.success('公开链接已复制到剪贴板')
@@ -478,16 +477,16 @@ const handleDeleteAssetView = async (assetViewItem: any) => {
                 type: 'warning',
             }
         )
-        
+
         const payload: any = {
             sid: assetViewItem.sid
         }
-        
+
         // 如果是管理员且选择了用户，传递 user_name 参数
         if (haveAdminRole.value && selectedUserName.value) {
             payload.user_name = selectedUserName.value
         }
-        
+
         const res = await http.delete('/EVE/asset/deleteAssetView', payload)
         const data = await res.json()
         if (data.status !== 200) {
@@ -503,7 +502,7 @@ const handleDeleteAssetView = async (assetViewItem: any) => {
 
 // ============== 增加监控 ==============
 const addMonitorDialogVisible = ref(false)
-const selectedContainers = ref<Array<{container_id: number, owner_id: number}>>([])
+const selectedContainers = ref<Array<{ container_id: number, owner_id: number }>>([])
 const newViewTag = ref('')
 const containerPermissionList = ref<any[]>([])
 const containerPermissionLoading = ref(false)
@@ -525,12 +524,12 @@ const fetchContainerPermissionList = async () => {
     const payload: any = {
         force_refresh: false
     }
-    
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
     }
-    
+
     try {
         const res = await http.post('/EVE/industry/getUserAllContainerPermission', payload)
         const data = await res.json()
@@ -600,22 +599,22 @@ const handleAddMonitor = async () => {
         ElMessage.warning('请输入标签')
         return
     }
-    
+
     if (selectedContainers.value.length === 0) {
         ElMessage.warning('请至少选择一个容器')
         return
     }
-    
+
     const payload: any = {
         container_list: selectedContainers.value,
         tag: newViewTag.value.trim()
     }
-    
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
     }
-    
+
     try {
         const res = await http.post('/EVE/asset/createAssetView', payload)
         const data = await res.json()
@@ -635,7 +634,7 @@ const handleAddMonitor = async () => {
 
 // ============== 管理容器 ==============
 const manageContainerDialogVisible = ref(false)
-const manageContainerSelected = ref<Array<{container_id: number, owner_id: number}>>([])
+const manageContainerSelected = ref<Array<{ container_id: number, owner_id: number, location_flag: string | null }>>([])
 const manageContainerList = ref<any[]>([])
 const manageContainerLoading = ref(false)
 const manageContainerTableRef = ref()
@@ -643,9 +642,13 @@ const manageContainerTableRef = ref()
 const isSettingManageContainerSelection = ref(false)
 
 const handleOpenManageContainerDialog = async () => {
-    // 先保存当前选中的容器列表
-    manageContainerSelected.value = assetViewSetForm.value.asset_container_id_list 
-        ? assetViewSetForm.value.asset_container_id_list.map(item => ({...item}))
+    // 先保存当前选中的容器列表，确保 location_flag 字段存在
+    manageContainerSelected.value = assetViewSetForm.value.asset_container_id_list
+        ? assetViewSetForm.value.asset_container_id_list.map(item => ({
+            container_id: item.container_id,
+            owner_id: item.owner_id,
+            location_flag: item.location_flag ?? null
+        }))
         : []
     // 在打开对话框前设置加载状态，确保用户立即看到加载提示
     manageContainerLoading.value = true
@@ -666,12 +669,12 @@ const fetchManageContainerList = async () => {
     const payload: any = {
         force_refresh: false
     }
-    
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
     }
-    
+
     try {
         const res = await http.post('/EVE/industry/getUserAllContainerPermission', payload)
         const data = await res.json()
@@ -690,27 +693,27 @@ const fetchManageContainerList = async () => {
 
 const setManageContainerSelection = async () => {
     if (!manageContainerTableRef.value || !manageContainerList.value.length) return
-    
+
     // 保存当前应该选中的容器列表（防止被清空）
     const targetSelection = [...manageContainerSelected.value]
-    
+
     isSettingManageContainerSelection.value = true
     try {
         // 先清除所有选择
         manageContainerTableRef.value.clearSelection()
         // 等待清除操作完成
         await nextTick()
-        
+
         // 设置选中状态
         manageContainerList.value.forEach((row: any) => {
             const isSelected = targetSelection.some(
-                item => item.container_id === row.asset_container_id && item.owner_id === row.asset_owner_id
+                item => item.container_id === row.asset_container_id && item.owner_id === row.asset_owner_id && item.location_flag === row.location_flag
             )
             if (isSelected) {
                 manageContainerTableRef.value?.toggleRowSelection(row, true)
             }
         })
-        
+
         // 等待选择操作完成
         await nextTick()
         // 恢复 manageContainerSelected（防止被 clearSelection 触发的事件清空）
@@ -731,7 +734,8 @@ const handleManageContainerSelectionChange = (selection: any[]) => {
     }
     manageContainerSelected.value = selection.map(item => ({
         container_id: item.asset_container_id,
-        owner_id: item.asset_owner_id
+        owner_id: item.asset_owner_id,
+        location_flag: item.location_flag ?? null
     }))
 }
 
@@ -746,16 +750,23 @@ const handleManageContainerUnselectAll = () => {
 }
 
 const handleSaveManageContainer = async () => {
+    // 确保所有容器项都包含 location_flag 字段（如果缺失则设为 null）
+    const containerList = manageContainerSelected.value.map(item => ({
+        container_id: item.container_id,
+        owner_id: item.owner_id,
+        location_flag: item.location_flag ?? null
+    }))
+
     const payload: any = {
         sid: assetViewSetForm.value.sid,
-        container_list: manageContainerSelected.value
+        container_list: containerList
     }
-    
+
     // 如果是管理员且选择了用户，传递 user_name 参数
     if (haveAdminRole.value && selectedUserName.value) {
         payload.user_name = selectedUserName.value
     }
-    
+    console.log("handleSaveManageContainer payload", payload)
     try {
         const res = await http.post('/EVE/asset/saveAssetViewConfig', payload)
         const data = await res.json()
@@ -765,7 +776,7 @@ const handleSaveManageContainer = async () => {
         }
         ElMessage.success('容器列表更新成功')
         manageContainerDialogVisible.value = false
-        assetViewSetForm.value.asset_container_id_list = manageContainerSelected.value.map(item => ({...item}))
+        assetViewSetForm.value.asset_container_id_list = containerList.map(item => ({ ...item }))
         await getAssetViewList()
     } catch (error) {
         ElMessage.error('更新容器列表失败')
@@ -802,41 +813,28 @@ onMounted(async () => {
         <!-- 管理员用户选择器 -->
         <div v-if="haveAdminRole" class="admin-user-selector">
             <el-form-item label="选择用户" style="margin-bottom: 16px;">
-                <el-select
-                    v-model="selectedUserName"
-                    placeholder="选择用户（留空显示当前用户）"
-                    filterable
-                    clearable
-                    :loading="userListLoading"
-                    style="width: 300px;"
-                >
-                    <el-option
-                        v-for="user in userList"
-                        :key="user.userName"
-                        :label="user.userName"
-                        :value="user.userName"
-                    />
+                <el-select v-model="selectedUserName" placeholder="选择用户（留空显示当前用户）" filterable clearable
+                    :loading="userListLoading" style="width: 300px;">
+                    <el-option v-for="user in userList" :key="user.userName" :label="user.userName"
+                        :value="user.userName" />
                 </el-select>
             </el-form-item>
         </div>
-        
+
         <div class="asset-view-grid">
             <!-- 增加监控卡片 -->
             <el-card class="add-monitor-card" shadow="hover" @click="handleOpenAddMonitorDialog">
                 <div class="add-monitor-content">
-                    <el-icon class="add-icon"><Plus /></el-icon>
+                    <el-icon class="add-icon">
+                        <Plus />
+                    </el-icon>
                     <div class="add-monitor-text">增加监控</div>
                 </div>
             </el-card>
-            
+
             <!-- 资产视图卡片 -->
-            <el-card 
-                v-for="assetView in assetViewList" 
-                :key="assetView.sid" 
-                class="asset-view-card"
-                shadow="hover"
-                @click="handleViewAssetView(assetView)"
-            >
+            <el-card v-for="assetView in assetViewList" :key="assetView.sid" class="asset-view-card" shadow="hover"
+                @click="handleViewAssetView(assetView)">
                 <div class="card-header">
                     <div class="card-info">
                         <div class="card-title">{{ assetView.tag || '未命名视图' }}</div>
@@ -844,50 +842,35 @@ onMounted(async () => {
                     </div>
                     <el-badge v-if="assetView.public" value="公开" class="public-badge" />
                 </div>
-                
+
                 <div class="card-actions" @click.stop>
                     <el-tooltip content="查看详情" placement="top">
-                        <el-button 
-                            circle 
-                            size="medium" 
-                            type="primary" 
-                            @click="handleViewAssetView(assetView)"
-                        >
-                            <el-icon><View /></el-icon>
+                        <el-button circle size="medium" type="primary" @click="handleViewAssetView(assetView)">
+                            <el-icon>
+                                <View />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="设置" placement="top">
-                        <el-button 
-                            circle 
-                            size="medium" 
-                            type="primary" 
-                            plain
-                            @click="handleSetAssetView(assetView)"
-                        >
-                            <el-icon><Setting /></el-icon>
+                        <el-button circle size="medium" type="primary" plain @click="handleSetAssetView(assetView)">
+                            <el-icon>
+                                <Setting />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="分享链接" placement="top">
-                        <el-button 
-                            circle 
-                            size="medium" 
-                            type="success" 
-                            plain
-                            :disabled="!assetView.public"
-                            @click="copyPublicLink(assetView)"
-                        >
-                            <el-icon><Share /></el-icon>
+                        <el-button circle size="medium" type="success" plain :disabled="!assetView.public"
+                            @click="copyPublicLink(assetView)">
+                            <el-icon>
+                                <Share />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                     <el-tooltip content="删除" placement="top">
-                        <el-button 
-                            circle 
-                            size="medium" 
-                            type="danger" 
-                            plain
-                            @click="handleDeleteAssetView(assetView)"
-                        >
-                            <el-icon><Delete /></el-icon>
+                        <el-button circle size="medium" type="danger" plain @click="handleDeleteAssetView(assetView)">
+                            <el-icon>
+                                <Delete />
+                            </el-icon>
                         </el-button>
                     </el-tooltip>
                 </div>
@@ -896,16 +879,9 @@ onMounted(async () => {
     </div>
 
     <el-dialog v-model="assetViewDialogVisible" title="资产视图" width="80%" class="asset-view-dialog">
-        <component 
-            :is="currentViewComponent"
-            :loading="assetViewDialogLoading" 
-            :asset-view="assetView"
-            :sid="AssetViewDialogSid"
-            :view_type="AssetViewDialogType"
-            :config="AssetViewDialogConfig"
-            :last-update-time="assetViewLastUpdateTime"
-            @refresh="refreshAssetView"
-        />
+        <component :is="currentViewComponent" :loading="assetViewDialogLoading" :asset-view="assetView"
+            :sid="AssetViewDialogSid" :view_type="AssetViewDialogType" :config="AssetViewDialogConfig"
+            :last-update-time="assetViewLastUpdateTime" @refresh="refreshAssetView" />
     </el-dialog>
 
     <el-dialog v-model="assetViewSetDialogVisible" title="设置资产视图" width="700px" class="asset-view-set-dialog">
@@ -931,7 +907,8 @@ onMounted(async () => {
                 </el-select>
             </el-form-item>
             <el-form-item v-if="assetViewSetForm.view_type === 'sell'">
-                <el-input-number v-model="assetViewSetForm.config.percent" placeholder="百分比" :min="0" :max="1" :step="0.01" />
+                <el-input-number v-model="assetViewSetForm.config.percent" placeholder="百分比" :min="0" :max="1"
+                    :step="0.01" />
             </el-form-item>
 
             <el-form-item label="是否公开">
@@ -947,55 +924,37 @@ onMounted(async () => {
             </el-form-item>
 
             <el-divider content-position="left">过滤条件</el-divider>
-            
+
             <div class="filter-groups">
-                <el-card 
-                    v-for="group in assetViewSetForm.filter_groups" 
-                    :key="group.index" 
-                    class="filter-group-card"
-                    shadow="never"
-                >
+                <el-card v-for="group in assetViewSetForm.filter_groups" :key="group.index" class="filter-group-card"
+                    shadow="never">
                     <template #header>
                         <div class="filter-group-header">
                             <span>过滤组 #{{ group.index + 1 }}</span>
-                            <el-button
-                                @click="delete_filter_group(group.index)"
-                                type="danger"
-                                size="small"
-                                text
-                                :icon="Delete"
-                            >
+                            <el-button @click="delete_filter_group(group.index)" type="danger" size="small" text
+                                :icon="Delete">
                                 删除
                             </el-button>
                         </div>
                     </template>
                     <el-form-item label="过滤类型">
                         <el-select v-model="group.filter_type" placeholder="请选择过滤类型" style="width: 100%">
-                            <el-option
-                                v-for="item in filterTypeOptions"
-                                :key="item.value"
-                                :label="item.label"
-                                :value="item.value"
-                            />
+                            <el-option v-for="item in filterTypeOptions" :key="item.value" :label="item.label"
+                                :value="item.value" />
                         </el-select>
                     </el-form-item>
                     <el-form-item label="过滤值">
-                        <el-autocomplete
-                            v-model="group.filter_value"
-                            :fetch-suggestions="fetchFilterSuggestions"
-                            value-key="value"
-                            @click="before_fetch_filter_suggestions(group.filter_type)"
-                            placeholder="请输入过滤值"
-                            style="width: 100%"
-                        />
+                        <el-autocomplete v-model="group.filter_value" :fetch-suggestions="fetchFilterSuggestions"
+                            value-key="value" @click="before_fetch_filter_suggestions(group.filter_type)"
+                            placeholder="请输入过滤值" style="width: 100%" />
                     </el-form-item>
                 </el-card>
             </div>
-            
+
             <el-button @click="add_filter_group" type="primary" size="small" :icon="Plus" class="add-filter-btn">
                 增加过滤组
             </el-button>
-            
+
             <div class="dialog-actions">
                 <el-button @click="assetViewSetDialogVisible = false">取消</el-button>
                 <el-button @click="saveAssetViewConfig" type="primary">保存</el-button>
@@ -1006,11 +965,7 @@ onMounted(async () => {
     <el-dialog v-model="addMonitorDialogVisible" title="增加监控" width="1000px" class="add-monitor-dialog">
         <el-form label-width="120px" class="add-monitor-form" :model="{ tag: newViewTag }">
             <el-form-item label="标签" required>
-                <el-input 
-                    v-model="newViewTag" 
-                    placeholder="请输入标签（必填）" 
-                    style="width: 100%"
-                />
+                <el-input v-model="newViewTag" placeholder="请输入标签（必填）" style="width: 100%" />
             </el-form-item>
             <el-form-item label="选择容器">
                 <div class="container-selector">
@@ -1020,24 +975,17 @@ onMounted(async () => {
                         <span class="selected-count">已选择 {{ selectedContainers.length }} 个容器</span>
                     </div>
                     <div v-if="containerPermissionLoading" class="loading-tip">
-                        <el-icon class="is-loading"><Loading /></el-icon>
+                        <el-icon class="is-loading">
+                            <Loading />
+                        </el-icon>
                         <span>正在加载容器列表...</span>
                     </div>
-                    <el-table
-                        ref="containerTableRef"
-                        :key="`container-table-${addMonitorDialogVisible}`"
-                        :data="containerPermissionList"
-                        :loading="containerPermissionLoading"
-                        :row-key="(row: any) => `${row.asset_container_id}-${row.asset_owner_id}`"
-                        max-height="400px"
-                        @selection-change="handleTableSelectionChange"
-                    >
-                        <el-table-column 
-                            type="selection" 
-                            :reserve-selection="true" 
-                            width="55"
-                            :selectable="(row: any) => true"
-                        />
+                    <el-table ref="containerTableRef" :key="`container-table-${addMonitorDialogVisible}`"
+                        :data="containerPermissionList" :loading="containerPermissionLoading"
+                        :row-key="(row: any) => `${row.asset_container_id}-${row.asset_owner_id}`" max-height="400px"
+                        @selection-change="handleTableSelectionChange">
+                        <el-table-column type="selection" :reserve-selection="true" width="55"
+                            :selectable="(row: any) => true" />
                         <el-table-column prop="tag" label="标签" width="120" />
                         <el-table-column prop="structure_name" label="结构名称" width="200" />
                         <el-table-column prop="system_name" label="星系" width="150" />
@@ -1057,7 +1005,7 @@ onMounted(async () => {
         </el-form>
     </el-dialog>
 
-    <el-dialog v-model="manageContainerDialogVisible" title="管理容器" width="800px" class="manage-container-dialog">
+    <el-dialog v-model="manageContainerDialogVisible" title="管理容器" width="950" class="manage-container-dialog">
         <div class="container-selector">
             <div class="selector-actions">
                 <el-button size="small" @click="handleManageContainerSelectAll">全选</el-button>
@@ -1065,28 +1013,22 @@ onMounted(async () => {
                 <span class="selected-count">已选择 {{ manageContainerSelected.length }} 个容器</span>
             </div>
             <div v-if="manageContainerLoading" class="loading-tip">
-                <el-icon class="is-loading"><Loading /></el-icon>
+                <el-icon class="is-loading">
+                    <Loading />
+                </el-icon>
                 <span>正在加载容器列表...</span>
             </div>
-            <el-table
-                ref="manageContainerTableRef"
-                :key="`manage-container-table-${manageContainerDialogVisible}`"
-                :data="manageContainerList"
-                :loading="manageContainerLoading"
-                :row-key="(row: any) => `${row.asset_container_id}-${row.asset_owner_id}`"
-                max-height="400px"
-                @selection-change="handleManageContainerSelectionChange"
-            >
-                <el-table-column 
-                    type="selection" 
-                    :reserve-selection="true" 
-                    width="55"
-                    :selectable="(row: any) => true"
-                />
+            <el-table ref="manageContainerTableRef" :key="`manage-container-table-${manageContainerDialogVisible}`"
+                :data="manageContainerList" :loading="manageContainerLoading"
+                :row-key="(row: any) => `${row.asset_container_id}-${row.asset_owner_id}-${row.location_flag}`"
+                max-height="400px" @selection-change="handleManageContainerSelectionChange">
+                <el-table-column type="selection" :reserve-selection="true" width="55"
+                    :selectable="(row: any) => true" />
                 <el-table-column prop="tag" label="标签" width="120" />
                 <el-table-column prop="structure_name" label="结构名称" width="200" />
                 <el-table-column prop="system_name" label="星系" width="150" />
                 <el-table-column prop="owner_name" label="所有者" width="150" />
+                <el-table-column prop="location_flag" label="位置标志" width="150" />
                 <el-table-column prop="owner_type" label="类型" width="100">
                     <template #default="scope">
                         <span>{{ scope.row.owner_type === 'character' ? '角色' : '公司' }}</span>
@@ -1121,7 +1063,7 @@ onMounted(async () => {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 20px;
-    max-width: 1400px;
+    max-width: auto;
 }
 
 /* 增加监控卡片 */
@@ -1331,7 +1273,7 @@ onMounted(async () => {
         grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
         gap: 16px;
     }
-    
+
     .asset-view-set-dialog,
     .add-monitor-dialog {
         width: 90% !important;
@@ -1342,12 +1284,12 @@ onMounted(async () => {
     .asset-view-container {
         padding: 12px;
     }
-    
+
     .asset-view-grid {
         grid-template-columns: 1fr;
         gap: 12px;
     }
-    
+
     .card-actions {
         flex-wrap: wrap;
     }

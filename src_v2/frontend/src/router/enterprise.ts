@@ -18,7 +18,13 @@ export const enterpriseRoutes: RouteRecordRaw[] = [
       roles: ['vip_omega'],
       enterpriseOnly: true
     }
-  }
+  },
+  {
+    path: '/allianceContract',
+    name: 'allianceContract',
+    component: () => import('../views/enterprise/alliance_contract.vue'),
+    meta: { requiresAuth: false, enterpriseOnly: true}
+  },
 ]
 
 /**

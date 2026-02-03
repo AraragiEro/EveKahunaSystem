@@ -19,8 +19,14 @@ export function setupAuthGuards(router: Router): void {
         const isAuthValid = await authStore.checkAuth()
         if (isAuthValid) {
           // token 有效，已登录，重定向到首页
-          next('/home')
-          return
+          //如果是alpha或以上，跳转home，否则todolist
+          if (authStore.user?.roles.includes('vip_alpha') || authStore.user?.roles.includes('vip_omega')) {
+            next('/home')
+            return
+          } else {
+            next('/todolist')
+            return
+          }
         }
         // token 无效，checkAuth 已自动清除状态，允许访问登录页
       }

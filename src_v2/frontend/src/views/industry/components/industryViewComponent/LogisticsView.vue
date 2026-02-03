@@ -79,16 +79,63 @@ const tableData = computed(() => {
     }))
 })
 
-// 计算总体积总和
+// 计算总体积总和（基于过滤后的数据）
 const totalVolume = computed(() => {
-    if (!tableData.value || tableData.value.length === 0) {
+    if (!filteredTableData.value || filteredTableData.value.length === 0) {
         return 0
     }
-    return tableData.value.reduce((sum, item) => {
+    return filteredTableData.value.reduce((sum, item) => {
         const volume = item.provide_volume || 0
         return sum + (typeof volume === 'number' ? volume : parseFloat(volume) || 0)
     }, 0)
 })
+
+// 筛选状态
+const selectedDeparture = ref<string>('')
+const selectedDestination = ref<string>('')
+
+// 出发地筛选选项
+const departureFilterOptions = computed(() => {
+    const uniqueValues = new Set<string>()
+    tableData.value.forEach(item => {
+        if (item.provide_structure_name) {
+            uniqueValues.add(item.provide_structure_name)
+        }
+    })
+    return Array.from(uniqueValues).sort()
+})
+
+// 目的地筛选选项
+const destinationFilterOptions = computed(() => {
+    const uniqueValues = new Set<string>()
+    tableData.value.forEach(item => {
+        if (item.lack_structure_name) {
+            uniqueValues.add(item.lack_structure_name)
+        }
+    })
+    return Array.from(uniqueValues).sort()
+})
+
+// 过滤后的表格数据
+const filteredTableData = computed(() => {
+    let result = tableData.value
+
+    if (selectedDeparture.value) {
+        result = result.filter(item => item.provide_structure_name === selectedDeparture.value)
+    }
+
+    if (selectedDestination.value) {
+        result = result.filter(item => item.lack_structure_name === selectedDestination.value)
+    }
+
+    return result
+})
+
+// 清除筛选
+const clearFilters = () => {
+    selectedDeparture.value = ''
+    selectedDestination.value = ''
+}
 
 // 图表相关
 const graphContainerRef = ref<HTMLElement>()
@@ -220,12 +267,12 @@ const graphData = computed(() => {
 
     // 先收集所有边的键
     const allEdgeKeys = Array.from(edgeVolumeMap.keys())
-    
+
     allEdgeKeys.forEach(edgeKey => {
         const [source, target] = edgeKey.split('-')
         const reverseKey = `${target}-${source}`
         const volume = edgeVolumeMap.get(edgeKey) || 0
-        
+
         // 检查是否存在反向边
         const hasReverse = edgeVolumeMap.has(reverseKey)
 
@@ -393,7 +440,7 @@ const updateChart = async () => {
     await nextTick()
     if (graphContainerRef.value) {
         const container = graphContainerRef.value
-        
+
         if (container.offsetWidth > 0 && container.offsetHeight > 0) {
             initChart()
         } else {
@@ -419,9 +466,9 @@ const observeContainer = () => {
                 chartInstance.resize()
             }
         })
-        
+
         observer.observe(graphContainerRef.value)
-        
+
         return observer
     }
     return null
@@ -464,16 +511,16 @@ const startDrag = (e: MouseEvent) => {
 
 const onDrag = (e: MouseEvent) => {
     if (!isDragging.value || !splitContainerRef.value) return
-    
+
     const container = splitContainerRef.value
     const rect = container.getBoundingClientRect()
     const x = e.clientX - rect.left
     const percentage = (x / rect.width) * 100
-    
+
     // 限制分割线位置在 20% 到 80% 之间
     const clampedPercentage = Math.max(20, Math.min(80, percentage))
     splitPosition.value = clampedPercentage
-    
+
     // 使用防抖来优化图表调整性能
     if (resizeTimer) {
         cancelAnimationFrame(resizeTimer)
@@ -489,13 +536,13 @@ const stopDrag = () => {
     isDragging.value = false
     document.removeEventListener('mousemove', onDrag)
     document.removeEventListener('mouseup', stopDrag)
-    
+
     // 清理防抖定时器
     if (resizeTimer) {
         cancelAnimationFrame(resizeTimer)
         resizeTimer = null
     }
-    
+
     // 拖拽结束后重新调整图表大小
     if (chartInstance) {
         setTimeout(() => {
@@ -529,17 +576,17 @@ onMounted(async () => {
     // 等待多个 nextTick 确保 DOM 完全渲染
     await nextTick()
     await nextTick()
-    
+
     // 设置 ResizeObserver 监听容器尺寸变化
     setTimeout(() => {
         containerObserver = observeContainer()
     }, 100)
-    
+
     // 延迟初始化图表，确保容器有尺寸
     setTimeout(() => {
         updateChart()
     }, 300)
-    
+
     // 响应式调整图表大小
     window.addEventListener('resize', handleResize)
     // 监听窗口大小变化以更新响应式布局
@@ -553,7 +600,7 @@ onUnmounted(() => {
         containerObserver.disconnect()
         containerObserver = null
     }
-    
+
     // 清理图表实例
     if (chartInstance) {
         chartInstance.dispose()
@@ -579,15 +626,8 @@ onUnmounted(() => {
             </template>
             <div class="content-container">
                 <!-- 大屏幕：图表和表格在同一行，中间有可拖动分割线 -->
-                <div 
-                    v-if="isLargeScreen" 
-                    ref="splitContainerRef"
-                    class="split-container"
-                >
-                    <div 
-                        class="split-pane chart-pane"
-                        :style="{ width: `${splitPosition}%` }"
-                    >
+                <div v-if="isLargeScreen" ref="splitContainerRef" class="split-container">
+                    <div class="split-pane chart-pane" :style="{ width: `${splitPosition}%` }">
                         <el-card shadow="never" class="chart-card">
                             <template #header>
                                 <span>星系图</span>
@@ -595,46 +635,45 @@ onUnmounted(() => {
                             <div ref="graphContainerRef" class="chart-container"></div>
                         </el-card>
                     </div>
-                    <div 
-                        class="split-divider"
-                        :class="{ dragging: isDragging }"
-                        @mousedown="startDrag"
-                    >
+                    <div class="split-divider" :class="{ dragging: isDragging }" @mousedown="startDrag">
                         <div class="split-handle"></div>
                     </div>
-                    <div 
-                        class="split-pane table-pane"
-                        :style="{ width: `${100 - splitPosition}%` }"
-                    >
+                    <div class="split-pane table-pane" :style="{ width: `${100 - splitPosition}%` }">
                         <el-card shadow="never" class="table-card">
                             <template #header>
                                 <span>运力表</span>
                             </template>
-                            <el-table
-                                :data="tableData"
-                                :key="`logistics-table-${selectedPlan || 'default'}`"
-                                border
-                                max-height="80vh"
-                                show-overflow-tooltip
-                            >
+                            <!-- 筛选器 -->
+                            <div class="filter-container">
+                                <el-select v-model="selectedDeparture" placeholder="请选择出发地" clearable
+                                    style="width: 200px; margin-right: 10px;">
+                                    <el-option v-for="item in departureFilterOptions" :key="item" :label="item"
+                                        :value="item" />
+                                </el-select>
+                                <el-select v-model="selectedDestination" placeholder="请选择目的地" clearable
+                                    style="width: 200px; margin-right: 10px;">
+                                    <el-option v-for="item in destinationFilterOptions" :key="item" :label="item"
+                                        :value="item" />
+                                </el-select>
+                                <el-button v-if="selectedDeparture || selectedDestination" type="primary" plain
+                                    size="small" @click="clearFilters">
+                                    清除筛选
+                                </el-button>
+                            </div>
+                            <el-table :data="filteredTableData" :key="`logistics-table-${selectedPlan || 'default'}`"
+                                border max-height="80vh" show-overflow-tooltip>
                                 <el-table-column label="物品名称" prop="lack_type_name" width="150">
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
-                                            @click="copyCellContent(row.lack_type_name, '物品名称')"
-                                            :title="`点击复制: ${row.lack_type_name || ''}`"
-                                        >
+                                        <div class="copyable-cell" @click="copyCellContent(row.lack_type_name, '物品名称')"
+                                            :title="`点击复制: ${row.lack_type_name || ''}`">
                                             {{ row.lack_type_name }}
                                         </div>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="总数量" prop="provide_quantity" width="150">
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
-                                            @click="copyCellContent(row.provide_quantity, '总数量')"
-                                            :title="`点击复制: ${row.provide_quantity || ''}`"
-                                        >
+                                        <div class="copyable-cell" @click="copyCellContent(row.provide_quantity, '总数量')"
+                                            :title="`点击复制: ${row.provide_quantity || ''}`">
                                             {{ formatAccounting(row.provide_quantity) }}
                                         </div>
                                     </template>
@@ -642,49 +681,41 @@ onUnmounted(() => {
                                 <el-table-column label="总体积 (m³)" prop="provide_volume" width="150">
                                     <template #header>
                                         <span>总体积 (m³)</span>
-                                        <div style="font-size: 12px; color: #909399; font-weight: normal; margin-top: 4px;">
+                                        <div
+                                            style="font-size: 12px; color: #909399; font-weight: normal; margin-top: 4px;">
                                             总计: {{ formatAccounting(totalVolume) }}
                                         </div>
                                     </template>
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
-                                            @click="copyCellContent(row.provide_volume, '总体积')"
-                                            :title="`点击复制: ${row.provide_volume || ''}`"
-                                        >
+                                        <div class="copyable-cell" @click="copyCellContent(row.provide_volume, '总体积')"
+                                            :title="`点击复制: ${row.provide_volume || ''}`">
                                             {{ formatAccounting(row.provide_volume) }}
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="出发地" prop="provide_structure_name" width="250">
+                                <el-table-column label="出发地" prop="provide_structure_name" width="250" sortable>
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
+                                        <div class="copyable-cell"
                                             @click="copyCellContent(row.provide_structure_name, '出发地')"
-                                            :title="`点击复制: ${row.provide_structure_name || ''}`"
-                                        >
+                                            :title="`点击复制: ${row.provide_structure_name || ''}`">
                                             {{ row.provide_structure_name }}
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="目的地" prop="lack_structure_name" width="250">
+                                <el-table-column label="目的地" prop="lack_structure_name" width="250" sortable>
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
+                                        <div class="copyable-cell"
                                             @click="copyCellContent(row.lack_structure_name, '目的地')"
-                                            :title="`点击复制: ${row.lack_structure_name || ''}`"
-                                        >
+                                            :title="`点击复制: ${row.lack_structure_name || ''}`">
                                             {{ row.lack_structure_name }}
                                         </div>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="距离(Ly)" prop="provide_system_distance" width="100">
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
+                                        <div class="copyable-cell"
                                             @click="copyCellContent(row.provide_system_distance, '距离')"
-                                            :title="`点击复制: ${row.provide_system_distance || ''}`"
-                                        >
+                                            :title="`点击复制: ${row.provide_system_distance || ''}`">
                                             {{ formatAccounting(row.provide_system_distance) }}
                                         </div>
                                     </template>
@@ -693,7 +724,7 @@ onUnmounted(() => {
                         </el-card>
                     </div>
                 </div>
-                
+
                 <!-- 小屏幕：图表和表格各自独占一行 -->
                 <el-row v-else :gutter="20">
                     <el-col :span="24">
@@ -709,31 +740,37 @@ onUnmounted(() => {
                             <template #header>
                                 <span>运力表</span>
                             </template>
-                            <el-table
-                                :data="tableData"
-                                :key="`logistics-table-${selectedPlan || 'default'}`"
-                                border
-                                max-height="600px"
-                                show-overflow-tooltip
-                            >
+                            <!-- 筛选器 -->
+                            <div class="filter-container">
+                                <el-select v-model="selectedDeparture" placeholder="请选择出发地" clearable
+                                    style="width: 200px; margin-right: 10px;">
+                                    <el-option v-for="item in departureFilterOptions" :key="item" :label="item"
+                                        :value="item" />
+                                </el-select>
+                                <el-select v-model="selectedDestination" placeholder="请选择目的地" clearable
+                                    style="width: 200px; margin-right: 10px;">
+                                    <el-option v-for="item in destinationFilterOptions" :key="item" :label="item"
+                                        :value="item" />
+                                </el-select>
+                                <el-button v-if="selectedDeparture || selectedDestination" type="primary" plain
+                                    size="small" @click="clearFilters">
+                                    清除筛选
+                                </el-button>
+                            </div>
+                            <el-table :data="filteredTableData" :key="`logistics-table-${selectedPlan || 'default'}`"
+                                border max-height="600px" show-overflow-tooltip>
                                 <el-table-column label="物品名称" prop="lack_type_name" width="150">
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
-                                            @click="copyCellContent(row.lack_type_name, '物品名称')"
-                                            :title="`点击复制: ${row.lack_type_name || ''}`"
-                                        >
+                                        <div class="copyable-cell" @click="copyCellContent(row.lack_type_name, '物品名称')"
+                                            :title="`点击复制: ${row.lack_type_name || ''}`">
                                             {{ row.lack_type_name }}
                                         </div>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="总数量" prop="provide_quantity" width="150">
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
-                                            @click="copyCellContent(row.provide_quantity, '总数量')"
-                                            :title="`点击复制: ${row.provide_quantity || ''}`"
-                                        >
+                                        <div class="copyable-cell" @click="copyCellContent(row.provide_quantity, '总数量')"
+                                            :title="`点击复制: ${row.provide_quantity || ''}`">
                                             {{ formatAccounting(row.provide_quantity) }}
                                         </div>
                                     </template>
@@ -741,49 +778,41 @@ onUnmounted(() => {
                                 <el-table-column label="总体积 (m³)" prop="provide_volume" width="150">
                                     <template #header>
                                         <span>总体积 (m³)</span>
-                                        <div style="font-size: 12px; color: #909399; font-weight: normal; margin-top: 4px;">
+                                        <div
+                                            style="font-size: 12px; color: #909399; font-weight: normal; margin-top: 4px;">
                                             总计: {{ formatAccounting(totalVolume) }}
                                         </div>
                                     </template>
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
-                                            @click="copyCellContent(row.provide_volume, '总体积')"
-                                            :title="`点击复制: ${row.provide_volume || ''}`"
-                                        >
+                                        <div class="copyable-cell" @click="copyCellContent(row.provide_volume, '总体积')"
+                                            :title="`点击复制: ${row.provide_volume || ''}`">
                                             {{ formatAccounting(row.provide_volume) }}
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="出发地" prop="provide_structure_name" width="250">
+                                <el-table-column label="出发地" prop="provide_structure_name" width="250" sortable>
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
+                                        <div class="copyable-cell"
                                             @click="copyCellContent(row.provide_structure_name, '出发地')"
-                                            :title="`点击复制: ${row.provide_structure_name || ''}`"
-                                        >
+                                            :title="`点击复制: ${row.provide_structure_name || ''}`">
                                             {{ row.provide_structure_name }}
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="目的地" prop="lack_structure_name" width="250">
+                                <el-table-column label="目的地" prop="lack_structure_name" width="250" sortable>
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
+                                        <div class="copyable-cell"
                                             @click="copyCellContent(row.lack_structure_name, '目的地')"
-                                            :title="`点击复制: ${row.lack_structure_name || ''}`"
-                                        >
+                                            :title="`点击复制: ${row.lack_structure_name || ''}`">
                                             {{ row.lack_structure_name }}
                                         </div>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="距离(Ly)" prop="provide_system_distance" width="100">
                                     <template #default="{ row }">
-                                        <div 
-                                            class="copyable-cell" 
+                                        <div class="copyable-cell"
                                             @click="copyCellContent(row.provide_system_distance, '距离')"
-                                            :title="`点击复制: ${row.provide_system_distance || ''}`"
-                                        >
+                                            :title="`点击复制: ${row.provide_system_distance || ''}`">
                                             {{ formatAccounting(row.provide_system_distance) }}
                                         </div>
                                     </template>
@@ -935,20 +964,28 @@ onUnmounted(() => {
     padding: 20px;
 }
 
+.filter-container {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
 /* 小屏幕时的样式 */
 @media (max-width: 1919px) {
     .chart-card {
         margin-bottom: 20px;
     }
-    
+
     .chart-card :deep(.el-card__body) {
         padding: 20px;
     }
-    
+
     .table-card {
         margin-left: 0;
     }
-    
+
     .chart-container {
         height: 80vh;
         min-height: 400px;
@@ -972,4 +1009,3 @@ onUnmounted(() => {
     text-decoration: underline;
 }
 </style>
-

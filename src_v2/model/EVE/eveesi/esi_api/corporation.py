@@ -28,7 +28,7 @@ async def corporations_corporation_id_icons(corporation_id: int, log=True):
 # https://esi.evetech.net/corporations/{corporation_id}/blueprints
 # esi-corporations.read_blueprints.v1
 # This route is part of the rate limit group corp-industry. This group is limited to 600 tokens per 15 minutes.
-@esi_request(limit=2/3)
+@esi_request(limit=0.3)
 async def corporations_corporation_id_blueprints(access_token, corporation_id: int, page: int=1, max_retries=3, log=True):
     if not isinstance(access_token, str):
         ac_token = await access_token
