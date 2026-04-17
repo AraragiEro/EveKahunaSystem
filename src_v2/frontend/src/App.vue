@@ -246,7 +246,7 @@ onUnmounted(() => {
         <el-header class="main-header">
           <div class="header-content">
             <div class="header-title">
-              <h2>Kahuna-System V1.5.1</h2>
+              <h2>Kahuna-System V1.5.2</h2>
               <el-tag :type="isEnterprise ? 'success' : 'info'" size="small" class="edition-tag">
                 {{ isEnterprise ? '企业版' : '社区版' }}
               </el-tag>
