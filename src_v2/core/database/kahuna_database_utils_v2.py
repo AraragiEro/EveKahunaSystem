@@ -85,7 +85,7 @@ class _AsyncIteratorWrapper:
             self._closed = True
             # 先关闭生成器
             try:
-                if hasattr(self._generator, 'aclose'):
+                if hasattr(self._generator, "aclose"):
                     try:
                         await self._generator.aclose()
                     except (StopAsyncIteration, GeneratorExit):
@@ -129,7 +129,7 @@ class _AsyncIteratorWrapper:
                 "_AsyncIteratorWrapper 对象被垃圾回收时 session 尚未关闭。"
                 "请确保使用 'async with' 上下文管理器或显式调用 aclose()。",
                 ResourceWarning,
-                stacklevel=2
+                stacklevel=2,
             )
 
 
@@ -168,13 +168,15 @@ class _CommonUtils:
 
             # 将字符串列表转换为 Column 对象列表（如果需要）
             if index_elements and isinstance(index_elements[0], str):
-                index_cols = [getattr(cls.cls_model, col_name)
-                              for col_name in index_elements]
+                index_cols = [
+                    getattr(cls.cls_model, col_name) for col_name in index_elements
+                ]
                 index_col_names = set(index_elements)  # 字符串列表
             else:
                 index_cols = index_elements
-                index_col_names = {col.name if hasattr(
-                    col, 'name') else str(col) for col in index_cols}
+                index_col_names = {
+                    col.name if hasattr(col, "name") else str(col) for col in index_cols
+                }
 
             # 构建更新字典，排除索引字段和主键字段
             # 使用 excluded 表别名来引用被插入的值
@@ -186,8 +188,7 @@ class _CommonUtils:
                     update_dict[col.name] = getattr(stmt.excluded, col.name)
 
             stmt = stmt.on_conflict_do_update(
-                index_elements=index_cols,
-                set_=update_dict
+                index_elements=index_cols, set_=update_dict
             )
 
             result = await session.execute(stmt)
@@ -206,14 +207,13 @@ class _CommonUtils:
 
             # 将字符串列表转换为 Column 对象列表（如果需要）
             if index_elements and isinstance(index_elements[0], str):
-                index_cols = [getattr(cls.cls_model, col_name)
-                              for col_name in index_elements]
+                index_cols = [
+                    getattr(cls.cls_model, col_name) for col_name in index_elements
+                ]
             else:
                 index_cols = index_elements
 
-            stmt = stmt.on_conflict_do_nothing(
-                index_elements=index_cols
-            )
+            stmt = stmt.on_conflict_do_nothing(index_elements=index_cols)
             await session.execute(stmt)
             await session.commit()
 
@@ -280,16 +280,13 @@ class _CommonCacheUtils:
         async with get_postgres_manager().get_session() as session:
             try:
                 # 清空cache表
-                await session.execute(
-                    delete(cls.cls_model)
-                )
+                await session.execute(delete(cls.cls_model))
 
                 # 将元数据表的数据复制到Cache表
                 table_name = cls.cls_base_model.__tablename__
                 cache_table_name = cls.cls_model.__tablename__
                 await session.execute(
-                    text(
-                        f"INSERT INTO {cache_table_name} SELECT * FROM {table_name}")
+                    text(f"INSERT INTO {cache_table_name} SELECT * FROM {table_name}")
                 )
 
                 logger.info(f"从 {table_name} 复制到 {cache_table_name} 完成。")
@@ -306,8 +303,7 @@ class UserDBUtils(_CommonUtils):
     @classmethod
     async def select_user_by_user_name(cls, user_name: AnyStr):
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.user_name == user_name)
+            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -315,19 +311,18 @@ class UserDBUtils(_CommonUtils):
     async def delete_user_by_user_username(cls, user_name: AnyStr, session=None):
         if not session:
             async with get_postgres_manager().get_session() as session:
-                stmt = delete(cls.cls_model).where(
-                    cls.cls_model.user_name == user_name)
+                stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name)
                 await session.execute(stmt)
         else:
-            stmt = delete(cls.cls_model).where(
-                cls.cls_model.user_name == user_name)
+            stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name)
             await session.execute(stmt)
 
     @classmethod
     async def select_passwd_hash_by_user_name(cls, user_name: AnyStr):
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model.password_hash).where(
-                cls.cls_model.user_name == user_name)
+                cls.cls_model.user_name == user_name
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -338,8 +333,7 @@ class UserDataDBUtils(_CommonUtils):
     @classmethod
     async def select_user_data_by_user_name(cls, user_name: AnyStr):
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.user_name == user_name)
+            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -347,12 +341,10 @@ class UserDataDBUtils(_CommonUtils):
     async def delete_user_data_by_user_name(cls, user_name: AnyStr, session=None):
         if not session:
             async with get_postgres_manager().get_session() as session:
-                stmt = delete(cls.cls_model).where(
-                    cls.cls_model.user_name == user_name)
+                stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name)
                 await session.execute(stmt)
         else:
-            stmt = delete(cls.cls_model).where(
-                cls.cls_model.user_name == user_name)
+            stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name)
             await session.execute(stmt)
 
     @classmethod
@@ -383,7 +375,9 @@ class UserDataDBUtils(_CommonUtils):
             return user_data
 
     @classmethod
-    async def get_user_setting(cls, user_name: str, setting_key: str, default_value=None):
+    async def get_user_setting(
+        cls, user_name: str, setting_key: str, default_value=None
+    ):
         """获取用户设置中的指定键值
 
         Args:
@@ -404,14 +398,74 @@ class UserDataDBUtils(_CommonUtils):
         return user_data.setting.get(setting_key, default_value)
 
 
+class UserQQBindingDBUtils(_CommonUtils):
+    cls_model = model.UserQQBinding
+
+    @classmethod
+    async def select_by_user_name(cls, user_name: AnyStr):
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def select_by_user_qq(cls, user_qq: int):
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(cls.cls_model.user_qq == user_qq)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def delete_by_user_name(cls, user_name: AnyStr, session=None):
+        if not session:
+            async with get_postgres_manager().get_session() as session:
+                stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name)
+                await session.execute(stmt)
+        else:
+            stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name)
+            await session.execute(stmt)
+
+    @classmethod
+    async def delete_by_user_qq(cls, user_qq: int, session=None):
+        if not session:
+            async with get_postgres_manager().get_session() as session:
+                stmt = delete(cls.cls_model).where(cls.cls_model.user_qq == user_qq)
+                await session.execute(stmt)
+        else:
+            stmt = delete(cls.cls_model).where(cls.cls_model.user_qq == user_qq)
+            await session.execute(stmt)
+
+    @classmethod
+    async def bind_user_qq(cls, user_name: str, user_qq: int):
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        bind_time = datetime.utcnow()
+        async with get_postgres_manager().get_session() as session:
+            await session.execute(
+                delete(cls.cls_model).where(cls.cls_model.user_qq == user_qq)
+            )
+            stmt = pg_insert(cls.cls_model).values(
+                user_name=user_name, user_qq=user_qq, bind_time=bind_time
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[cls.cls_model.user_name],
+                set_={"user_qq": user_qq, "bind_time": bind_time},
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+
 class RolesDBUtils(_CommonUtils):
     cls_model = model.Roles
 
     @classmethod
     async def select_role_by_role_name(cls, role_name: str) -> model.Roles | None:
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.role_name == role_name)
+            stmt = select(cls.cls_model).where(cls.cls_model.role_name == role_name)
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -428,11 +482,11 @@ class RolesDBUtils(_CommonUtils):
         if not session:
             async with get_postgres_manager().get_session() as session:
                 stmt = delete(cls.cls_model).where(
-                    cls.cls_model.role_name.in_(role_names))
+                    cls.cls_model.role_name.in_(role_names)
+                )
                 await session.execute(stmt)
         else:
-            stmt = delete(cls.cls_model).where(
-                cls.cls_model.role_name.in_(role_names))
+            stmt = delete(cls.cls_model).where(cls.cls_model.role_name.in_(role_names))
             await session.execute(stmt)
 
 
@@ -443,7 +497,8 @@ class PermissionsDBUtils(_CommonUtils):
     async def select_permission_by_permission_name(cls, permission_name: str):
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                cls.cls_model.permission_name == permission_name)
+                cls.cls_model.permission_name == permission_name
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -464,20 +519,22 @@ class UserRolesDBUtils(_CommonUtils):
         if not session:
             async with get_postgres_manager().get_session() as session:
                 stmt = delete(cls.cls_model).where(
-                    cls.cls_model.role_name.in_(role_names))
+                    cls.cls_model.role_name.in_(role_names)
+                )
                 await session.execute(stmt)
         else:
-            stmt = delete(cls.cls_model).where(
-                cls.cls_model.role_name.in_(role_names))
+            stmt = delete(cls.cls_model).where(cls.cls_model.role_name.in_(role_names))
             await session.execute(stmt)
 
     @classmethod
-    async def select_user_role_by_user_name_and_role_name(cls, user_name: str, role_name: str):
+    async def select_user_role_by_user_name_and_role_name(
+        cls, user_name: str, role_name: str
+    ):
         """查询用户角色关联"""
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                (cls.cls_model.user_name == user_name) &
-                (cls.cls_model.role_name == role_name)
+                (cls.cls_model.user_name == user_name)
+                & (cls.cls_model.role_name == role_name)
             )
             result = await session.execute(stmt)
             return result.scalars().first()
@@ -485,15 +542,13 @@ class UserRolesDBUtils(_CommonUtils):
     @classmethod
     async def select_user_roles_by_user_name(cls, user_name: str):
         """查询用户的所有角色"""
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name)
+        stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def select_user_roles_by_role_name(cls, role_name: str):
         """查询角色的所有用户"""
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.role_name == role_name)
+        stmt = select(cls.cls_model).where(cls.cls_model.role_name == role_name)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
 
@@ -504,19 +559,23 @@ class RolePermissionsDBUtils(_CommonUtils):
     async def delete_role_permissions_by_permission_name(cls, permission_name: str):
         async with get_postgres_manager().get_session() as session:
             stmt = delete(cls.cls_model).where(
-                cls.cls_model.permission_name == permission_name)
+                cls.cls_model.permission_name == permission_name
+            )
             await session.execute(stmt)
 
     @classmethod
     async def select_role_permissions_by_permission_name(cls, permission_name: str):
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                cls.cls_model.permission_name == permission_name)
+                cls.cls_model.permission_name == permission_name
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
     @classmethod
-    async def delete_role_permissions_by_role_names(cls, role_names: list[str], session=None):
+    async def delete_role_permissions_by_role_names(
+        cls, role_names: list[str], session=None
+    ):
         """批量删除角色权限关联
 
         Args:
@@ -528,20 +587,22 @@ class RolePermissionsDBUtils(_CommonUtils):
         if not session:
             async with get_postgres_manager().get_session() as session:
                 stmt = delete(cls.cls_model).where(
-                    cls.cls_model.role_name.in_(role_names))
+                    cls.cls_model.role_name.in_(role_names)
+                )
                 await session.execute(stmt)
         else:
-            stmt = delete(cls.cls_model).where(
-                cls.cls_model.role_name.in_(role_names))
+            stmt = delete(cls.cls_model).where(cls.cls_model.role_name.in_(role_names))
             await session.execute(stmt)
 
     @classmethod
-    async def select_role_permission_by_role_name_and_permission_name(cls, role_name: str, permission_name: str):
+    async def select_role_permission_by_role_name_and_permission_name(
+        cls, role_name: str, permission_name: str
+    ):
         """查询角色权限关联"""
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                (cls.cls_model.role_name == role_name) &
-                (cls.cls_model.permission_name == permission_name)
+                (cls.cls_model.role_name == role_name)
+                & (cls.cls_model.permission_name == permission_name)
             )
             result = await session.execute(stmt)
             return result.scalars().first()
@@ -549,8 +610,7 @@ class RolePermissionsDBUtils(_CommonUtils):
     @classmethod
     async def select_role_permissions_by_role_name(cls, role_name: str):
         """查询角色的所有权限"""
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.role_name == role_name)
+        stmt = select(cls.cls_model).where(cls.cls_model.role_name == role_name)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
 
@@ -560,32 +620,34 @@ class RoleHierarchyDBUtils(_CommonUtils):
     @classmethod
     async def select_all_by_parent_role_name(cls, parent_role_name: str):
         stmt = select(cls.cls_model).where(
-            cls.cls_model.parent_role_name == parent_role_name)
+            cls.cls_model.parent_role_name == parent_role_name
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def select_all_by_child_role_name(cls, child_role_name: str):
         """查询所有以指定角色作为子角色的关系"""
         stmt = select(cls.cls_model).where(
-            cls.cls_model.child_role_name == child_role_name)
+            cls.cls_model.child_role_name == child_role_name
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def select_parent_roles_by_role_name(cls, role_name: str):
         """查询角色的所有父角色（返回所有以该角色作为子角色的关系）"""
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.child_role_name == role_name)
+        stmt = select(cls.cls_model).where(cls.cls_model.child_role_name == role_name)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def select_child_roles_by_role_name(cls, role_name: str):
         """查询角色的所有子角色（返回所有以该角色作为父角色的关系）"""
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.parent_role_name == role_name)
+        stmt = select(cls.cls_model).where(cls.cls_model.parent_role_name == role_name)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
-    async def delete_hierarchy_by_role_names(cls, hierarchy_pairs: list[list[str]], session=None):
+    async def delete_hierarchy_by_role_names(
+        cls, hierarchy_pairs: list[list[str]], session=None
+    ):
         """批量删除特定的角色层级关系
 
         Args:
@@ -600,11 +662,12 @@ class RoleHierarchyDBUtils(_CommonUtils):
         for pair in hierarchy_pairs:
             if len(pair) != 2:
                 raise ValueError(
-                    f"Invalid hierarchy pair: {pair}. Expected [parent_name, child_name]")
+                    f"Invalid hierarchy pair: {pair}. Expected [parent_name, child_name]"
+                )
             parent_name, child_name = pair
             conditions.append(
-                (cls.cls_model.parent_role_name == parent_name) &
-                (cls.cls_model.child_role_name == child_name)
+                (cls.cls_model.parent_role_name == parent_name)
+                & (cls.cls_model.child_role_name == child_name)
             )
 
         if not conditions:
@@ -625,22 +688,23 @@ class UserPermissionsDBUtils(_CommonUtils):
     @classmethod
     async def select_user_permissions_by_user_name(cls, user_name: str):
         """查询用户的所有权限"""
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name)
+        stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def delete_user_permissions_by_permission_name(cls, permission_name: str):
         async with get_postgres_manager().get_session() as session:
             stmt = delete(cls.cls_model).where(
-                cls.cls_model.permission_name == permission_name)
+                cls.cls_model.permission_name == permission_name
+            )
             await session.execute(stmt)
 
     @classmethod
     async def select_user_permissions_by_permission_name(cls, permission_name: str):
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                cls.cls_model.permission_name == permission_name)
+                cls.cls_model.permission_name == permission_name
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -651,22 +715,23 @@ class EveAuthedCharacterDBUtils(_CommonUtils):
     @classmethod
     async def select_all_by_owner_user_name(cls, user_name: AnyStr):
         """根据用户名返回所有角色的异步迭代器"""
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.owner_user_name == user_name)
+        stmt = select(cls.cls_model).where(cls.cls_model.owner_user_name == user_name)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def delete_character_by_character_id(cls, character_id: int):
         async with get_postgres_manager().get_session() as session:
             stmt = delete(cls.cls_model).where(
-                cls.cls_model.character_id == character_id)
+                cls.cls_model.character_id == character_id
+            )
             await session.execute(stmt)
 
     @classmethod
     async def select_character_by_character_name(cls, character_name: str):
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                cls.cls_model.character_name == character_name)
+                cls.cls_model.character_name == character_name
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -674,7 +739,8 @@ class EveAuthedCharacterDBUtils(_CommonUtils):
     async def select_character_by_character_id(cls, character_id: int):
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                cls.cls_model.character_id == character_id)
+                cls.cls_model.character_id == character_id
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -682,7 +748,8 @@ class EveAuthedCharacterDBUtils(_CommonUtils):
     async def select_all_characters_by_corporation_id(cls, corporation_id: int):
         """根据公司ID返回所有角色的异步迭代器"""
         stmt = select(cls.cls_model).where(
-            cls.cls_model.corporation_id == corporation_id)
+            cls.cls_model.corporation_id == corporation_id
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
 
@@ -693,7 +760,8 @@ class EvePublicCharacterInfoDBUtils(_CommonUtils):
     async def select_public_character_info_by_character_id(cls, character_id: int):
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                cls.cls_model.character_id == character_id)
+                cls.cls_model.character_id == character_id
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -701,21 +769,23 @@ class EvePublicCharacterInfoDBUtils(_CommonUtils):
     async def select_public_character_info_by_name(cls, character_name: str):
         """根据角色名称查询角色信息"""
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.name == character_name)
+            stmt = select(cls.cls_model).where(cls.cls_model.name == character_name)
             result = await session.execute(stmt)
             return result.scalars().first()
 
     @classmethod
-    async def select_character_info_by_characterid_with_same_title(cls, character_id: int):
+    async def select_character_info_by_characterid_with_same_title(
+        cls, character_id: int
+    ):
         """根据角色ID返回相同标题的角色信息的异步迭代器"""
         # 创建别名用于自连接
         alias = aliased(cls.cls_model)
         # 自连接：通过标题匹配，找到与给定character_id具有相同标题的所有角色
-        stmt = select(cls.cls_model).join(
-            alias,
-            cls.cls_model.title == alias.title
-        ).where(alias.character_id == character_id)
+        stmt = (
+            select(cls.cls_model)
+            .join(alias, cls.cls_model.title == alias.title)
+            .where(alias.character_id == character_id)
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
 
@@ -723,10 +793,13 @@ class EveCorporationDBUtils(_CommonUtils):
     cls_model = model.EveCorporation
 
     @classmethod
-    async def select_corporation_by_corporation_id(cls, corporation_id: int) -> cls_model:
+    async def select_corporation_by_corporation_id(
+        cls, corporation_id: int
+    ) -> cls_model:
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                cls.cls_model.corporation_id == corporation_id)
+                cls.cls_model.corporation_id == corporation_id
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -738,14 +811,16 @@ class EveAliasCharacterDBUtils(_CommonUtils):
     async def select_alias_character_by_character_id(cls, character_id: int):
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                cls.cls_model.alias_character_id == character_id)
+                cls.cls_model.alias_character_id == character_id
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
     @classmethod
     async def select_all_by_main_character_id(cls, main_character_id: int):
         stmt = select(cls.cls_model).where(
-            cls.cls_model.main_character_id == main_character_id)
+            cls.cls_model.main_character_id == main_character_id
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
 
@@ -753,10 +828,15 @@ class EveAssetPullMissionDBUtils(_CommonUtils):
     cls_model = model.EveAssetPullMission
 
     @classmethod
-    async def select_mission_by_owner_id_and_owner_type(cls, asset_owner_id: int, asset_owner_type: str):
+    async def select_mission_by_owner_id_and_owner_type(
+        cls, asset_owner_id: int, asset_owner_type: str
+    ):
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(cls.cls_model.asset_owner_id == asset_owner_id).where(
-                cls.cls_model.asset_owner_type == asset_owner_type)
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.asset_owner_id == asset_owner_id)
+                .where(cls.cls_model.asset_owner_type == asset_owner_type)
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -764,20 +844,29 @@ class EveAssetPullMissionDBUtils(_CommonUtils):
     async def select_mission_by_owner_id(cls, asset_owner_id: int):
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                cls.cls_model.asset_owner_id == asset_owner_id)
+                cls.cls_model.asset_owner_id == asset_owner_id
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
     @classmethod
-    async def select_all_by_owner_id_and_owner_type(cls, asset_owner_id: int, asset_owner_type: str):
-        stmt = select(cls.cls_model).where(cls.cls_model.asset_owner_id == asset_owner_id).where(
-            cls.cls_model.asset_owner_type == asset_owner_type)
+    async def select_all_by_owner_id_and_owner_type(
+        cls, asset_owner_id: int, asset_owner_type: str
+    ):
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.asset_owner_id == asset_owner_id)
+            .where(cls.cls_model.asset_owner_type == asset_owner_type)
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def select_all_by_user_name(cls, user_name: str):
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.user_name == user_name)
+            .order_by(cls.cls_model.id)
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
 
@@ -786,30 +875,102 @@ class EveIndustryPlanDBUtils(_CommonUtils):
 
     @classmethod
     async def select_all_by_user_name(cls, user_name: str):
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.user_name == user_name)
+            .order_by(cls.cls_model.id)
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def select_by_user_name_and_plan_name(cls, user_name: str, plan_name: str):
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-                cls.cls_model.plan_name == plan_name)
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.user_name == user_name)
+                .where(cls.cls_model.plan_name == plan_name)
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
     @classmethod
-    async def delete_by_user_name_and_plan_name(cls, user_name: str, plan_name: str, session=None):
+    async def delete_by_user_name_and_plan_name(
+        cls, user_name: str, plan_name: str, session=None
+    ):
         if not session:
             async with get_postgres_manager().get_session() as session:
-                stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-                    cls.cls_model.plan_name == plan_name)
+                stmt = (
+                    delete(cls.cls_model)
+                    .where(cls.cls_model.user_name == user_name)
+                    .where(cls.cls_model.plan_name == plan_name)
+                )
                 await session.execute(stmt)
                 await session.commit()
         else:
-            stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-                cls.cls_model.plan_name == plan_name)
+            stmt = (
+                delete(cls.cls_model)
+                .where(cls.cls_model.user_name == user_name)
+                .where(cls.cls_model.plan_name == plan_name)
+            )
             await session.execute(stmt)
+
+    # ===== 分享功能相关方法 =====
+
+    @classmethod
+    async def select_by_share_token(cls, share_token: str):
+        """根据分享token获取计划
+
+        Args:
+            share_token: 分享令牌
+
+        Returns:
+            计划对象，如果不存在则返回 None
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(cls.cls_model.share_token == share_token)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def update_share_info(
+        cls, user_name: str, plan_name: str, share_data: dict, session=None
+    ):
+        """更新计划分享信息
+
+        Args:
+            user_name: 用户名
+            plan_name: 计划名称
+            share_data: 分享数据字典，可包含 public, share_token, filter_snapshot
+            session: 可选的数据库会话
+        """
+
+        async def _update(session):
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.user_name == user_name)
+                .where(cls.cls_model.plan_name == plan_name)
+            )
+            result = await session.execute(stmt)
+            plan = result.scalars().first()
+
+            if plan:
+                # 更新分享相关字段
+                if "public" in share_data:
+                    plan.public = share_data["public"]
+                if "share_token" in share_data:
+                    plan.share_token = share_data["share_token"]
+                if "filter_snapshot" in share_data:
+                    plan.filter_snapshot = share_data["filter_snapshot"]
+
+                await session.commit()
+                return plan
+            return None
+
+        if not session:
+            async with get_postgres_manager().get_session() as session:
+                return await _update(session)
+        else:
+            return await _update(session)
 
 
 class EveIndustryPlanProductDBUtils(_CommonUtils):
@@ -817,27 +978,43 @@ class EveIndustryPlanProductDBUtils(_CommonUtils):
 
     @classmethod
     async def select_all_by_user_name(cls, user_name: str):
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.user_name == user_name)
+            .order_by(cls.cls_model.id)
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
-    async def select_all_by_user_name_and_plan_name(cls, user_name: str, plan_name: str):
-        stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-            cls.cls_model.plan_name == plan_name)
+    async def select_all_by_user_name_and_plan_name(
+        cls, user_name: str, plan_name: str
+    ):
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.user_name == user_name)
+            .where(cls.cls_model.plan_name == plan_name)
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
-    async def delete_all_by_user_name_and_plan_name(cls, user_name: str, plan_name: str, session=None):
+    async def delete_all_by_user_name_and_plan_name(
+        cls, user_name: str, plan_name: str, session=None
+    ):
         if not session:
             async with get_postgres_manager().get_session() as session:
-                stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-                    cls.cls_model.plan_name == plan_name)
+                stmt = (
+                    delete(cls.cls_model)
+                    .where(cls.cls_model.user_name == user_name)
+                    .where(cls.cls_model.plan_name == plan_name)
+                )
                 await session.execute(stmt)
                 await session.commit()
         else:
-            stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-                cls.cls_model.plan_name == plan_name)
+            stmt = (
+                delete(cls.cls_model)
+                .where(cls.cls_model.user_name == user_name)
+                .where(cls.cls_model.plan_name == plan_name)
+            )
             await session.execute(stmt)
 
 
@@ -847,8 +1024,11 @@ class EveIndustryPlanProductJSONBDBUtils(_CommonUtils):
     @classmethod
     async def select_by_user_name_and_plan_name(cls, user_name: str, plan_name: str):
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-                cls.cls_model.plan_name == plan_name)
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.user_name == user_name)
+                .where(cls.cls_model.plan_name == plan_name)
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -858,42 +1038,51 @@ class EveIndustryAssetContainerPermissionDBUtils(_CommonUtils):
 
     @classmethod
     async def select_all_by_user_name(cls, user_name: str):
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.user_name == user_name)
+            .order_by(cls.cls_model.id)
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
-    async def select_by_container_id_and_owner_id(cls, container_id: int, owner_id: int):
+    async def select_by_container_id_and_owner_id(
+        cls, container_id: int, owner_id: int
+    ):
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(cls.cls_model.asset_container_id ==
-                                               container_id).where(cls.cls_model.asset_owner_id == owner_id)
-            result = await session.execute(stmt)
-            return result.scalars().first()
-
-    @classmethod
-    async def select_by_container_id_owner_id_and_user_name(cls, container_id: int, owner_id: int, user_name: str):
-        async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.asset_container_id == container_id
-            ).where(
-                cls.cls_model.asset_owner_id == owner_id
-            ).where(
-                cls.cls_model.user_name == user_name
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.asset_container_id == container_id)
+                .where(cls.cls_model.asset_owner_id == owner_id)
             )
             result = await session.execute(stmt)
             return result.scalars().first()
 
     @classmethod
-    async def select_by_container_id_owner_id_user_name_location_flag(cls, container_id: int, owner_id: int, user_name: str, location_flag: str):
+    async def select_by_container_id_owner_id_and_user_name(
+        cls, container_id: int, owner_id: int, user_name: str
+    ):
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.asset_container_id == container_id
-            ).where(
-                cls.cls_model.asset_owner_id == owner_id
-            ).where(
-                cls.cls_model.user_name == user_name
-            ).where(
-                cls.cls_model.location_flag == location_flag
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.asset_container_id == container_id)
+                .where(cls.cls_model.asset_owner_id == owner_id)
+                .where(cls.cls_model.user_name == user_name)
+            )
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+    @classmethod
+    async def select_by_container_id_owner_id_user_name_location_flag(
+        cls, container_id: int, owner_id: int, user_name: str, location_flag: str
+    ):
+        async with get_postgres_manager().get_session() as session:
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.asset_container_id == container_id)
+                .where(cls.cls_model.asset_owner_id == owner_id)
+                .where(cls.cls_model.user_name == user_name)
+                .where(cls.cls_model.location_flag == location_flag)
             )
             result = await session.execute(stmt)
             return result.scalars().first()
@@ -904,8 +1093,11 @@ class EveIndustryPlanConfigFlowConfigDBUtils(_CommonUtils):
 
     @classmethod
     async def select_all_by_user_name(cls, user_name: str):
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.user_name == user_name)
+            .order_by(cls.cls_model.id)
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
@@ -920,7 +1112,9 @@ class EveIndustryPlanConfigFlowConfigDBUtils(_CommonUtils):
             return result.scalars().first()
 
     @classmethod
-    async def select_by_user_name_and_config_type_and_config_value(cls, user_name: str, config_type: str, config_value: dict):
+    async def select_by_user_name_and_config_type_and_config_value(
+        cls, user_name: str, config_type: str, config_value: dict
+    ):
         """查询是否存在相同的配置
 
         Args:
@@ -935,7 +1129,7 @@ class EveIndustryPlanConfigFlowConfigDBUtils(_CommonUtils):
             stmt = select(cls.cls_model).where(
                 cls.cls_model.user_name == user_name,
                 cls.cls_model.config_type == config_type,
-                cls.cls_model.config_value == config_value
+                cls.cls_model.config_value == config_value,
             )
             result = await session.execute(stmt)
             return result.scalars().first()
@@ -945,34 +1139,50 @@ class EveIndustryPlanConfigFlowDBUtils(_CommonUtils):
     cls_model = model.EveIndustryPlanConfigFlow
 
     @classmethod
-    async def select_configflow_by_user_name_and_plan_name(cls, user_name: str, plan_name: str, pdm=None):
+    async def select_configflow_by_user_name_and_plan_name(
+        cls, user_name: str, plan_name: str, pdm=None
+    ):
         if pdm:
             m = pdm
         else:
             m = get_postgres_manager()
         async with m.get_session() as session:
-            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-                cls.cls_model.plan_name == plan_name)
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.user_name == user_name)
+                .where(cls.cls_model.plan_name == plan_name)
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
     @classmethod
     async def select_all_by_user_name(cls, user_name: str):
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.user_name == user_name)
+            .order_by(cls.cls_model.id)
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
-    async def delete_by_user_name_and_plan_name(cls, user_name: str, plan_name: str, session=None):
+    async def delete_by_user_name_and_plan_name(
+        cls, user_name: str, plan_name: str, session=None
+    ):
         if not session:
             async with get_postgres_manager().get_session() as session:
-                stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-                    cls.cls_model.plan_name == plan_name)
+                stmt = (
+                    delete(cls.cls_model)
+                    .where(cls.cls_model.user_name == user_name)
+                    .where(cls.cls_model.plan_name == plan_name)
+                )
                 await session.execute(stmt)
                 await session.commit()
         else:
-            stmt = delete(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-                cls.cls_model.plan_name == plan_name)
+            stmt = (
+                delete(cls.cls_model)
+                .where(cls.cls_model.user_name == user_name)
+                .where(cls.cls_model.plan_name == plan_name)
+            )
             await session.execute(stmt)
 
 
@@ -981,15 +1191,23 @@ class EveIndustrryPlanConfigFlowPresetDBUtils(_CommonUtils):
 
     @classmethod
     async def select_all_by_user_name(cls, user_name: str):
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name).order_by(cls.cls_model.id)
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.user_name == user_name)
+            .order_by(cls.cls_model.id)
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
-    async def select_by_user_name_and_preset_name(cls, user_name: str, preset_name: str):
+    async def select_by_user_name_and_preset_name(
+        cls, user_name: str, preset_name: str
+    ):
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name).where(
-                cls.cls_model.preset_name == preset_name)
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.user_name == user_name)
+                .where(cls.cls_model.preset_name == preset_name)
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -1010,32 +1228,36 @@ class InvitCodeDBUtils(_CommonUtils):
         if not session:
             async with get_postgres_manager().get_session() as session:
                 stmt = select(cls.cls_model).where(
-                    cls.cls_model.invite_code == invite_code)
+                    cls.cls_model.invite_code == invite_code
+                )
                 result = await session.execute(stmt)
                 return result.scalars().first()
         else:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.invite_code == invite_code)
+            stmt = select(cls.cls_model).where(cls.cls_model.invite_code == invite_code)
             result = await session.execute(stmt)
             return result.scalars().first()
 
     @classmethod
     async def select_invite_codes_by_creator(cls, creator_user_name: str):
         """根据创建者查询邀请码列表"""
-        stmt = select(cls.cls_model).where(cls.cls_model.creator_user_name ==
-                                           creator_user_name).order_by(cls.cls_model.create_date.desc())
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.creator_user_name == creator_user_name)
+            .order_by(cls.cls_model.create_date.desc())
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def select_all_invite_codes(cls, only_available: bool = False):
         """查询所有邀请码，支持筛选未使用完的"""
         if only_available:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.used_count_current < cls.cls_model.used_count_max
-            ).order_by(cls.cls_model.create_date.desc())
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.used_count_current < cls.cls_model.used_count_max)
+                .order_by(cls.cls_model.create_date.desc())
+            )
         else:
-            stmt = select(cls.cls_model).order_by(
-                cls.cls_model.create_date.desc())
+            stmt = select(cls.cls_model).order_by(cls.cls_model.create_date.desc())
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
 
@@ -1045,15 +1267,21 @@ class InviteCodeUsedHistoryDBUtils(_CommonUtils):
     @classmethod
     async def select_history_by_invite_code(cls, invite_code: str):
         """根据邀请码查询使用记录"""
-        stmt = select(cls.cls_model).where(cls.cls_model.invite_code ==
-                                           invite_code).order_by(cls.cls_model.used_date.desc())
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.invite_code == invite_code)
+            .order_by(cls.cls_model.used_date.desc())
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
     async def select_history_by_user(cls, used_user_name: str):
         """根据用户查询使用记录"""
-        stmt = select(cls.cls_model).where(cls.cls_model.used_user_name ==
-                                           used_user_name).order_by(cls.cls_model.used_date.desc())
+        stmt = (
+            select(cls.cls_model)
+            .where(cls.cls_model.used_user_name == used_user_name)
+            .order_by(cls.cls_model.used_date.desc())
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
 
@@ -1063,8 +1291,7 @@ class VipStateDBUtils(_CommonUtils):
     @classmethod
     async def select_vip_state_by_user_name(cls, user_name: str):
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.user_name == user_name)
+            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -1074,7 +1301,9 @@ class VipStateDBUtils(_CommonUtils):
         return await cls.select_all()
 
     @classmethod
-    async def update_vip_state(cls, user_name: str, vip_level: str = None, vip_end_date=None):
+    async def update_vip_state(
+        cls, user_name: str, vip_level: str = None, vip_end_date=None
+    ):
         """更新指定用户的VIP状态
 
         :param user_name: 用户名
@@ -1083,8 +1312,7 @@ class VipStateDBUtils(_CommonUtils):
         """
         async with get_postgres_manager().get_session() as session:
             # 先查询现有记录
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.user_name == user_name)
+            stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
             result = await session.execute(stmt)
             vip_state = result.scalars().first()
 
@@ -1098,9 +1326,7 @@ class VipStateDBUtils(_CommonUtils):
             else:
                 # 创建新记录
                 vip_state = cls.cls_model(
-                    user_name=user_name,
-                    vip_level=vip_level,
-                    vip_end_date=vip_end_date
+                    user_name=user_name, vip_level=vip_level, vip_end_date=vip_end_date
                 )
                 session.add(vip_state)
 
@@ -1120,8 +1346,7 @@ class EveAssetViewDBUtils(_CommonUtils):
 
     @classmethod
     async def select_by_user_name(cls, user_name: str):
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name)
+        stmt = select(cls.cls_model).where(cls.cls_model.user_name == user_name)
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
 
@@ -1144,9 +1369,11 @@ class EveIndustryCalculateHistoryDBUtils(_CommonUtils):
             start_time = end_time - timedelta(days=days)
 
             # 查询过去N天的所有记录
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.calculate_start_time >= start_time
-            ).order_by(cls.cls_model.calculate_start_time)
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.calculate_start_time >= start_time)
+                .order_by(cls.cls_model.calculate_start_time)
+            )
             result = await session.execute(stmt)
             records = result.scalars().all()
 
@@ -1158,14 +1385,14 @@ class EveIndustryCalculateHistoryDBUtils(_CommonUtils):
 
                 # 按小时分组（格式：YYYY-MM-DD HH:00:00）
                 hour_key = record.calculate_start_time.replace(
-                    minute=0, second=0, microsecond=0)
-                hour_str = hour_key.strftime('%Y-%m-%d %H:00:00')
+                    minute=0, second=0, microsecond=0
+                )
+                hour_str = hour_key.strftime("%Y-%m-%d %H:00:00")
 
                 if hour_str not in hourly_stats:
-                    hourly_stats[hour_str] = {
-                        'total': 0, 'success': 0, 'failed': 0}
+                    hourly_stats[hour_str] = {"total": 0, "success": 0, "failed": 0}
 
-                hourly_stats[hour_str]['total'] += 1
+                hourly_stats[hour_str]["total"] += 1
 
                 # 判断成功/失败：通过 calculate_result 字段判断
                 # 如果 calculate_result 包含错误信息或为 None，则视为失败
@@ -1174,11 +1401,17 @@ class EveIndustryCalculateHistoryDBUtils(_CommonUtils):
                     is_success = False
                 elif isinstance(record.calculate_result, dict):
                     # 检查是否有错误相关的键
-                    error_keys = ['error', 'exception', 'failed', 'failure']
-                    if any(key in str(record.calculate_result).lower() for key in error_keys):
+                    error_keys = ["error", "exception", "failed", "failure"]
+                    if any(
+                        key in str(record.calculate_result).lower()
+                        for key in error_keys
+                    ):
                         is_success = False
                 elif isinstance(record.calculate_result, str):
-                    if 'error' in record.calculate_result.lower() or 'exception' in record.calculate_result.lower():
+                    if (
+                        "error" in record.calculate_result.lower()
+                        or "exception" in record.calculate_result.lower()
+                    ):
                         is_success = False
 
                 # 如果 calculate_time 为空，说明计算未完成，视为失败
@@ -1186,17 +1419,17 @@ class EveIndustryCalculateHistoryDBUtils(_CommonUtils):
                     is_success = False
 
                 if is_success:
-                    hourly_stats[hour_str]['success'] += 1
+                    hourly_stats[hour_str]["success"] += 1
                 else:
-                    hourly_stats[hour_str]['failed'] += 1
+                    hourly_stats[hour_str]["failed"] += 1
 
             # 转换为列表并排序
             result_list = [
                 {
-                    'hour': hour,
-                    'total': stats['total'],
-                    'success': stats['success'],
-                    'failed': stats['failed']
+                    "hour": hour,
+                    "total": stats["total"],
+                    "success": stats["success"],
+                    "failed": stats["failed"],
                 }
                 for hour, stats in sorted(hourly_stats.items())
             ]
@@ -1224,7 +1457,7 @@ class EveIndustryCalculateHistoryDBUtils(_CommonUtils):
             stmt = select(cls.cls_model).where(
                 cls.cls_model.calculate_start_time.isnot(None),
                 cls.cls_model.calculate_time.isnot(None),
-                cls.cls_model.product_count.isnot(None)
+                cls.cls_model.product_count.isnot(None),
             )
             result = await session.execute(stmt)
             records = result.scalars().all()
@@ -1242,8 +1475,9 @@ class EveIndustryCalculateHistoryDBUtils(_CommonUtils):
                 if record.calculate_time is None or record.calculate_start_time is None:
                     continue
 
-                duration = (record.calculate_time -
-                            record.calculate_start_time).total_seconds()
+                duration = (
+                    record.calculate_time - record.calculate_start_time
+                ).total_seconds()
 
                 # 只处理有效的持续时间（大于0）
                 if duration < 0:
@@ -1260,13 +1494,158 @@ class EveIndustryCalculateHistoryDBUtils(_CommonUtils):
             for product_count in sorted(groups.keys()):
                 durations = groups[product_count]
                 if durations and len(durations) > 0:
-                    result_list.append({
-                        'product_count': product_count,
-                        'min_duration': float(min(durations)),
-                        'max_duration': float(max(durations)),
-                        'avg_duration': float(sum(durations) / len(durations)),
-                        'count': len(durations)
-                    })
+                    result_list.append(
+                        {
+                            "product_count": product_count,
+                            "min_duration": float(min(durations)),
+                            "max_duration": float(max(durations)),
+                            "avg_duration": float(sum(durations) / len(durations)),
+                            "count": len(durations),
+                        }
+                    )
+
+            return result_list
+
+    @classmethod
+    async def get_user_frequency_statistics(cls, days: int = 30, limit: int = 100):
+        """获取用户使用频率统计（高频用户排行）
+
+        Args:
+            days: 查询过去多少天的数据，默认30天
+            limit: 返回的用户数量上限，默认100
+
+        Returns:
+            list: 用户频率统计列表，按使用次数降序排列
+                格式为 [{'user_name': 'user1', 'total_count': 50, 'success_count': 45, 'failed_count': 5}, ...]
+        """
+        async with get_postgres_manager().get_session() as session:
+            # 计算起始时间
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=days)
+
+            # 查询过去N天的所有记录
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.calculate_start_time >= start_time
+            )
+            result = await session.execute(stmt)
+            records = result.scalars().all()
+
+            # 按用户分组统计
+            user_stats = {}
+            for record in records:
+                if not record.user_name:
+                    continue
+
+                user_name = record.user_name
+                if user_name not in user_stats:
+                    user_stats[user_name] = {
+                        "user_name": user_name,
+                        "total_count": 0,
+                        "success_count": 0,
+                        "failed_count": 0,
+                    }
+
+                user_stats[user_name]["total_count"] += 1
+
+                # 判断成功/失败
+                is_success = True
+                if record.calculate_result is None:
+                    is_success = False
+                elif isinstance(record.calculate_result, dict):
+                    error_keys = ["error", "exception", "failed", "failure"]
+                    if any(
+                        key in str(record.calculate_result).lower()
+                        for key in error_keys
+                    ):
+                        is_success = False
+                elif isinstance(record.calculate_result, str):
+                    if (
+                        "error" in record.calculate_result.lower()
+                        or "exception" in record.calculate_result.lower()
+                    ):
+                        is_success = False
+
+                if record.calculate_time is None:
+                    is_success = False
+
+                if is_success:
+                    user_stats[user_name]["success_count"] += 1
+                else:
+                    user_stats[user_name]["failed_count"] += 1
+
+            # 转换为列表并按使用次数降序排列
+            result_list = list(user_stats.values())
+            result_list.sort(key=lambda x: x["total_count"], reverse=True)
+
+            # 限制返回数量
+            return result_list[:limit]
+
+    @classmethod
+    async def get_user_calculate_history_by_date_range(
+        cls, user_name: str, start_date: datetime, end_date: datetime
+    ):
+        """获取特定用户在特定时间范围的计算历史
+
+        Args:
+            user_name: 用户名
+            start_date: 起始时间
+            end_date: 结束时间
+
+        Returns:
+            list: 计算历史记录列表
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = (
+                select(cls.cls_model)
+                .where(
+                    cls.cls_model.user_name == user_name,
+                    cls.cls_model.calculate_start_time >= start_date,
+                    cls.cls_model.calculate_start_time <= end_date,
+                )
+                .order_by(cls.cls_model.calculate_start_time.desc())
+            )
+            result = await session.execute(stmt)
+            records = result.scalars().all()
+
+            # 转换为字典列表
+            result_list = []
+            for record in records:
+                # 判断成功/失败
+                is_success = True
+                if record.calculate_result is None:
+                    is_success = False
+                elif isinstance(record.calculate_result, dict):
+                    error_keys = ["error", "exception", "failed", "failure"]
+                    if any(
+                        key in str(record.calculate_result).lower()
+                        for key in error_keys
+                    ):
+                        is_success = False
+                elif isinstance(record.calculate_result, str):
+                    if (
+                        "error" in record.calculate_result.lower()
+                        or "exception" in record.calculate_result.lower()
+                    ):
+                        is_success = False
+
+                if record.calculate_time is None:
+                    is_success = False
+
+                result_list.append(
+                    {
+                        "id": record.id,
+                        "user_name": record.user_name,
+                        "plan_name": record.plan_name,
+                        "product_count": record.product_count,
+                        "calculate_start_time": record.calculate_start_time.isoformat()
+                        if record.calculate_start_time
+                        else None,
+                        "calculate_time": record.calculate_time.isoformat()
+                        if record.calculate_time
+                        else None,
+                        "is_success": is_success,
+                    }
+                )
 
             return result_list
 
@@ -1278,6 +1657,7 @@ class EveMarketRegionHistoryStatisticDBUtils(_CommonUtils):
     使用 Postgre 主库中的 `EveMarketRegionHistoryStatistic` 模型，
     提供基于 (type_id, region_id, date) 唯一键的批量插入/更新能力。
     """
+
     cls_model = model.EveMarketRegionHistoryStatistic
 
     @classmethod
@@ -1336,10 +1716,15 @@ class EveMarketRegionHistoryStatisticDBUtils(_CommonUtils):
         :return: 最新记录，如果没有则返回 None
         """
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.type_id == type_id,
-                cls.cls_model.region_id == region_id,
-            ).order_by(cls.cls_model.date.desc()).limit(1)
+            stmt = (
+                select(cls.cls_model)
+                .where(
+                    cls.cls_model.type_id == type_id,
+                    cls.cls_model.region_id == region_id,
+                )
+                .order_by(cls.cls_model.date.desc())
+                .limit(1)
+            )
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
@@ -1360,16 +1745,12 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
         删除指定 region_id 的所有订单记录。
         """
         async with get_postgres_manager().get_session() as session:
-            stmt = delete(cls.cls_model).where(
-                cls.cls_model.region_id == region_id)
+            stmt = delete(cls.cls_model).where(cls.cls_model.region_id == region_id)
             await session.execute(stmt)
 
     @classmethod
     async def get_sell_orders_by_type_ids_grouped_by_price(
-        cls,
-        type_ids: list[int],
-        location_id: int,
-        region_id: int
+        cls, type_ids: list[int], location_id: int, region_id: int
     ) -> dict[int, list[list[float, int]]]:
         """
         查询指定类型ID列表的卖单，按价格分组汇总数量。
@@ -1383,21 +1764,20 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
             return {}
 
         async with get_postgres_manager().get_session() as session:
-            stmt = select(
-                cls.cls_model.type_id,
-                cls.cls_model.price,
-                func.sum(cls.cls_model.volume_remain).label('total_quantity')
-            ).where(
-                cls.cls_model.type_id.in_(type_ids),
-                cls.cls_model.location_id == location_id,
-                cls.cls_model.is_buy_order == False,
-                cls.cls_model.region_id == region_id
-            ).group_by(
-                cls.cls_model.type_id,
-                cls.cls_model.price
-            ).order_by(
-                cls.cls_model.type_id,
-                cls.cls_model.price
+            stmt = (
+                select(
+                    cls.cls_model.type_id,
+                    cls.cls_model.price,
+                    func.sum(cls.cls_model.volume_remain).label("total_quantity"),
+                )
+                .where(
+                    cls.cls_model.type_id.in_(type_ids),
+                    cls.cls_model.location_id == location_id,
+                    cls.cls_model.is_buy_order == False,
+                    cls.cls_model.region_id == region_id,
+                )
+                .group_by(cls.cls_model.type_id, cls.cls_model.price)
+                .order_by(cls.cls_model.type_id, cls.cls_model.price)
             )
 
             result = await session.execute(stmt)
@@ -1423,11 +1803,7 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
 
     @classmethod
     async def save_orders_via_temp_table(
-        cls,
-        region_id: int,
-        orders_generator,
-        total_count: int,
-        progress_callback=None
+        cls, region_id: int, orders_generator, total_count: int, progress_callback=None
     ):
         """
         使用临时表方案保存订单数据，避免多次append操作。
@@ -1438,6 +1814,7 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
         :param progress_callback: 进度回调函数，接收已处理数量作为参数
         """
         import uuid
+
         temp_table_name = f"eve_market_region_orders_tmp_{uuid.uuid4().hex[:8]}"
 
         try:
@@ -1446,12 +1823,15 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
                 columns_def = []
                 for col in cls.cls_model.__table__.columns:
                     # 跳过id字段，因为原表的id是自增的
-                    if col.name == 'id':
+                    if col.name == "id":
                         continue
                     col_def = f'"{col.name}" {cls._get_postgresql_type(col.type)}'
                     # 保留NOT NULL约束（除了created_at/updated_at）
-                    if not col.nullable and col.name not in ('created_at', 'updated_at'):
-                        col_def += ' NOT NULL'
+                    if not col.nullable and col.name not in (
+                        "created_at",
+                        "updated_at",
+                    ):
+                        col_def += " NOT NULL"
                     columns_def.append(col_def)
 
                 create_sql = text(f'''
@@ -1467,8 +1847,11 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
 
                 # 构建列名列表（排除id，因为临时表不需要自增id）
                 column_names = [
-                    col.name for col in cls.cls_model.__table__.columns if col.name != 'id']
-                cols_csv = ', '.join([f'"{c}"' for c in column_names])
+                    col.name
+                    for col in cls.cls_model.__table__.columns
+                    if col.name != "id"
+                ]
+                cols_csv = ", ".join([f'"{c}"' for c in column_names])
 
                 async def _insert_batch(batch: list):
                     if not batch:
@@ -1489,7 +1872,7 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
                             param_index += 1
                         values_parts.append(f"({', '.join(row_values)})")
 
-                    values_clause = ', '.join(values_parts)
+                    values_clause = ", ".join(values_parts)
                     insert_sql = text(f'''
                         INSERT INTO "{temp_table_name}" ({cols_csv})
                         VALUES {values_clause}
@@ -1512,16 +1895,19 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
                         await progress_callback(len(batch))
 
                 # 3. 删除原表中该region的数据
-                delete_sql = text(f'''
+                delete_sql = text(f"""
                     DELETE FROM {cls.cls_model.__tablename__}
                     WHERE region_id = :region_id
-                ''')
+                """)
                 await conn.execute(delete_sql, {"region_id": region_id})
 
                 # 4. 将临时表数据复制到原表
                 column_names = [
-                    col.name for col in cls.cls_model.__table__.columns if col.name != 'id']
-                cols_csv = ', '.join([f'"{c}"' for c in column_names])
+                    col.name
+                    for col in cls.cls_model.__table__.columns
+                    if col.name != "id"
+                ]
+                cols_csv = ", ".join([f'"{c}"' for c in column_names])
                 copy_sql = text(f'''
                     INSERT INTO {cls.cls_model.__tablename__} ({cols_csv})
                     SELECT {cols_csv} FROM "{temp_table_name}"
@@ -1554,17 +1940,17 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
 
         # 简单的类型映射作为后备方案
         type_mapping = {
-            'Integer': 'INTEGER',
-            'BigInteger': 'BIGINT',
-            'Text': 'TEXT',
-            'String': 'TEXT',
-            'DateTime': 'TIMESTAMP',
-            'Date': 'DATE',
-            'Time': 'TIME',
-            'Float': 'DOUBLE PRECISION',
-            'Numeric': 'NUMERIC',
-            'Boolean': 'BOOLEAN',
-            'LargeBinary': 'BYTEA',
+            "Integer": "INTEGER",
+            "BigInteger": "BIGINT",
+            "Text": "TEXT",
+            "String": "TEXT",
+            "DateTime": "TIMESTAMP",
+            "Date": "DATE",
+            "Time": "TIME",
+            "Float": "DOUBLE PRECISION",
+            "Numeric": "NUMERIC",
+            "Boolean": "BOOLEAN",
+            "LargeBinary": "BYTEA",
         }
 
         # 尝试通过类型名称匹配
@@ -1573,12 +1959,40 @@ class EveMarketRegionOrdersDBUtils(_CommonUtils):
             return type_mapping[type_name]
 
         # 默认返回TEXT
-        return 'TEXT'
+        return "TEXT"
 
 
 class EnterpriseMarketDBUtils(_CommonUtils):
     """企业市场数据库工具类"""
+
     cls_model = model.EnterpriseMarket
+
+    @classmethod
+    async def select_market_id_tag_list_by_user_name(cls, user_name: str):
+        async with get_postgres_manager().get_session() as session:
+            stmt = (
+                select(cls.cls_model.id, cls.cls_model.tag)
+                .where(cls.cls_model.user_name == user_name)
+                .order_by(cls.cls_model.created_at.desc())
+            )
+            result = await session.execute(stmt)
+            return result.all()
+
+    @classmethod
+    async def select_by_user_name_and_market_id(cls, user_name: str, market_id: int):
+        """
+        根据用户与市场ID获取市场记录
+
+        Args:
+            user_name: 用户名
+            market_id: 市场ID
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.user_name == user_name, cls.cls_model.id == market_id
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
 
     @classmethod
     async def collect_all_product_type_ids(cls) -> list[int]:
@@ -1605,7 +2019,9 @@ class EnterpriseMarketDBUtils(_CommonUtils):
                                 type_id_set.add(type_id)
 
             type_id_list = sorted(list(type_id_set))
-            logger.info(f"从自选市场收集到 {len(type_id_list)} 个唯一的 product_type_id")
+            logger.info(
+                f"从自选市场收集到 {len(type_id_list)} 个唯一的 product_type_id"
+            )
             return type_id_list
 
         except Exception as e:
@@ -1615,6 +2031,7 @@ class EnterpriseMarketDBUtils(_CommonUtils):
 
 class EveOverviewHistoryDBUtils(_CommonUtils):
     """Overview历史数据数据库工具类"""
+
     cls_model = model.EveOverviewHistory
 
     @classmethod
@@ -1635,20 +2052,14 @@ class EveOverviewHistoryDBUtils(_CommonUtils):
 
             # 构建插入语句
             stmt = pg_insert(cls.cls_model).values(
-                user_name=user_name,
-                date=date,
-                data=data
+                user_name=user_name, date=date, data=data
             )
 
             # 基于唯一约束 (user_name, date) 进行冲突处理
             # 如果冲突则更新 data 字段
-            index_cols = [
-                cls.cls_model.user_name,
-                cls.cls_model.date
-            ]
+            index_cols = [cls.cls_model.user_name, cls.cls_model.date]
             stmt = stmt.on_conflict_do_update(
-                index_elements=index_cols,
-                set_={'data': stmt.excluded.data}
+                index_elements=index_cols, set_={"data": stmt.excluded.data}
             )
 
             await session.execute(stmt)
@@ -1656,8 +2067,7 @@ class EveOverviewHistoryDBUtils(_CommonUtils):
 
             # 重新查询返回
             stmt = select(cls.cls_model).where(
-                cls.cls_model.user_name == user_name,
-                cls.cls_model.date == date
+                cls.cls_model.user_name == user_name, cls.cls_model.date == date
             )
             result = await session.execute(stmt)
             return result.scalars().first()
@@ -1675,14 +2085,15 @@ class EveOverviewHistoryDBUtils(_CommonUtils):
         """
         async with get_postgres_manager().get_session() as session:
             stmt = select(cls.cls_model).where(
-                cls.cls_model.user_name == user_name,
-                cls.cls_model.date == date
+                cls.cls_model.user_name == user_name, cls.cls_model.date == date
             )
             result = await session.execute(stmt)
             return result.scalars().first()
 
     @classmethod
-    async def get_overview_data_by_date_range(cls, user_name: str, start_date: date, end_date: date):
+    async def get_overview_data_by_date_range(
+        cls, user_name: str, start_date: date, end_date: date
+    ):
         """获取指定日期范围内的overview数据
 
         Args:
@@ -1693,11 +2104,15 @@ class EveOverviewHistoryDBUtils(_CommonUtils):
         Returns:
             历史记录列表，按日期升序排列
         """
-        stmt = select(cls.cls_model).where(
-            cls.cls_model.user_name == user_name,
-            cls.cls_model.date >= start_date,
-            cls.cls_model.date <= end_date
-        ).order_by(cls.cls_model.date.asc())
+        stmt = (
+            select(cls.cls_model)
+            .where(
+                cls.cls_model.user_name == user_name,
+                cls.cls_model.date >= start_date,
+                cls.cls_model.date <= end_date,
+            )
+            .order_by(cls.cls_model.date.asc())
+        )
         return await _AsyncIteratorWrapper.from_stmt(stmt)
 
     @classmethod
@@ -1713,15 +2128,16 @@ class EveOverviewHistoryDBUtils(_CommonUtils):
         """
         async with get_postgres_manager().get_session() as session:
             stmt = select(func.count(cls.cls_model.id)).where(
-                cls.cls_model.user_name == user_name,
-                cls.cls_model.date == date
+                cls.cls_model.user_name == user_name, cls.cls_model.date == date
             )
             result = await session.execute(stmt)
             count = result.scalar()
             return count > 0 if count else False
 
     @classmethod
-    async def get_latest_overview_data_excluding_today(cls, user_name: str, exclude_date: date):
+    async def get_latest_overview_data_excluding_today(
+        cls, user_name: str, exclude_date: date
+    ):
         """获取除指定日期外的最近一次overview历史记录
 
         Args:
@@ -1732,10 +2148,15 @@ class EveOverviewHistoryDBUtils(_CommonUtils):
             历史记录对象或None（如果没有找到）
         """
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.user_name == user_name,
-                cls.cls_model.date < exclude_date
-            ).order_by(cls.cls_model.date.desc()).limit(1)
+            stmt = (
+                select(cls.cls_model)
+                .where(
+                    cls.cls_model.user_name == user_name,
+                    cls.cls_model.date < exclude_date,
+                )
+                .order_by(cls.cls_model.date.desc())
+                .limit(1)
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -1750,9 +2171,12 @@ class EveOverviewHistoryDBUtils(_CommonUtils):
             历史记录对象或None（如果没有找到）
         """
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.user_name == user_name
-            ).order_by(cls.cls_model.date.asc()).limit(1)
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.user_name == user_name)
+                .order_by(cls.cls_model.date.asc())
+                .limit(1)
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -1771,8 +2195,7 @@ class EveOverviewHistoryDBUtils(_CommonUtils):
         async with get_postgres_manager().get_session() as session:
             # 先尝试查询目标日期的精确数据
             stmt = select(cls.cls_model).where(
-                cls.cls_model.user_name == user_name,
-                cls.cls_model.date == target_date
+                cls.cls_model.user_name == user_name, cls.cls_model.date == target_date
             )
             result = await session.execute(stmt)
             record = result.scalars().first()
@@ -1780,21 +2203,28 @@ class EveOverviewHistoryDBUtils(_CommonUtils):
                 return record
 
             # 如果没有精确数据，查询目标日期之前最近的数据
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.user_name == user_name,
-                cls.cls_model.date < target_date
-            ).order_by(cls.cls_model.date.desc()).limit(1)
+            stmt = (
+                select(cls.cls_model)
+                .where(
+                    cls.cls_model.user_name == user_name,
+                    cls.cls_model.date < target_date,
+                )
+                .order_by(cls.cls_model.date.desc())
+                .limit(1)
+            )
             result = await session.execute(stmt)
             return result.scalars().first()
 
 
 class EveCorporationContractDBUtils(_CommonUtils):
     """公司合同数据库工具类"""
+
     cls_model = model.EveCorporationContract
 
 
 class EnterpriseMarketCostHistoryDBUtils(_CommonUtils):
     """企业版市场成本历史缓存数据库工具类"""
+
     cls_model = model.EnterpriseMarketCostHistory
 
     @classmethod
@@ -1808,9 +2238,7 @@ class EnterpriseMarketCostHistoryDBUtils(_CommonUtils):
             缓存记录对象，如果不存在则返回 None
         """
         async with get_postgres_manager().get_session() as session:
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.type_id == type_id
-            )
+            stmt = select(cls.cls_model).where(cls.cls_model.type_id == type_id)
             result = await session.execute(stmt)
             return result.scalars().first()
 
@@ -1831,23 +2259,94 @@ class EnterpriseMarketCostHistoryDBUtils(_CommonUtils):
 
             # 构建插入语句
             stmt = pg_insert(cls.cls_model).values(
-                type_id=type_id,
-                history_data=history_data
+                type_id=type_id, history_data=history_data
             )
 
             # 基于主键 type_id 进行冲突处理
             # 如果冲突则更新 history_data 字段
             stmt = stmt.on_conflict_do_update(
                 index_elements=[cls.cls_model.type_id],
-                set_={'history_data': stmt.excluded.history_data}
+                set_={"history_data": stmt.excluded.history_data},
             )
 
             await session.execute(stmt)
             await session.commit()
 
             # 重新查询返回
-            stmt = select(cls.cls_model).where(
-                cls.cls_model.type_id == type_id
+            stmt = select(cls.cls_model).where(cls.cls_model.type_id == type_id)
+            result = await session.execute(stmt)
+            return result.scalars().first()
+
+
+# ============ 工作流分享功能数据库工具类 ============
+
+
+class EveIndustryPlanTaskClaimDBUtils(_CommonUtils):
+    """工作流任务接取记录数据库工具类"""
+
+    cls_model = model.EveIndustryPlanTaskClaim
+
+    @classmethod
+    async def select_by_plan_token(cls, plan_token: str):
+        """根据分享token获取所有接取记录
+
+        Args:
+            plan_token: 分享链接token
+
+        Returns:
+            接取记录列表
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(cls.cls_model.plan_token == plan_token)
+            result = await session.execute(stmt)
+            return result.scalars().all()
+
+    @classmethod
+    async def select_by_plan_token_and_item_key(
+        cls, plan_token: str, workflow_item_key: str
+    ):
+        """根据分享token和工作流项key获取接取记录
+
+        Args:
+            plan_token: 分享链接token
+            workflow_item_key: 工作流项唯一标识
+
+        Returns:
+            接取记录对象，如果不存在则返回 None
+        """
+        async with get_postgres_manager().get_session() as session:
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.plan_token == plan_token)
+                .where(cls.cls_model.workflow_item_key == workflow_item_key)
             )
             result = await session.execute(stmt)
             return result.scalars().first()
+
+    @classmethod
+    async def delete_by_plan_token_and_item_key(
+        cls, plan_token: str, workflow_item_key: str, session=None
+    ):
+        """删除接取记录（取消接取）
+
+        Args:
+            plan_token: 分享链接token
+            workflow_item_key: 工作流项唯一标识
+            session: 可选的数据库会话
+        """
+        if not session:
+            async with get_postgres_manager().get_session() as session:
+                stmt = (
+                    delete(cls.cls_model)
+                    .where(cls.cls_model.plan_token == plan_token)
+                    .where(cls.cls_model.workflow_item_key == workflow_item_key)
+                )
+                await session.execute(stmt)
+                await session.commit()
+        else:
+            stmt = (
+                delete(cls.cls_model)
+                .where(cls.cls_model.plan_token == plan_token)
+                .where(cls.cls_model.workflow_item_key == workflow_item_key)
+            )
+            await session.execute(stmt)

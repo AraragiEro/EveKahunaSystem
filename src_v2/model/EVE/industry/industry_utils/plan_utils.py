@@ -523,10 +523,12 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
                     "type_name": await SdeUtils.get_name_by_id(top_product_type_id, pdm=sdm),
                     "index_id": relation["index_id"],
                     "product_num": op.product_num_dict.get(top_product_type_id, 0),
+                    "products_per_run": await BPM.get_bp_product_quantity_typeid(top_product_type_id, pdm=sdm),
                     "asset_quantity": await op.get_type_assets_quantity(top_product_type_id),
                     "children": [],
                     "_children_dict": {},  # 临时字典，用于按 type_id 合并材料
                 }
+
             # 所有边的eiv_cost汇总到最上层节点
             eiv_cost_dict[top_product_type_id].update({
                 "eiv_cost": eiv_cost_dict[top_product_type_id].get('eiv_cost', 0) + relation['real_eiv_cost_total'],

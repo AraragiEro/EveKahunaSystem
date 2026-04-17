@@ -1,13 +1,27 @@
 <script setup lang="ts">
-import { useRouter, useRoute } from 'vue-router'
-import { ArrowDown, Document } from '@element-plus/icons-vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import {
+  ArrowDown,
+  ChatLineRound,
+  Cpu,
+  Document,
+  House,
+  Monitor,
+  Moon,
+  Opportunity,
+  PieChart,
+  Setting,
+  Sunny,
+  Tickets,
+} from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useHelpStore } from '@/stores/help'
 import { useEdition } from '@/composables/useEdition'
+import { useThemeStore, type ThemeMode } from '@/stores/theme'
 import smallSideBar from './components/sideBar/smallSideBar.vue'
 import HelpDrawer from './components/HelpDrawer.vue'
 import VipPricingDialog from './components/VipPricingDialog.vue'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
 import githubIcon from '@/assets/github-mark.svg'
 import aifadianLogo from '@/assets/横版-白底-透明背景.png'
 
@@ -15,205 +29,200 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const helpStore = useHelpStore()
+const themeStore = useThemeStore()
 const { isEnterprise } = useEdition()
 
-// GitHub 仓库地址
 const GITHUB_REPO_URL = 'https://github.com/AraragiEro/EveKahunaSystem.git'
+const publicPages = ['login', 'landing', 'announcements', 'forbidden', 'characterAuthClose', 'publicStorage', 'publicWorkflow', 'allianceContract']
 
-// 打开 GitHub 仓库
+const donateLink = computed(() => import.meta.env.VITE_DONATE_LINK as string | undefined)
+const showDonateButton = computed(() => !!donateLink.value)
+const isPublicPage = computed(() => publicPages.includes(route.name as string))
+
+const themeIconMap = {
+  light: Sunny,
+  dark: Moon,
+  system: Monitor,
+} as const
+
+const currentThemeIcon = computed(() => themeIconMap[themeStore.mode])
+type MenuIconComponent =
+  | typeof Tickets
+  | typeof House
+  | typeof Cpu
+  | typeof PieChart
+  | typeof Opportunity
+  | typeof ChatLineRound
+  | typeof Setting
+
+const menuItems = computed(() => {
+  const items: { id: number; icon: MenuIconComponent; label: string; active: boolean; route: string }[] = []
+  const currentPath = router.currentRoute.value.path
+  const userRoles = authStore.user?.roles || []
+  let idIndex = 1
+
+  items.push({
+    id: idIndex++,
+    icon: Tickets,
+    label: 'TODO',
+    active: currentPath === '/todolist' || currentPath === '/',
+    route: '/todolist',
+  })
+
+  if (userRoles.includes('vip_alpha') || userRoles.includes('vip_omega')) {
+    items.push({
+      id: idIndex++,
+      icon: House,
+      label: '总览',
+      active: currentPath.startsWith('/home'),
+      route: '/home',
+    })
+  }
+
+  if (userRoles.includes('user')) {
+    items.push({
+      id: idIndex++,
+      icon: Cpu,
+      label: '工业',
+      active: currentPath.startsWith('/industry'),
+      route: '/industry',
+    })
+  }
+
+  if (isEnterprise && userRoles.includes('vip_omega')) {
+    items.push({
+      id: idIndex++,
+      icon: PieChart,
+      label: '市场分析',
+      active: currentPath.startsWith('/market'),
+      route: '/market',
+    })
+  }
+
+  if (userRoles.includes('user')) {
+    items.push({
+      id: idIndex++,
+      icon: Opportunity,
+      label: '实用工具',
+      active: currentPath === '/utils',
+      route: '/utils',
+    })
+    items.push({
+      id: idIndex++,
+      icon: ChatLineRound,
+      label: '留言板',
+      active: currentPath === '/messageBoard',
+      route: '/messageBoard',
+    })
+    items.push({
+      id: idIndex++,
+      icon: Setting,
+      label: '设置',
+      active: currentPath.startsWith('/setting'),
+      route: '/setting',
+    })
+  }
+
+  if (userRoles.includes('admin')) {
+    items.push({
+      id: idIndex++,
+      icon: Cpu,
+      label: '管理台',
+      active: currentPath.startsWith('/admin'),
+      route: '/admin',
+    })
+  }
+
+  return items
+})
+
+const hasAlphaSubscription = computed(() => (authStore.user?.roles || []).includes('vip_alpha'))
+const hasOmegaSubscription = computed(() => (authStore.user?.roles || []).includes('vip_omega'))
+const isNonVip = computed(() => !hasAlphaSubscription.value && !hasOmegaSubscription.value)
+const subscriptionEndDate = computed(() => authStore.user?.vipEndDate || null)
+const currentTime = ref(Date.now())
+const vipDialogVisible = ref(false)
+
 const openGitHub = () => {
   window.open(GITHUB_REPO_URL, '_blank')
 }
 
-// 捐赠链接（从环境变量读取）
-const donateLink = computed(() => import.meta.env.VITE_DONATE_LINK as string | undefined)
-const showDonateButton = computed(() => !!donateLink.value)
-
-// 打开捐赠链接
 const openDonate = () => {
   if (donateLink.value) {
     window.open(donateLink.value, '_blank')
   }
 }
 
-// 全局快捷键支持（F1 打开文档）
-const handleKeyDown = (event: KeyboardEvent) => {
-  // F1 键打开文档
-  if (event.key === 'F1') {
-    event.preventDefault()
-    helpStore.openHelp()
-  }
-  // Ctrl+H 或 Cmd+H 打开文档
-  if ((event.ctrlKey || event.metaKey) && event.key === 'h') {
-    event.preventDefault()
-    helpStore.openHelp()
-  }
-}
-
-
-// 定义公开页面列表（不需要认证和主布局）
-const publicPages = ['login', 'landing', 'forbidden', 'characterAuthClose', 'publicStorage', 'allianceContract']
-const isPublicPage = computed(() => publicPages.includes(route.name as string))
-
-// 主菜单配置 - 使用 computed 响应式地生成菜单项
-const menuItems = computed(() => {
-  const items: { id: number; icon: string; label: string; active: boolean; route: string }[] = []
-  let id_index = 1
-
-  // 首页始终显示
-  items.push({ id: id_index++, icon: 'Tickets', label: 'TODO', active: router.currentRoute.value.path === '/todolist' || router.currentRoute.value.path === '/', route: '/todolist' })
-  if (authStore.user?.roles.includes('vip_alpha') || authStore.user?.roles.includes('vip_omega')) {
-    items.push({ id: id_index++, icon: 'House', label: '总览', active: router.currentRoute.value.path.startsWith('/home'), route: '/home' })
-  }
-
-  // 根据用户角色动态添加菜单项
-  const userRoles = authStore.user?.roles || []
-  if (userRoles.includes('user')) {
-    items.push({ id: id_index++, icon: 'Cpu', label: '工业', active: router.currentRoute.value.path.startsWith('/industry'), route: '/industry' })
-    // items.push({ id: id_index++, icon: 'ShoppingBag', label: '公司商城', active: router.currentRoute.value.path === '/corpShop', route: '/corpShop' })
-  }
-
-  // 企业版专用菜单项
-  if (isEnterprise) {
-    if (userRoles.includes('vip_omega')) {
-      items.push({
-        id: id_index++,
-        icon: 'PieChart',
-        label: '市场分析',
-        active: router.currentRoute.value.path.startsWith('/market'),
-        route: '/market'
-      })
-    }
-  }
-
-  if (userRoles.includes('user')) {
-    items.push({ id: id_index++, icon: 'Opportunity', label: '实用工具', active: router.currentRoute.value.path === '/utils', route: '/utils' })
-    items.push({ id: id_index++, icon: 'ChatLineRound', label: '留言板', active: router.currentRoute.value.path === '/messageBoard', route: '/messageBoard' })
-    items.push({ id: id_index++, icon: 'Setting', label: '设置', active: router.currentRoute.value.path.startsWith('/setting'), route: '/setting' })
-  }
-
-  if (userRoles.includes('admin')) {
-    items.push({ id: id_index++, icon: 'Cpu', label: '管理员', active: router.currentRoute.value.path.startsWith('/admin'), route: '/admin' })
-  }
-
-  return items
-})
-
 const handleLogout = () => {
   authStore.logout()
   router.push('/login')
 }
 
-// 订阅状态计算属性
-const hasAlphaSubscription = computed(() => {
-  const userRoles = authStore.user?.roles || []
-  return userRoles.includes('vip_alpha')
-})
-
-const hasOmegaSubscription = computed(() => {
-  const userRoles = authStore.user?.roles || []
-  return userRoles.includes('vip_omega')
-})
-
-// 判断是否为非VIP用户
-const isNonVip = computed(() => {
-  return !hasAlphaSubscription.value && !hasOmegaSubscription.value
-})
-
-// VIP弹窗控制
-const vipDialogVisible = ref(false)
-
-// 打开VIP弹窗
-const openVipDialog = () => {
-  vipDialogVisible.value = true
-}
-
-// 当前时间，用于定时更新剩余时间显示
-const currentTime = ref(Date.now())
-
-// 获取订阅有效期
-const subscriptionEndDate = computed(() => {
-  return authStore.user?.vipEndDate || null
-})
-
-// 检查是否过期
 const isExpired = (endDateStr: string | null | undefined): boolean => {
   if (!endDateStr) return true
-
-  try {
-    const endDate = new Date(endDateStr)
-    const now = new Date(currentTime.value)
-    return endDate.getTime() <= now.getTime()
-  } catch {
-    return true
-  }
+  const endDate = new Date(endDateStr)
+  return endDate.getTime() <= currentTime.value
 }
 
-// 计算剩余时间文本
 const getRemainingTimeText = (endDateStr: string | null | undefined): string => {
   if (!endDateStr) return ''
-
-  try {
-    const endDate = new Date(endDateStr)
-    const now = new Date(currentTime.value)
-    const diff = endDate.getTime() - now.getTime()
-
-    if (diff <= 0) {
-      return ''
-    }
-
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-
-    if (days > 0) {
-      return `剩余${days}天${hours}小时`
-    } else if (hours > 0) {
-      return `剩余${hours}小时${minutes}分钟`
-    } else {
-      return `剩余${minutes}分钟`
-    }
-  } catch {
-    return ''
-  }
+  const diff = new Date(endDateStr).getTime() - currentTime.value
+  if (diff <= 0) return ''
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+  if (days > 0) return `剩余 ${days} 天 ${hours} 小时`
+  if (hours > 0) return `剩余 ${hours} 小时 ${minutes} 分钟`
+  return `剩余 ${minutes} 分钟`
 }
 
-// 获取剩余时间标签类型（颜色）
-const getRemainingTimeTagType = (endDateStr: string | null | undefined): string => {
+const getRemainingTimeTagType = (endDateStr: string | null | undefined): 'danger' | 'warning' | 'success' | 'info' => {
   if (!endDateStr) return 'info'
+  const diff = new Date(endDateStr).getTime() - currentTime.value
+  if (diff <= 0) return 'danger'
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+  if (days < 1) return 'danger'
+  if (days < 7) return 'warning'
+  return 'success'
+}
 
-  try {
-    const endDate = new Date(endDateStr)
-    const now = new Date(currentTime.value)
-    const diff = endDate.getTime() - now.getTime()
+const cycleTheme = () => {
+  const next: Record<ThemeMode, ThemeMode> = {
+    light: 'dark',
+    dark: 'system',
+    system: 'light',
+  }
+  themeStore.setMode(next[themeStore.mode])
+}
 
-    if (diff <= 0) {
-      return 'danger'
-    }
+const setThemeMode = (mode: ThemeMode) => {
+  themeStore.setMode(mode)
+}
 
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+const themeModeLabel = computed(() => {
+  if (themeStore.mode === 'light') return '浅色'
+  if (themeStore.mode === 'dark') return '深色'
+  return '跟随系统'
+})
 
-    if (days < 1) {
-      return 'danger' // 少于1天显示危险色
-    } else if (days < 7) {
-      return 'warning' // 少于7天显示警告色
-    } else {
-      return 'success' // 7天以上显示成功色
-    }
-  } catch {
-    return 'info'
+const handleKeyDown = (event: KeyboardEvent) => {
+  if (event.key === 'F1') {
+    event.preventDefault()
+    helpStore.openHelp()
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'h') {
+    event.preventDefault()
+    helpStore.openHelp()
   }
 }
 
-// 定时更新当前时间（每分钟更新一次）
 let timeUpdateInterval: number | null = null
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeyDown)
-  // 每分钟更新一次当前时间
   timeUpdateInterval = window.setInterval(() => {
     currentTime.value = Date.now()
-  }, 60000) // 60000ms = 1分钟
+  }, 60000)
 })
 
 onUnmounted(() => {
@@ -226,83 +235,74 @@ onUnmounted(() => {
 
 <template>
   <div class="kahuna-container">
-    <!-- 公开页面（登录页、403页面等）不显示主布局 -->
-    <router-view v-if="isPublicPage" />
+    <div v-if="isPublicPage" class="public-page-scroll">
+      <router-view />
+    </div>
 
-    <!-- 主应用布局 - 确保用户信息已加载 -->
-    <el-container v-else-if="authStore.isAuthenticated">
-      <!-- 左侧窄侧边菜单 -->
+    <el-container v-else-if="authStore.isAuthenticated" class="app-shell">
       <smallSideBar :menu-items="menuItems" />
 
-      <!-- 主内容区域 -->
       <el-container class="main-container">
         <el-header class="main-header">
           <div class="header-content">
             <div class="header-title">
               <h2>Kahuna-System V1.5.1</h2>
               <el-tag :type="isEnterprise ? 'success' : 'info'" size="small" class="edition-tag">
-                {{ isEnterprise ? '紫竹梅特供版' : '社区版' }}
+                {{ isEnterprise ? '企业版' : '社区版' }}
               </el-tag>
-              <el-tag v-if="hasAlphaSubscription && !hasOmegaSubscription" type="warning" size="small"
-                class="edition-tag">
-                Alpha订阅
+              <el-tag v-if="hasAlphaSubscription && !hasOmegaSubscription" type="warning" size="small" class="edition-tag">
+                Alpha 订阅
               </el-tag>
               <el-tag
                 v-if="hasAlphaSubscription && !hasOmegaSubscription && subscriptionEndDate && !isExpired(subscriptionEndDate)"
-                :type="getRemainingTimeTagType(subscriptionEndDate)" size="small" class="edition-tag">
+                :type="getRemainingTimeTagType(subscriptionEndDate)"
+                size="small"
+                class="edition-tag"
+              >
                 {{ getRemainingTimeText(subscriptionEndDate) }}
               </el-tag>
               <el-tag v-if="hasOmegaSubscription" type="danger" size="small" class="edition-tag">
-                Omega订阅
+                Omega 订阅
               </el-tag>
-              <el-tag v-if="hasOmegaSubscription && subscriptionEndDate && !isExpired(subscriptionEndDate)"
-                :type="getRemainingTimeTagType(subscriptionEndDate)" size="small" class="edition-tag">
+              <el-tag
+                v-if="hasOmegaSubscription && subscriptionEndDate && !isExpired(subscriptionEndDate)"
+                :type="getRemainingTimeTagType(subscriptionEndDate)"
+                size="small"
+                class="edition-tag"
+              >
                 {{ getRemainingTimeText(subscriptionEndDate) }}
               </el-tag>
-              <el-button
-                v-if="isNonVip"
-                type="primary"
-                size="small"
-                @click="openVipDialog"
-                class="edition-tag get-vip-button"
-              >
-                获取VIP
+              <el-button v-if="isNonVip" type="primary" size="small" @click="vipDialogVisible = true" class="edition-tag get-vip-button">
+                获取 VIP
               </el-button>
             </div>
 
             <div class="header-actions">
+              <el-button @click="cycleTheme" class="header-action-btn" :title="`切换主题（当前：${themeModeLabel}）`">
+                <el-icon><component :is="currentThemeIcon" /></el-icon>
+                <span class="btn-label">{{ themeModeLabel }}</span>
+              </el-button>
 
-              <!-- 捐赠按钮 -->
-              <el-button v-if="showDonateButton" @click="openDonate" title="支持作者"
-                class="header-action-btn donate-button">
+              <el-button v-if="showDonateButton" @click="openDonate" title="支持作者" class="header-action-btn donate-button">
                 <img :src="aifadianLogo" alt="爱发电" class="donate-icon" />
               </el-button>
 
-              <!-- GitHub 按钮 -->
               <el-button @click="openGitHub" title="打开 GitHub 仓库" class="header-action-btn github-btn">
                 <img :src="githubIcon" alt="GitHub" class="github-icon" />
                 <span class="btn-label">仓库</span>
               </el-button>
 
-              <!-- 文档按钮 -->
               <el-button @click="helpStore.openHelp" title="打开使用说明 (F1)" class="header-action-btn">
-                <el-icon>
-                  <Document />
-                </el-icon>
+                <el-icon><Document /></el-icon>
                 <span class="btn-label">指南</span>
               </el-button>
 
-              <!-- 用户信息和退出按钮 -->
               <div class="user-info">
                 <el-dropdown @command="handleLogout">
                   <span class="user-dropdown">
-                    <el-avatar :size="32">
-                      {{ authStore.user?.username?.charAt(0)?.toUpperCase() }}
-                    </el-avatar>
+                    <el-avatar :size="32">{{ authStore.user?.username?.charAt(0)?.toUpperCase() }}</el-avatar>
                     <span class="username">{{ authStore.user?.username }}</span>
-                    <el-icon>
-                      <ArrowDown />
-                    </el-icon>
+                    <el-icon><ArrowDown /></el-icon>
                   </span>
                   <template #dropdown>
                     <el-dropdown-menu>
@@ -316,182 +316,163 @@ onUnmounted(() => {
         </el-header>
 
         <el-main class="main-content">
-          <div class="main-content-inner">
+          <div class="main-scroll">
             <router-view />
           </div>
         </el-main>
 
         <el-footer class="main-footer">
-          <span>© 2025 Kahuna Kahuna-System. 紫竹梅重工.</span>
+          <span>© 2026 Kahuna System</span>
         </el-footer>
       </el-container>
     </el-container>
 
-    <!-- 全局文档 Drawer -->
     <HelpDrawer />
-
-    <!-- VIP方案弹窗 -->
     <VipPricingDialog v-model="vipDialogVisible" />
+
+    <div class="global-theme-switch">
+      <el-dropdown trigger="click" @command="setThemeMode">
+        <el-button circle class="theme-fab" :title="`主题：${themeModeLabel}`">
+          <el-icon><component :is="currentThemeIcon" /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="light">浅色模式</el-dropdown-item>
+            <el-dropdown-item command="dark">深色模式</el-dropdown-item>
+            <el-dropdown-item command="system">跟随系统</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.kahuna-container,
+.app-shell {
+  height: 100%;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.public-page-scroll {
+  height: 100%;
+  min-height: 100dvh;
+  overflow: auto;
+}
+
 .main-container {
   margin-left: 60px;
-  transition: margin-left 0.3s ease;
-  min-height: 98vh;
-  height: 100%;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: transparent;
 }
 
-.kahuna-container {
-  height: 100%;
-  background-color: #f5f7fa;
-  overflow: hidden;
-}
-
-/* 主内容区域样式 */
 .main-header {
-  background: white;
-  border-bottom: 1px solid #e1e8ed;
-  padding: 0 24px;
-  display: flex;
-  align-items: center;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  border-top-left-radius: 12px;
-  border-top-right-radius: 12px;
-  flex-shrink: 0;
-  height: 64px;
+  height: auto;
+  min-height: 64px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--k-color-border);
+  background: color-mix(in srgb, var(--k-color-surface) 92%, transparent);
+  backdrop-filter: blur(10px);
 }
 
 .header-content {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  width: 100%;
+  gap: 12px;
 }
 
 .header-title {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.header-content h2 {
+.header-title h2 {
   margin: 0;
-  color: #2c3e50;
-  font-weight: 600;
+  color: var(--k-color-text);
   font-size: 20px;
+  font-weight: 700;
 }
 
 .edition-tag {
-  font-size: 12px;
-  font-weight: 500;
-  padding: 4px 10px;
-  border-radius: 4px;
+  border-radius: var(--k-radius-sm);
+  border-color: var(--k-color-border);
+}
+
+.header-title :deep(.edition-tag) {
+  background: var(--k-color-surface-soft) !important;
+  color: var(--k-color-text-secondary) !important;
+  border-color: var(--k-color-border) !important;
+}
+
+.header-title :deep(.edition-tag.el-tag--success) {
+  background: color-mix(in srgb, var(--k-color-success) 16%, var(--k-color-surface-soft)) !important;
+  color: var(--k-color-success) !important;
+}
+
+.header-title :deep(.edition-tag.el-tag--warning) {
+  background: color-mix(in srgb, var(--k-color-warning) 16%, var(--k-color-surface-soft)) !important;
+  color: var(--k-color-warning) !important;
+}
+
+.header-title :deep(.edition-tag.el-tag--danger) {
+  background: color-mix(in srgb, var(--k-color-danger) 16%, var(--k-color-surface-soft)) !important;
+  color: var(--k-color-danger) !important;
+}
+
+.header-title :deep(.edition-tag.el-tag--info) {
+  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
+  color: var(--k-color-primary) !important;
 }
 
 .get-vip-button {
-  margin-left: 8px;
-  font-size: 12px;
-  padding: 4px 12px;
-  height: auto;
-  line-height: 1.5;
+  margin-left: 4px;
 }
 
 .header-actions {
   display: flex;
-  gap: 12px;
-}
-
-.main-content {
-  flex: 1;
-  padding: 24px;
-  background: #f5f7fa;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.main-content-inner {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-.content-wrapper {
-  background: white;
-  border-radius: 12px;
-  padding: 32px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  height: 100%;
-  overflow: auto;
-}
-
-.content-wrapper h3 {
-  margin: 0 0 16px 0;
-  color: #2c3e50;
-  font-weight: 600;
-}
-
-.content-wrapper p {
-  margin: 0;
-  color: #64748b;
-  line-height: 1.6;
-}
-
-.main-footer {
-  background: white;
-  border-top: 1px solid #e1e8ed;
-  display: flex;
   align-items: center;
-  justify-content: center;
-  color: #64748b;
-  font-size: 14px;
-  height: 60px;
-  flex-shrink: 0;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
-/* 优化 el-main 的默认样式 */
-:deep(.el-main) {
-  padding: 0;
+.header-action-btn {
+  border-radius: var(--k-radius-sm);
+  border-color: var(--k-color-border);
+  color: var(--k-color-text-secondary);
+  background: var(--k-color-surface);
+  box-shadow: var(--k-shadow-sm);
 }
 
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .sidebar {
-    width: 60px !important;
-  }
+.header-action-btn:hover {
+  border-color: color-mix(in srgb, var(--k-color-primary) 40%, var(--k-color-border));
+  color: var(--k-color-text);
+}
 
-  .menu-item {
-    width: 50px;
-    height: 50px;
-  }
+.btn-label {
+  font-size: 13px;
+}
 
-  .main-header {
-    padding: 0 16px;
-    height: 56px;
-  }
+.github-icon {
+  width: 16px;
+  height: 16px;
+}
 
-  .header-content h2 {
-    font-size: 18px;
-  }
-
-  .main-content {
-    padding: 16px;
-  }
-
-  .main-footer {
-    height: 48px;
-    font-size: 12px;
-  }
+.donate-icon {
+  width: auto;
+  height: 24px;
+  display: block;
 }
 
 .user-info {
-  margin-left: 16px;
+  margin-left: 6px;
 }
 
 .user-dropdown {
@@ -500,104 +481,73 @@ onUnmounted(() => {
   gap: 8px;
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 6px;
-  transition: background-color 0.2s;
+  border-radius: var(--k-radius-sm);
 }
 
 .user-dropdown:hover {
-  background-color: #f1f5f9;
+  background: var(--k-color-surface-soft);
 }
 
 .username {
-  color: #64748b;
-  font-size: 14px;
-}
-
-.header-action-btn {
-  border: 1px solid #e1e8ed;
-  background: #ffffff;
-  color: #64748b;
-  transition: all 0.2s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  border-radius: 8px;
-  padding: 8px 16px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-}
-
-.header-action-btn:hover {
-  background-color: #f8fafc;
-  border-color: #cbd5e1;
-  color: #2c3e50;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  transform: translateY(-1px);
-}
-
-.header-action-btn:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.github-btn {
-  padding: 8px 16px;
-}
-
-.github-icon {
-  width: 18px;
-  height: 18px;
-  display: block;
-  opacity: 0.8;
-  transition: opacity 0.2s;
-  flex-shrink: 0;
-}
-
-.github-btn:hover .github-icon {
-  opacity: 1;
-}
-
-.btn-label {
-  font-size: 14px;
-  font-weight: 500;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--k-color-text-secondary);
 }
 
-.donate-icon {
-  height: 50px;
-  width: auto;
-  object-fit: contain;
-  display: block;
+.main-content {
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.main-scroll {
+  height: 100%;
+  overflow: auto;
+  border-radius: var(--k-radius-lg);
+}
+
+.main-footer {
+  height: 42px;
   flex-shrink: 0;
+  border-top: 1px solid var(--k-color-border);
+  color: var(--k-color-text-secondary);
+  background: color-mix(in srgb, var(--k-color-surface) 96%, transparent);
 }
 
-.header-action-btn :deep(.el-icon) {
-  font-size: 18px;
-  flex-shrink: 0;
+.global-theme-switch {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 3000;
 }
 
-/* 优化主内容区域的滚动条样式 */
-.main-content-inner {
-  scrollbar-width: thin;
-  scrollbar-color: #c1c1c1 #f1f1f1;
+.theme-fab {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--k-color-border);
+  background: var(--k-color-surface);
+  color: var(--k-color-text);
+  box-shadow: var(--k-shadow-md);
 }
 
-.main-content-inner::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
+@media (max-width: 900px) {
+  .main-container {
+    margin-left: 60px;
+  }
 
-.main-content-inner::-webkit-scrollbar-track {
-  background: #f5f7fa;
-  border-radius: 4px;
-}
+  .main-content {
+    padding: 10px;
+  }
 
-.main-content-inner::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 4px;
-}
+  .btn-label {
+    display: none;
+  }
 
-.main-content-inner::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+  .username {
+    display: none;
+  }
 }
 </style>

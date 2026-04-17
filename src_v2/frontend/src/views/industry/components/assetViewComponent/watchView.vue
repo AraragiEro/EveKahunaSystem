@@ -920,4 +920,68 @@ const copyAllPurchaseList = async () => {
         right: 52px;
     }
 }
+
+/* Theme override */
+.watch-view-content,
+.watch-view-container,
+.action-bar,
+.asset-grid,
+.asset-item-card,
+.asset-item-content,
+.progress-container,
+.setting-content {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+.asset-item-card,
+.setting-content {
+    box-shadow: var(--k-shadow-sm) !important;
+}
+
+.asset-item-card:hover {
+    box-shadow: var(--k-shadow-md) !important;
+    background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+}
+
+.asset-avatar {
+    border-color: var(--k-color-border) !important;
+}
+
+.progress-percentage,
+.asset-name-zh {
+    color: var(--k-color-text) !important;
+}
+
+.progress-label,
+.asset-name-en,
+.time-label {
+    color: var(--k-color-text-secondary) !important;
+}
+
+.time-value {
+    color: var(--k-color-primary) !important;
+}
+
+.asset-progress :deep(.el-progress-bar__outer),
+.asset-progress :deep(.el-progress-circle__track) {
+    background: color-mix(in srgb, var(--k-color-surface-strong) 72%, var(--k-color-border)) !important;
+    stroke: color-mix(in srgb, var(--k-color-surface-strong) 72%, var(--k-color-border)) !important;
+}
+
+.watch-view-container :deep(.el-card),
+.watch-view-container :deep(.el-dialog),
+.watch-view-container :deep(.el-dialog__header),
+.watch-view-container :deep(.el-dialog__body),
+.watch-view-container :deep(.el-dialog__footer),
+.watch-view-container :deep(.el-input__wrapper),
+.watch-view-container :deep(.el-input-number .el-input__wrapper),
+.watch-view-container :deep(.el-input-number__decrease),
+.watch-view-container :deep(.el-input-number__increase),
+.watch-view-container :deep(.el-select__wrapper) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
 </style>

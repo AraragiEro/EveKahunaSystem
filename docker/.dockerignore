@@ -1,0 +1,102 @@
+# Git 忽略
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# 虚拟环境
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 日志
+logs/
+*.log
+
+# 数据库
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 下载资源
+download_resource/
+
+# 配置文件（保留示例）
+config.toml
+!config.toml.example
+!docker/config.toml.docker
+
+# 凭证
+credentials/
+*.pem
+*.key
+
+# Docker
+docker/data/
+docker/logs/
+.docker/
+
+# 前端
+node_modules/
+dist/
+.parcel-cache/
+
+# 测试
+tests/
+test/
+*_test.py
+*_tests.py
+
+# 文档
+docs/
+*.md
+!README.md
+
+# 其他
+.github/
+.gitlab-ci.yml
+.travis.yml
+azure-pipelines.yml

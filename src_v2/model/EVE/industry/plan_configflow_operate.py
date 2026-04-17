@@ -984,7 +984,10 @@ class ConfigFlowOperateCenter():
         if type_id in self._type_adjust_price:
             return self._type_adjust_price[type_id]
 
-        type_adjust_price = float(await self.rdm.r.hget(f"market_price_cache:{type_id}", "adjusted_price"))
+        _market_price_cache = await self.rdm.r.hgetall(f"market_price_cache:{type_id}")
+        if not _market_price_cache or "adjusted_price" not in _market_price_cache:
+            return 0.0
+        type_adjust_price = float(_market_price_cache["adjusted_price"])
         self._type_adjust_price[type_id] = type_adjust_price
         return type_adjust_price
 

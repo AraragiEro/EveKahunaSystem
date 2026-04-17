@@ -5,6 +5,7 @@ import type { EChartsOption } from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/http'
 import { handleApiResponse } from '@/utils/apiResponse'
+import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
 
 // 数据接口
 interface HistoryDataItem {
@@ -38,6 +39,7 @@ const useStackedAreaChart = ref(true)  // 使用面积堆叠图开关
 // 图表引用
 const chartRef = ref<HTMLElement>()
 let chartInstance: echarts.ECharts | null = null
+let cleanupThemeWatcher: (() => void) | null = null
 
 // 从本地存储加载"考虑非标记资产"设置
 const loadIncludeUnmarkedFromStorage = (): boolean => {
@@ -206,6 +208,7 @@ const disposeChart = () => {
 
 // 获取图表配置
 const getChartOption = (): EChartsOption => {
+  const c = getChartThemeColors()
   // 处理数据
   const dates: string[] = []
   const walletValues: number[] = []
@@ -253,8 +256,7 @@ const getChartOption = (): EChartsOption => {
   // 保存所有系列的数据数组，用于计算总和
   const allSeriesData = seriesWithAvg.map(config => config.data)
 
-  const series: any[] = seriesWithAvg.map((config, index) => {
-    const isLast = index === seriesWithAvg.length - 1
+  const series: any[] = seriesWithAvg.map((config) => {
     const baseConfig: any = {
       name: config.name,
       type: 'line',
@@ -269,21 +271,6 @@ const getChartOption = (): EChartsOption => {
     if (useStackedAreaChart.value) {
       baseConfig.stack = 'Total'
       baseConfig.areaStyle = {}
-      if (isLast) {
-        baseConfig.label = {
-          show: true,
-          position: 'top',
-          formatter: (params: any) => {
-            // 计算所有系列在当前数据点的总和
-            const dataIndex = params.dataIndex
-            const total = allSeriesData.reduce((sum, seriesData) => {
-              return sum + (seriesData[dataIndex] || 0)
-            }, 0)
-            // 使用 formatNumber 函数进行格式化（千分位分隔）
-            return formatNumber(total)
-          }
-        }
-      }
     } else {
       // 普通折线图，不堆叠，不显示面积
       baseConfig.lineStyle = {
@@ -305,7 +292,7 @@ const getChartOption = (): EChartsOption => {
     ...(includeUnmarkedAssets.value ? unmarkedAssetValues : [])
   ].filter(v => v > 0) // 过滤掉0值
 
-  let useLogScale = false
+  let usePseudoLogScale = false
   let maxValue = 0
   let minValue = 0
 
@@ -328,14 +315,26 @@ const getChartOption = (): EChartsOption => {
       minValue = Math.min(...allValues)
     }
 
-    const ratio = maxValue / minValue
-    // 普通折线图始终使用对数坐标，面积堆叠图在差距超过100倍时使用
-    if (!useStackedAreaChart.value) {
-      useLogScale = true // 普通折线图始终使用对数坐标
-    } else {
-      // 如果最大值和最小值差距超过100倍，使用对数坐标
-      useLogScale = ratio > 30 && minValue > 0
-    }
+    // 伪对数坐标仅用于普通折线图；堆叠图保持线性坐标，避免总和语义失真
+    usePseudoLogScale = !useStackedAreaChart.value
+  }
+
+  // 幂次缩放：比对数更温和，适合 5B~1000B 这类中高倍率区间
+  const scaleExponent = 0.65
+  const toPseudoLog = (value: number): number => Math.pow(Math.max(0, value), scaleExponent)
+  const fromPseudoLog = (value: number): number => Math.pow(Math.max(0, value), 1 / scaleExponent)
+  let maxDisplayedValue = maxValue
+
+  if (usePseudoLogScale) {
+    maxDisplayedValue = toPseudoLog(maxValue)
+
+    series.forEach((seriesItem) => {
+      const rawSeriesData = (seriesItem.data as number[])
+      seriesItem.data = rawSeriesData.map((rawValue) => ({
+        value: toPseudoLog(rawValue),
+        rawValue
+      }))
+    })
   }
 
   // 根据排序后的顺序重新排列颜色
@@ -352,33 +351,45 @@ const getChartOption = (): EChartsOption => {
     // 使用总览页面的颜色主题，按排序后的顺序排列
     color: sortedColors,
     title: {
-      text: useStackedAreaChart.value ? '资产价值历史趋势（面积堆叠图）' : '资产价值历史趋势（折线图）'
+      text: useStackedAreaChart.value ? '资产价值历史趋势（面积堆叠图）' : '资产价值历史趋势（折线图）',
+      textStyle: {
+        color: c.text
+      }
     },
     tooltip: {
+      ...themedTooltip(c),
       trigger: 'axis',
       axisPointer: {
         type: 'cross',
         label: {
-          backgroundColor: '#6a7985'
+          backgroundColor: c.surfaceSoft,
+          color: c.text
         }
       },
       formatter: (params: unknown) => {
         if (!Array.isArray(params) || params.length === 0) return ''
-        const paramArray = params as Array<{ axisValue: string; marker: string; seriesName: string; value: number }>
+        const paramArray = params as Array<{ axisValue: string; marker: string; seriesName: string; value: number; data?: { rawValue?: number } }>
+        const getRawValue = (param: { value: number; data?: { rawValue?: number } }) => {
+          if (typeof param.data?.rawValue === 'number') return param.data.rawValue
+          return usePseudoLogScale ? fromPseudoLog(param.value) : param.value
+        }
         let result = `${paramArray[0].axisValue}<br/>`
         paramArray.forEach((param) => {
-          result += `${param.marker}${param.seriesName}: ${formatNumber(param.value)} ISK<br/>`
+          result += `${param.marker}${param.seriesName}: ${formatNumber(getRawValue(param))} ISK<br/>`
         })
         // 只有面积堆叠图才显示总计
         if (useStackedAreaChart.value) {
-          const total = paramArray.reduce((sum, param) => sum + param.value, 0)
+          const total = paramArray.reduce((sum, param) => sum + getRawValue(param), 0)
           result += `<br/>总计: ${formatNumber(total)} ISK`
         }
         return result
       }
     },
     legend: {
-      data: legendData
+      data: legendData,
+      textStyle: {
+        color: c.textSecondary
+      }
     },
     toolbox: {
       feature: {
@@ -399,9 +410,12 @@ const getChartOption = (): EChartsOption => {
         axisLine: {
           show: true,
           lineStyle: {
-            color: '#666',
+            color: c.border,
             width: 1
           }
+        },
+        axisLabel: {
+          color: c.textSecondary
         },
         splitLine: {
           show: false
@@ -410,48 +424,54 @@ const getChartOption = (): EChartsOption => {
     ],
     yAxis: [
       {
-        type: useLogScale ? 'log' : 'value',
-        ...(useLogScale && {
-          logBase: 10,
-          ...(allValues.length > 0 && {
-            // 对于对数坐标，确保最小值至少为1，避免0值问题
-            min: Math.max(1, minValue * 0.9),
-            max: maxValue * 1.1 // 留出一些顶部空间
-          })
+        type: 'value',
+        ...(usePseudoLogScale && allValues.length > 0 && {
+          min: 0,
+          max: maxDisplayedValue * 1.1
         }),
         axisLine: {
           show: true,
           lineStyle: {
-            color: '#666',
+            color: c.border,
             width: 1
           }
         },
         axisTick: {
           show: true,
           lineStyle: {
-            color: '#666'
+            color: c.border
+          }
+        },
+        axisPointer: {
+          label: {
+            formatter: (params: any) => {
+              const axisValue = typeof params?.value === 'number' ? params.value : Number(params?.value) || 0
+              const displayValue = usePseudoLogScale ? fromPseudoLog(axisValue) : axisValue
+              return `${formatNumber(displayValue)} ISK`
+            }
           }
         },
         splitLine: {
           show: true,
           lineStyle: {
-            color: '#e0e0e0',
+            color: c.border,
             width: 1,
             type: 'solid'
           }
         },
         axisLabel: {
           formatter: (value: number) => {
-            if (value >= 1e9) {
-              return `${(value / 1e9).toFixed(1)}B`
-            } else if (value >= 1e6) {
-              return `${(value / 1e6).toFixed(1)}M`
-            } else if (value >= 1e3) {
-              return `${(value / 1e3).toFixed(1)}K`
+            const displayValue = usePseudoLogScale ? fromPseudoLog(value) : value
+            if (displayValue >= 1e9) {
+              return `${(displayValue / 1e9).toFixed(1)}B`
+            } else if (displayValue >= 1e6) {
+              return `${(displayValue / 1e6).toFixed(1)}M`
+            } else if (displayValue >= 1e3) {
+              return `${(displayValue / 1e3).toFixed(1)}K`
             }
-            return value.toFixed(0)
+            return displayValue.toFixed(0)
           },
-          color: '#666',
+          color: c.textSecondary,
           fontSize: 12
         }
       }
@@ -507,6 +527,9 @@ const handleResize = () => {
 
 onMounted(async () => {
   window.addEventListener('resize', handleResize)
+  cleanupThemeWatcher = onThemeTokenChange(() => {
+    updateChart()
+  })
   // 从本地存储加载设置
   includeUnmarkedAssets.value = loadIncludeUnmarkedFromStorage()
   useStackedAreaChart.value = loadUseStackedAreaFromStorage()
@@ -517,6 +540,8 @@ onMounted(async () => {
 onUnmounted(() => {
   disposeChart()
   window.removeEventListener('resize', handleResize)
+  cleanupThemeWatcher?.()
+  cleanupThemeWatcher = null
 })
 </script>
 
@@ -571,9 +596,10 @@ onUnmounted(() => {
   gap: 16px;
   margin-bottom: 20px;
   padding: 16px;
-  background: #fff;
+  background: var(--k-color-surface);
   border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--k-shadow-sm);
+  border: 1px solid var(--k-color-border);
 }
 
 .switch-container {
@@ -584,7 +610,7 @@ onUnmounted(() => {
 
 .switch-label {
   font-size: 14px;
-  color: #606266;
+  color: var(--k-color-text-secondary);
 }
 
 .chart-section {
@@ -614,5 +640,23 @@ onUnmounted(() => {
     margin-left: 0;
     justify-content: space-between;
   }
+}
+
+/* Theme override */
+.history-container,
+.toolbar,
+.chart-section :deep(.el-card),
+.chart {
+  background: var(--k-color-surface) !important;
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text) !important;
+}
+
+.toolbar {
+  background: var(--k-color-surface-soft) !important;
+}
+
+.switch-label {
+  color: var(--k-color-text-secondary) !important;
 }
 </style>

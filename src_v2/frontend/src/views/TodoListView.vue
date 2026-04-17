@@ -257,8 +257,8 @@ const toggleExpand = (id: string) => {
   padding: 24px;
   max-width: 1200px;
   margin: 0 auto;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  min-height: calc(100vh - 60px);
+  background: transparent;
+  min-height: 100%;
 }
 
 .header-section {
@@ -271,13 +271,13 @@ const toggleExpand = (id: string) => {
   gap: 12px;
   font-size: 28px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--k-color-text);
   margin: 0 0 20px 0;
 }
 
 .page-title .el-icon {
   font-size: 32px;
-  color: #409eff;
+  color: var(--k-color-primary);
 }
 
 .progress-card {
@@ -285,8 +285,8 @@ const toggleExpand = (id: string) => {
 }
 
 .progress-stat-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border: none;
+  background: linear-gradient(135deg, #1f4ea1 0%, #205ea8 45%, #258ad0 100%);
+  border: 1px solid color-mix(in srgb, var(--k-color-primary) 30%, transparent);
   color: white;
 }
 
@@ -344,13 +344,15 @@ const toggleExpand = (id: string) => {
 
 .todo-card {
   transition: all 0.3s ease;
-  border-radius: 8px;
+  border-radius: var(--k-radius-md);
   overflow: hidden;
+  border: 1px solid var(--k-color-border);
+  background: var(--k-color-surface);
 }
 
 .todo-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--k-shadow-md);
 }
 
 .completed-card {
@@ -358,7 +360,7 @@ const toggleExpand = (id: string) => {
 }
 
 .completed-card :deep(.el-card__header) {
-  background-color: #f0f9ff;
+  background-color: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface));
 }
 
 .card-header {
@@ -378,7 +380,7 @@ const toggleExpand = (id: string) => {
 
 .expand-icon {
   transition: transform 0.3s ease;
-  color: #909399;
+  color: var(--k-color-text-secondary);
   font-size: 16px;
 }
 
@@ -398,7 +400,7 @@ const toggleExpand = (id: string) => {
 .item-title {
   font-size: 18px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--k-color-text);
 }
 
 .card-content {
@@ -422,19 +424,19 @@ const toggleExpand = (id: string) => {
   flex-direction: column;
   gap: 12px;
   padding-left: 8px;
-  border-left: 2px solid #e4e7ed;
+  border-left: 2px solid var(--k-color-border);
   margin-left: 20px;
 }
 
 .child-item {
   padding: 12px;
-  background-color: #fafafa;
+  background-color: var(--k-color-surface-soft);
   border-radius: 6px;
   transition: all 0.2s ease;
 }
 
 .child-item:hover {
-  background-color: #f5f7fa;
+  background-color: color-mix(in srgb, var(--k-color-primary) 5%, var(--k-color-surface-soft));
 }
 
 .child-completed {
@@ -453,7 +455,7 @@ const toggleExpand = (id: string) => {
 
 .child-title {
   font-size: 15px;
-  color: #606266;
+  color: var(--k-color-text-secondary);
   font-weight: 500;
 }
 
@@ -461,7 +463,7 @@ const toggleExpand = (id: string) => {
   margin-top: 12px;
   margin-left: 32px;
   padding-left: 16px;
-  border-left: 2px dashed #dcdfe6;
+  border-left: 2px dashed var(--k-color-border);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -472,13 +474,13 @@ const toggleExpand = (id: string) => {
   align-items: center;
   gap: 8px;
   padding: 8px;
-  background-color: white;
+  background-color: var(--k-color-surface);
   border-radius: 4px;
   transition: all 0.2s ease;
 }
 
 .grandchild-item:hover {
-  background-color: #f5f7fa;
+  background-color: var(--k-color-surface-soft);
 }
 
 .grandchild-completed {
@@ -491,7 +493,7 @@ const toggleExpand = (id: string) => {
 
 .grandchild-title {
   font-size: 14px;
-  color: #909399;
+  color: var(--k-color-text-secondary);
 }
 
 /* 响应式设计 */

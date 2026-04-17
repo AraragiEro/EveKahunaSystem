@@ -25,6 +25,8 @@ Kahuna System 是一个专为 EVE Online 玩家设计的 Web 应用平台，集�
 
 ## 核心功能
 
+- **自选市场价格查询与利润成本分析** - 支持吉他和联盟市场实时价格查询
+  - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/dd98f790-af19-484d-b43e-c82588a6bd88" />
 - **成本计算** - 精确计算制造和采购成本
   - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/5c45aac0-fd2e-4bfd-b5ff-57085d4eca11" />
 - **工业规划** - 智能工业制造规划与报表输出
@@ -34,22 +36,15 @@ Kahuna System 是一个专为 EVE Online 玩家设计的 Web 应用平台，集�
   - <img width="2560" height="1271" alt="landing-page-化矿计算" src="https://github.com/user-attachments/assets/9f98ee62-9211-49e6-9377-b6305954840f" />
 - **采购清单** - 可自定义数据来源的采购清单管理
   - <img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/6c1eb759-f83a-4c7f-b4e0-e899d865807b" />
-- **资产统计** - 角色和公司资产统计与管理
-  - **资产统计**
-    - <img width="1600" height="855" alt="image" src="https://github.com/user-attachments/assets/a7c68bcc-8234-4547-8cfa-5207e180494d" />
-  - **挂单分析** - 市场订单分析与优化建议
-    - <img width="1440" height="621" alt="image" src="https://github.com/user-attachments/assets/9aad5871-3f37-4b16-8cc0-a2e6903e8050" />
-  - **历史记录**
-    - <img width="1408" height="763" alt="image" src="https://github.com/user-attachments/assets/a139ec64-0094-4c4a-ac51-d4b0cb910687" />
-
- 
-
+- **挂单分析** - 市场订单分析与优化建议【**计划中**】
+- **资产统计** - 角色和公司资产统计与管理【**计划中**】
 
 ## 技术栈
 
 - **后端**: Quart (Python 3.13+), Hypercorn
 - **前端**: Vue 3, TypeScript, Element Plus, ECharts
 - **数据库**: SQLite / PostgreSQL, Neo4j, Redis
+- **MCP 中间件**: FastMCP (Model Context Protocol)
 - **其他**: ESI API, OAuth2
 
 ## 快速开始
@@ -118,6 +113,18 @@ python run_server.py --prod --host 0.0.0.0 --port 9527
 
 启动成功后，访问 `http://localhost:9527` 即可使用平台。
 
+**启动 MCP 中间件服务（可选，用于 Astrbot 集成）**:
+```bash
+# 启动 MCP 服务
+./run_server.sh start-mcp
+
+# 查看服务状态
+./run_server.sh status
+
+# 停止所有服务
+./run_server.sh stop-all
+```
+
 ## 数据库部署
 
 ### 使用 Docker 部署数据库服务
@@ -143,24 +150,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  sde:
-    image: postgres:16-alpine
-    container_name: kahuna-sde
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: secret
-      POSTGRES_DB: sde
-    ports:
-      - "5432:5432"
-    volumes:
-      - sde_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin"]
@@ -206,7 +195,6 @@ services:
 
 volumes:
   postgres_data:
-  sde_data
   redis_data:
   neo4j_data:
   neo4j_logs:
@@ -476,7 +464,7 @@ python update_sde.py --force
 
 - 更新过程可能需要较长时间，请耐心等待
 - 确保 PostgreSQL 数据库已正确配置并可以连接
-- 确保已创建 SDE 数据（如果使用compose创建容器，应该已经创建了sde数据库，直接运行脚本更新即可。）
+- 确保已创建 SDE 数据库（参考 [手动创建 SDE 数据库](#手动创建-sde-数据库) 部分）
 - 更新过程中会占用一定的系统资源，建议在服务器负载较低时执行
 
 ### init_neo4j.py - Neo4j 数据库初始化脚本
@@ -535,3 +523,173 @@ python init_neo4j.py --clean
 ```
 - [EVE Online 官网](https://www.eveonline.com/)
 - [EVE Online 开发者中心](https://developers.eveonline.com/)
+
+## MCP 中间件配置
+
+Kahuna System 提供 MCP (Model Context Protocol) 中间件服务，允许 AI 助手（如 Astrbot）通过标准化协议访问系统功能。
+
+### 什么是 MCP
+
+MCP (Model Context Protocol) 是一种开放协议，允许 AI 助手安全地访问外部工具和数据源。Kahuna MCP 服务作为中间件层，将 AI 请求转发到 Quart 后端 API，实现以下功能：
+
+- **安全隔离**: MCP 服务与主服务分离，通过 HTTP API 通信
+- **工具暴露**: 暴露 9 个核心工具供 AI 调用
+- **实时监控**: 支持 QQ 群 VIP 状态查询、市场价格查询等
+
+### MCP 工具列表
+
+#### QQ 相关工具
+| 工具名 | 描述 |
+|--------|------|
+| `qq_vip_state` | 查询 QQ 群 VIP 状态，返回已激活和未激活的用户列表 |
+
+#### 市场相关工具
+| 工具名 | 描述 |
+|--------|------|
+| `market_tag_list` | 获取市场价格标签列表 |
+| `market_price_detail` | 查询特定类型的市场价格详情 |
+| `market_type_cost` | 计算特定类型的采购成本 |
+| `market_fuzz_type_name` | 模糊搜索类型名称 |
+| `market_type_metrics` | 获取特定类型的市场指标 |
+
+#### 工业相关工具
+| 工具名 | 描述 |
+|--------|------|
+| `running_jobs_overview` | 获取正在进行的工业作业概览 |
+| `plan_missing_blueprint_workflow_summary` | 获取缺失蓝图的工业规划摘要 |
+| `get_company_medica_vouchers` | 获取公司医疗券信息 |
+
+### 启动 MCP 服务
+
+#### 使用脚本启动（推荐）
+
+```bash
+# 启动 MCP 服务
+./run_server.sh start-mcp
+
+# 停止 MCP 服务
+./run_server.sh stop-mcp
+
+# 查看服务状态
+./run_server.sh status
+
+# 停止所有服务
+./run_server.sh stop-all
+```
+
+#### 手动启动
+
+```bash
+# 直接启动 MCP 服务
+python run_mcp_middleware.py
+
+# 或作为后台进程启动
+nohup python run_mcp_middleware.py > logs/mcp_server.log 2>&1 &
+```
+
+### Astrbot MCP 配置
+
+在 Astrbot 的 `cmd_config.json` 或管理面板中配置 MCP：
+
+```json
+{
+    "mcpServers": {
+        "kahuna-system": {
+            "transport": "http",
+            "url": "http://localhost:9000/sse"
+        }
+    }
+}
+```
+
+#### 配置参数说明
+
+- **transport**: 传输协议，固定为 `http`
+- **url**: MCP 服务 SSE 端点地址
+  - 本地开发: `http://localhost:9000/sse`
+  - 远程服务器: `http://your-server-ip:9000/sse`
+
+### 服务架构
+
+```
+Astrbot (AI 助手)
+    ↓ (MCP 协议)
+MCP 中间件服务 (端口 9000)
+    ↓ (HTTP API)
+Quart 后端服务 (端口 9527)
+    ↓ (数据库)
+PostgreSQL / Redis / Neo4j
+```
+
+### 端口说明
+
+| 服务 | 端口 | 用途 |
+|------|------|------|
+| Quart 后端 | 9527 | Web 界面和 API |
+| MCP 中间件 | 9000 | MCP 协议服务 |
+| PostgreSQL | 5432 | 主数据库 |
+| Redis | 6379 | 缓存 |
+| Neo4j | 7687 | 图数据库 |
+
+### 故障排查
+
+#### MCP 服务无法启动
+
+1. **检查端口占用**
+   ```bash
+   # 检查 9000 端口是否被占用
+   netstat -tulpn | grep 9000
+   # 或
+   lsof -i :9000
+   ```
+
+2. **检查依赖安装**
+   ```bash
+   # 确保安装了 mcp 库
+   pip install mcp
+   ```
+
+3. **查看日志**
+   ```bash
+   tail -f logs/mcp_server.log
+   ```
+
+#### Astrbot 无法连接 MCP
+
+1. **检查服务状态**
+   ```bash
+   ./run_server.sh status
+   ```
+
+2. **测试 MCP 健康检查**
+   ```bash
+   curl http://localhost:9000/health
+   # 应返回: {"status": "healthy", "backend_connected": true}
+   ```
+
+3. **检查防火墙设置**
+   - 确保端口 9000 对外开放
+   - 如果是远程服务器，检查安全组规则
+
+4. **验证工具列表**
+   ```bash
+   # MCP 服务启动时会打印注册的工具列表
+   # 检查日志中是否有 9 个工具
+   grep "MCP 工具注册完成" logs/mcp_server.log
+   ```
+
+#### 工具调用失败
+
+1. **检查后端服务**
+   - 确保 Quart 后端服务已启动
+   - 检查后端日志: `tail -f logs/server.log`
+
+2. **检查内部 API**
+   ```bash
+   # 测试内部 API 是否可访问
+   curl http://localhost:9527/api/internal/mcp/qq_vip_state
+   ```
+
+3. **检查数据库连接**
+   - 确保 PostgreSQL、Redis、Neo4j 服务正常运行
+   - 验证配置文件 `config.toml` 中的连接信息

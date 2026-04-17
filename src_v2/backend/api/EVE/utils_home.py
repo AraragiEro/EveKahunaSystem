@@ -2,6 +2,7 @@
 Home API 工具函数模块
 用于处理首页概览相关的复杂业务逻辑
 """
+
 import asyncio
 import traceback
 from datetime import date, datetime, timedelta, timezone
@@ -26,7 +27,9 @@ from src_v2.model.EVE.market.market_manager import MarketManager
 from src_v2.model.EVE.sde import SdeUtils
 
 
-async def get_wallet_value(user_id: str, character_ids: Optional[List[int]] = None) -> Dict[str, float]:
+async def get_wallet_value(
+    user_id: str, character_ids: Optional[List[int]] = None
+) -> Dict[str, float]:
     """
     获取用户所有角色的钱包价值
 
@@ -45,24 +48,31 @@ async def get_wallet_value(user_id: str, character_ids: Optional[List[int]] = No
         # 如果提供了角色ID列表，进行筛选
         if character_ids:
             characters = [
-                char for char in characters if char.character_id in character_ids]
+                char for char in characters if char.character_id in character_ids
+            ]
 
         async def get_wallet_for_character(character_db_obj):
             try:
                 character = Character.from_db_obj(character_db_obj)
                 wallet_balance = await eveesi.character_character_id_wallet(
-                    character.ac_token,
-                    character.character_id
+                    character.ac_token, character.character_id
                 )
-                return [wallet_balance, character_db_obj.character_name] if wallet_balance is not None else [0.0, character_db_obj.character_name]
+                return (
+                    [wallet_balance, character_db_obj.character_name]
+                    if wallet_balance is not None
+                    else [0.0, character_db_obj.character_name]
+                )
             except Exception as e:
-                logger.warning("获取角色 %s 钱包余额失败: %s",
-                               character_db_obj.character_name, str(e))
+                logger.warning(
+                    "获取角色 %s 钱包余额失败: %s",
+                    character_db_obj.character_name,
+                    str(e),
+                )
                 return [0.0, character_db_obj.character_name]
 
-        wallet_balances = await asyncio.gather(*[
-            get_wallet_for_character(char) for char in characters
-        ])
+        wallet_balances = await asyncio.gather(
+            *[get_wallet_for_character(char) for char in characters]
+        )
         for wallet_balance, character_name in wallet_balances:
             wallet_value[character_name] = wallet_balance
     except Exception:
@@ -71,7 +81,9 @@ async def get_wallet_value(user_id: str, character_ids: Optional[List[int]] = No
     return wallet_value
 
 
-async def get_order_value(user_id: str, character_ids: Optional[List[int]] = None) -> Dict[str, float]:
+async def get_order_value(
+    user_id: str, character_ids: Optional[List[int]] = None
+) -> Dict[str, float]:
     """
     获取用户所有角色的订单价值
 
@@ -90,33 +102,36 @@ async def get_order_value(user_id: str, character_ids: Optional[List[int]] = Non
         # 如果提供了角色ID列表，进行筛选
         if character_ids:
             characters = [
-                char for char in characters if char.character_id in character_ids]
+                char for char in characters if char.character_id in character_ids
+            ]
 
         async def get_orders_for_character(character_db_obj):
             try:
                 character = Character.from_db_obj(character_db_obj)
                 orders = await eveesi.characters_character_orders(
-                    character.ac_token,
-                    character.character_id
+                    character.ac_token, character.character_id
                 )
 
                 # 计算订单总价值：price * volume_remain
                 total_value = 0.0
                 if orders:
                     for order in orders:
-                        price = order.get('price', 0)
-                        volume_remain = order.get('volume_remain', 0)
+                        price = order.get("price", 0)
+                        volume_remain = order.get("volume_remain", 0)
                         total_value += price * volume_remain
 
                 return [total_value, character_db_obj.character_name]
             except Exception as e:
-                logger.warning("获取角色 %s 订单价值失败: %s",
-                               character_db_obj.character_name, str(e))
+                logger.warning(
+                    "获取角色 %s 订单价值失败: %s",
+                    character_db_obj.character_name,
+                    str(e),
+                )
                 return [0.0, character_db_obj.character_name]
 
-        order_values = await asyncio.gather(*[
-            get_orders_for_character(char) for char in characters
-        ])
+        order_values = await asyncio.gather(
+            *[get_orders_for_character(char) for char in characters]
+        )
         for order_total, character_name in order_values:
             order_value[character_name] = order_total
     except Exception:
@@ -125,7 +140,9 @@ async def get_order_value(user_id: str, character_ids: Optional[List[int]] = Non
     return order_value
 
 
-async def get_order_details(user_id: str, character_ids: Optional[List[int]] = None) -> List[dict]:
+async def get_order_details(
+    user_id: str, character_ids: Optional[List[int]] = None
+) -> List[dict]:
     """
     获取用户所有角色的订单详情
 
@@ -155,7 +172,8 @@ async def get_order_details(user_id: str, character_ids: Optional[List[int]] = N
         # 如果提供了角色ID列表，进行筛选
         if character_ids:
             characters = [
-                char for char in characters if char.character_id in character_ids]
+                char for char in characters if char.character_id in character_ids
+            ]
 
         asset_manager = AssetManager()
 
@@ -163,8 +181,7 @@ async def get_order_details(user_id: str, character_ids: Optional[List[int]] = N
             try:
                 character = Character.from_db_obj(character_db_obj)
                 orders = await eveesi.characters_character_orders(
-                    character.ac_token,
-                    character.character_id
+                    character.ac_token, character.character_id
                 )
 
                 if not orders:
@@ -172,15 +189,15 @@ async def get_order_details(user_id: str, character_ids: Optional[List[int]] = N
 
                 character_orders = []
                 for order in orders:
-                    type_id = order.get('type_id')
-                    location_id = order.get('location_id')
-                    is_buy_order = order.get('is_buy_order', False)
-                    volume_total = order.get('volume_total', 0)
-                    volume_remain = order.get('volume_remain', 0)
-                    price = order.get('price', 0)
-                    issued = order.get('issued')
-                    duration = order.get('duration', 0)
-                    region_id = order.get('region_id')
+                    type_id = order.get("type_id")
+                    location_id = order.get("location_id")
+                    is_buy_order = order.get("is_buy_order", False)
+                    volume_total = order.get("volume_total", 0)
+                    volume_remain = order.get("volume_remain", 0)
+                    price = order.get("price", 0)
+                    issued = order.get("issued")
+                    duration = order.get("duration", 0)
+                    region_id = order.get("region_id")
 
                     # 查询物品名称
                     type_name = await SdeUtils.get_name_by_id(type_id, zh=True)
@@ -196,17 +213,24 @@ async def get_order_details(user_id: str, character_ids: Optional[List[int]] = N
                         if location_id < 100000000:
                             # 空间站
                             try:
-                                station_info, _ = await asset_manager.get_station_info(location_id)
-                                if station_info and 'name' in station_info:
-                                    location_name = station_info['name']
+                                station_info, _ = await asset_manager.get_station_info(
+                                    location_id
+                                )
+                                if station_info and "name" in station_info:
+                                    location_name = station_info["name"]
                             except Exception as e:
                                 logger.warning(
-                                    f"获取空间站 {location_id} 信息失败: {e}")
+                                    f"获取空间站 {location_id} 信息失败: {e}"
+                                )
                                 # 尝试直接调用ESI API
                                 try:
-                                    station_info = await eveesi.universe_stations_station(location_id)
-                                    if station_info and 'name' in station_info:
-                                        location_name = station_info['name']
+                                    station_info = (
+                                        await eveesi.universe_stations_station(
+                                            location_id
+                                        )
+                                    )
+                                    if station_info and "name" in station_info:
+                                        location_name = station_info["name"]
                                 except Exception:
                                     pass
                         else:
@@ -214,23 +238,28 @@ async def get_order_details(user_id: str, character_ids: Optional[List[int]] = N
                             try:
                                 # 先检查Redis缓存
                                 structure_info_cache = await rdm().r.hgetall(
-                                    f'eveesi:universe_structures_structure:{location_id}')
-                                if structure_info_cache and 'name' in structure_info_cache:
-                                    location_name = structure_info_cache['name']
+                                    f"eveesi:universe_structures_structure:{location_id}"
+                                )
+                                if (
+                                    structure_info_cache
+                                    and "name" in structure_info_cache
+                                ):
+                                    location_name = structure_info_cache["name"]
                                 else:
                                     # 缓存不存在，调用ESI API
-                                    structure_info = await eveesi.universe_structures_structure(
-                                        character.ac_token, location_id, log=False
+                                    structure_info = (
+                                        await eveesi.universe_structures_structure(
+                                            character.ac_token, location_id, log=False
+                                        )
                                     )
-                                    if structure_info and 'name' in structure_info:
-                                        location_name = structure_info['name']
+                                    if structure_info and "name" in structure_info:
+                                        location_name = structure_info["name"]
                                         # 保存到缓存（移除position字段，因为它是复杂对象）
                                         structure_info_cache = structure_info.copy()
-                                        structure_info_cache.pop(
-                                            'position', None)
+                                        structure_info_cache.pop("position", None)
                                         await rdm().r.hset(
-                                            f'eveesi:universe_structures_structure:{location_id}',
-                                            mapping=structure_info_cache
+                                            f"eveesi:universe_structures_structure:{location_id}",
+                                            mapping=structure_info_cache,
                                         )
                             except Exception as e:
                                 logger.warning(f"获取结构 {location_id} 信息失败: {e}")
@@ -239,7 +268,8 @@ async def get_order_details(user_id: str, character_ids: Optional[List[int]] = N
                     completion_percent = 0.0
                     if volume_total > 0:
                         completion_percent = (
-                            (volume_total - volume_remain) / volume_total) * 100
+                            (volume_total - volume_remain) / volume_total
+                        ) * 100
 
                     # 计算剩余订单价值
                     remaining_value = price * volume_remain
@@ -251,35 +281,35 @@ async def get_order_details(user_id: str, character_ids: Optional[List[int]] = N
                             # issued 可能是字符串或datetime对象
                             if isinstance(issued, str):
                                 issued_dt = datetime.fromisoformat(
-                                    issued.replace('Z', '+00:00'))
+                                    issued.replace("Z", "+00:00")
+                                )
                             else:
                                 issued_dt = issued
                             # 转换为本地时区（如果需要）
                             if issued_dt.tzinfo is None:
                                 # 假设是UTC时间
                                 from datetime import timezone
-                                issued_dt = issued_dt.replace(
-                                    tzinfo=timezone.utc)
+
+                                issued_dt = issued_dt.replace(tzinfo=timezone.utc)
                             # 计算过期时间
                             expiry_dt = issued_dt + timedelta(days=duration)
                             # 计算剩余时间（分钟）
                             # 获取当前UTC时间
                             from datetime import timezone
+
                             now_utc = datetime.now(timezone.utc)
 
                             # 统一时区：将过期时间转换为UTC
                             if expiry_dt.tzinfo is None:
                                 # 如果过期时间没有时区，假设是UTC
-                                expiry_dt = expiry_dt.replace(
-                                    tzinfo=timezone.utc)
+                                expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
                             else:
                                 # 如果过期时间有时区，转换为UTC
                                 expiry_dt = expiry_dt.astimezone(timezone.utc)
 
                             # 计算时间差
                             time_diff = expiry_dt - now_utc
-                            remaining_time_minutes = int(
-                                time_diff.total_seconds() / 60)
+                            remaining_time_minutes = int(time_diff.total_seconds() / 60)
                             # 如果已经过期，返回0
                             if remaining_time_minutes < 0:
                                 remaining_time_minutes = 0
@@ -287,32 +317,35 @@ async def get_order_details(user_id: str, character_ids: Optional[List[int]] = N
                             logger.warning(f"计算订单剩余时间失败: {e}")
 
                     order_detail = {
-                        'character_name': character_db_obj.character_name,
-                        'type_name': type_name,
-                        'order_type': '收购' if is_buy_order else '出售',
-                        'location_name': location_name,
-                        'volume_total': volume_total,
-                        'volume_remain': volume_remain,
-                        'completion_percent': round(completion_percent, 2),
-                        'remaining_value': remaining_value,
-                        'remaining_time_minutes': remaining_time_minutes,
-                        'price': price,
-                        'region_id': region_id,
-                        'order_id': order.get('order_id'),
-                        'is_buy_order': is_buy_order
+                        "character_name": character_db_obj.character_name,
+                        "type_name": type_name,
+                        "order_type": "收购" if is_buy_order else "出售",
+                        "location_name": location_name,
+                        "volume_total": volume_total,
+                        "volume_remain": volume_remain,
+                        "completion_percent": round(completion_percent, 2),
+                        "remaining_value": remaining_value,
+                        "remaining_time_minutes": remaining_time_minutes,
+                        "price": price,
+                        "region_id": region_id,
+                        "order_id": order.get("order_id"),
+                        "is_buy_order": is_buy_order,
                     }
                     character_orders.append(order_detail)
 
                 return character_orders
             except Exception as e:
-                logger.warning("获取角色 %s 订单详情失败: %s",
-                               character_db_obj.character_name, str(e))
+                logger.warning(
+                    "获取角色 %s 订单详情失败: %s",
+                    character_db_obj.character_name,
+                    str(e),
+                )
                 return []
 
         # 并发获取所有角色的订单
-        orders_results = await asyncio.gather(*[
-            get_orders_for_character(char) for char in characters
-        ])
+        orders_results = await asyncio.gather(
+            *[get_orders_for_character(char) for char in characters]
+        )
 
         # 展平结果
         for orders in orders_results:
@@ -342,8 +375,8 @@ async def get_all_plans_load_asset_confs(user_id: str) -> List[dict]:
 
         # 遍历每个计划，获取配置流
         for plan in plans:
-            plan_name = plan.get('plan_name')
-            user_name = plan.get('user_name', user_id)
+            plan_name = plan.get("plan_name")
+            user_name = plan.get("user_name", user_id)
 
             # 获取计划的配置流
             config_flow = await EveIndustryPlanConfigFlowDBUtils.select_configflow_by_user_name_and_plan_name(
@@ -355,14 +388,16 @@ async def get_all_plans_load_asset_confs(user_id: str) -> List[dict]:
 
             # 遍历配置流中的每个配置ID
             for config_id in config_flow.config_list:
-                config = await EveIndustryPlanConfigFlowConfigDBUtils.select_by_id(config_id)
+                config = await EveIndustryPlanConfigFlowConfigDBUtils.select_by_id(
+                    config_id
+                )
 
                 if not config:
                     logger.warning(f"配置 {config_id} 不存在")
                     continue
 
                 # 筛选出 LoadAssetConf 类型的配置
-                if config.config_type == 'LoadAssetConf':
+                if config.config_type == "LoadAssetConf":
                     load_asset_confs.append(config.config_value)
 
     except Exception as e:
@@ -386,14 +421,18 @@ async def get_corporation_jobs(user_id: str) -> List[dict]:
     try:
         # 获取用户的主角色
         main_character_id = await UserManager().get_main_character_id(user_id)
-        main_character = await CharacterManager().get_character_by_character_id(main_character_id)
+        main_character = await CharacterManager().get_character_by_character_id(
+            main_character_id
+        )
 
         if not main_character:
             return corp_jobs
 
         # 获取主角色所在公司的总监角色
-        director_character_ids = await CharacterManager().get_director_character_id_of_corporation(
-            main_character.corporation_id
+        director_character_ids = (
+            await CharacterManager().get_director_character_id_of_corporation(
+                main_character.corporation_id
+            )
         )
 
         if not director_character_ids:
@@ -401,12 +440,16 @@ async def get_corporation_jobs(user_id: str) -> List[dict]:
 
         # 获取总监角色对象
         for director_character_id in director_character_ids:
-            director = await CharacterManager().get_character_by_character_id(director_character_id)
+            director = await CharacterManager().get_character_by_character_id(
+                director_character_id
+            )
             try:
                 await director.ac_token
                 break
             except Exception as e:
-                logger.warning(f"获取总监角色 {director_character_id} 的token失败: {str(e)}")
+                logger.warning(
+                    f"获取总监角色 {director_character_id} 的token失败: {str(e)}"
+                )
                 director = None
                 continue
 
@@ -415,8 +458,7 @@ async def get_corporation_jobs(user_id: str) -> List[dict]:
 
         # 获取公司jobs
         corp_jobs_result = await eveesi.corporations_corporation_id_industry_jobs(
-            director.ac_token,
-            director.corporation_id
+            director.ac_token, director.corporation_id
         )
 
         # corp_jobs_result 可能是嵌套列表，需要展平
@@ -454,19 +496,19 @@ async def get_character_jobs(user_id: str) -> List[dict]:
             try:
                 character = Character.from_db_obj(character_db_obj)
                 jobs = await eveesi.characters_character_id_industry_jobs(
-                    character.ac_token,
-                    character.character_id
+                    character.ac_token, character.character_id
                 )
                 return jobs if jobs else []
             except Exception as e:
                 logger.warning(
-                    f"获取角色 {character_db_obj.character_name} jobs失败: {str(e)}")
+                    f"获取角色 {character_db_obj.character_name} jobs失败: {str(e)}"
+                )
                 return []
 
         # 并发获取所有角色的jobs
-        jobs_results = await asyncio.gather(*[
-            get_jobs_for_character(char) for char in characters
-        ])
+        jobs_results = await asyncio.gather(
+            *[get_jobs_for_character(char) for char in characters]
+        )
 
         # 展平结果
         for jobs in jobs_results:
@@ -495,7 +537,7 @@ async def calculate_running_process_value(user_id: str) -> dict:
         # 提取所有 asset_container_id 作为目标库存列表
         target_container_ids = set()
         for conf in load_asset_confs:
-            asset_container_id = conf.get('asset_container_id')
+            asset_container_id = conf.get("asset_container_id")
             if asset_container_id:
                 target_container_ids.add(asset_container_id)
 
@@ -504,7 +546,7 @@ async def calculate_running_process_value(user_id: str) -> dict:
             return {
                 "corp_jobs_value": 0.0,
                 "character_jobs_value": 0.0,
-                "total_value": 0.0
+                "total_value": 0.0,
             }
 
         # 获取所有jobs
@@ -529,27 +571,31 @@ async def calculate_running_process_value(user_id: str) -> dict:
         async def get_product_quantity_per_run(type_id: int) -> int:
             """获取每次运行的产出数量，带缓存"""
             if type_id not in product_quantity_cache:
-                product_quantity_cache[type_id] = await BPM.get_bp_product_quantity_typeid(type_id)
+                product_quantity_cache[
+                    type_id
+                ] = await BPM.get_bp_product_quantity_typeid(type_id)
             return product_quantity_cache[type_id]
 
         # 计算公司jobs价值
         corp_jobs_value = 0.0
         for job in corp_jobs:
-            output_location_id = job.get('output_location_id')
+            output_location_id = job.get("output_location_id")
             if output_location_id not in target_container_ids:
                 continue
 
-            product_type_id = job.get('product_type_id')
+            product_type_id = job.get("product_type_id")
             if not product_type_id:
                 continue
 
             # 获取运行次数
-            runs = job.get('runs', 0)
+            runs = job.get("runs", 0)
             if runs <= 0:
                 continue
 
             # 获取每次运行的产出数量（需要查询蓝图）
-            product_quantity_per_run = await get_product_quantity_per_run(product_type_id)
+            product_quantity_per_run = await get_product_quantity_per_run(
+                product_type_id
+            )
 
             # 计算总产出数量 = runs × 每次运行产出数量
             total_product_quantity = runs * product_quantity_per_run
@@ -564,21 +610,23 @@ async def calculate_running_process_value(user_id: str) -> dict:
         # 计算角色jobs价值
         character_jobs_value = 0.0
         for job in character_jobs:
-            output_location_id = job.get('output_location_id')
+            output_location_id = job.get("output_location_id")
             if output_location_id not in target_container_ids:
                 continue
 
-            product_type_id = job.get('product_type_id')
+            product_type_id = job.get("product_type_id")
             if not product_type_id:
                 continue
 
             # 获取运行次数
-            runs = job.get('runs', 0)
+            runs = job.get("runs", 0)
             if runs <= 0:
                 continue
 
             # 获取每次运行的产出数量（需要查询蓝图）
-            product_quantity_per_run = await get_product_quantity_per_run(product_type_id)
+            product_quantity_per_run = await get_product_quantity_per_run(
+                product_type_id
+            )
 
             # 计算总产出数量 = runs × 每次运行产出数量
             total_product_quantity = runs * product_quantity_per_run
@@ -595,16 +643,12 @@ async def calculate_running_process_value(user_id: str) -> dict:
         return {
             "corp_jobs_value": corp_jobs_value,
             "character_jobs_value": character_jobs_value,
-            "total_value": total_value
+            "total_value": total_value,
         }
 
     except Exception as e:
         logger.error(f"计算运行中流程价值失败: {traceback.format_exc()}")
-        return {
-            "corp_jobs_value": 0.0,
-            "character_jobs_value": 0.0,
-            "total_value": 0.0
-        }
+        return {"corp_jobs_value": 0.0, "character_jobs_value": 0.0, "total_value": 0.0}
 
 
 async def get_all_assets_by_owner_ids(owner_ids: List[int]) -> List[dict]:
@@ -638,8 +682,7 @@ async def get_all_assets_by_owner_ids(owner_ids: List[int]) -> List[dict]:
 
 
 async def get_marked_asset_value(
-    user_id: str,
-    asset_mission_filters: Optional[List[Tuple[str, int]]] = None
+    user_id: str, asset_mission_filters: Optional[List[Tuple[str, int]]] = None
 ) -> float:
     """
     获取标记资产价值（在访问许可内的资产价值总和）
@@ -654,7 +697,9 @@ async def get_marked_asset_value(
     """
     try:
         # 获取用户所有访问许可
-        container_permissions = await IndustryManager.get_user_all_container_permission(user_id)
+        container_permissions = await IndustryManager.get_user_all_container_permission(
+            user_id
+        )
 
         if not container_permissions:
             return 0.0
@@ -669,8 +714,8 @@ async def get_marked_asset_value(
             # 筛选容器权限
             filtered_permissions = []
             for permission in container_permissions:
-                owner_id = permission.get('asset_owner_id')
-                owner_type = permission.get('owner_type')
+                owner_id = permission.get("asset_owner_id")
+                owner_type = permission.get("owner_type")
                 # 检查 owner_id 和 owner_type 是否匹配筛选条件
                 if owner_id in filter_owner_ids:
                     # 进一步检查 owner_type 是否匹配
@@ -686,18 +731,19 @@ async def get_marked_asset_value(
         # 构建容器-所有者对列表
         container_owner_list = []
         for permission in container_permissions:
-            container_id = permission.get('asset_container_id')
-            owner_id = permission.get('asset_owner_id')
-            location_flag = permission.get('location_flag')
+            container_id = permission.get("asset_container_id")
+            owner_id = permission.get("asset_owner_id")
+            location_flag = permission.get("location_flag")
             if container_id and owner_id:
-                container_owner_list.append(
-                    [container_id, owner_id, location_flag])
+                container_owner_list.append([container_id, owner_id, location_flag])
 
         if not container_owner_list:
             return 0.0
 
         # 获取标记资产
-        marked_assets = await NAU.get_asset_in_container_owner_list(container_owner_list)
+        marked_assets = await NAU.get_asset_in_container_owner_list(
+            container_owner_list
+        )
 
         if not marked_assets:
             return 0.0
@@ -714,11 +760,18 @@ async def get_marked_asset_value(
                 price_cache[type_id] = await market_manager.get_jita_buy_price(type_id)
             return price_cache[type_id]
 
+        # 过滤掉蓝图拷贝(BPC)，只计算蓝图原图(BPO)和其他资产
+        filtered_assets = [
+            asset
+            for asset in marked_assets
+            if not asset.get("is_blueprint_copy", False)
+        ]
+
         # 计算总价值
         total_value = 0.0
-        for asset in marked_assets:
-            type_id = asset.get('type_id')
-            quantity = asset.get('quantity', 0)
+        for asset in filtered_assets:
+            type_id = asset.get("type_id")
+            quantity = asset.get("quantity", 0)
 
             if not type_id or quantity <= 0:
                 continue
@@ -735,8 +788,7 @@ async def get_marked_asset_value(
 
 
 async def get_unmarked_asset_value(
-    user_id: str,
-    asset_mission_filters: Optional[List[Tuple[str, int]]] = None
+    user_id: str, asset_mission_filters: Optional[List[Tuple[str, int]]] = None
 ) -> float:
     """
     获取非标记资产价值（不在访问许可内的资产价值总和）
@@ -753,6 +805,8 @@ async def get_unmarked_asset_value(
         # 获取用户所有资产拉取任务
         asset_manager = AssetManager()
         missions = await asset_manager.get_user_asset_pull_mission_list(user_id)
+        # 排除异常任务（主体已不存在的任务无法参与资产计算）
+        missions = [m for m in missions if not m.get("is_abnormal")]
 
         if not missions:
             return 0.0
@@ -764,9 +818,13 @@ async def get_unmarked_asset_value(
             # 筛选任务
             filtered_missions = []
             for mission in missions:
-                subject_type = mission.get('subject_type')
-                subject_id = mission.get('subject_id')
-                if subject_type and subject_id and (subject_type, subject_id) in filter_set:
+                subject_type = mission.get("subject_type")
+                subject_id = mission.get("subject_id")
+                if (
+                    subject_type
+                    and subject_id
+                    and (subject_type, subject_id) in filter_set
+                ):
                     filtered_missions.append(mission)
             missions = filtered_missions
 
@@ -774,8 +832,15 @@ async def get_unmarked_asset_value(
             return 0.0
 
         # 提取所有 asset_owner_id (subject_id)
-        owner_ids = list(set([mission.get('subject_id')
-                         for mission in missions if mission.get('subject_id')]))
+        owner_ids = list(
+            set(
+                [
+                    mission.get("subject_id")
+                    for mission in missions
+                    if mission.get("subject_id")
+                ]
+            )
+        )
 
         if not owner_ids:
             return 0.0
@@ -787,34 +852,37 @@ async def get_unmarked_asset_value(
             return 0.0
 
         # 获取标记资产（用于排除）
-        container_permissions = await IndustryManager.get_user_all_container_permission(user_id)
+        container_permissions = await IndustryManager.get_user_all_container_permission(
+            user_id
+        )
 
         marked_asset_keys = set()
         if container_permissions:
             # 构建容器-所有者对列表
             container_owner_list = []
             for permission in container_permissions:
-                container_id = permission.get('asset_container_id')
-                owner_id = permission.get('asset_owner_id')
-                location_flag = permission.get('location_flag')
+                container_id = permission.get("asset_container_id")
+                owner_id = permission.get("asset_owner_id")
+                location_flag = permission.get("location_flag")
                 if container_id and owner_id:
-                    container_owner_list.append(
-                        [container_id, owner_id, location_flag])
+                    container_owner_list.append([container_id, owner_id, location_flag])
 
             if container_owner_list:
-                marked_assets = await NAU.get_asset_in_container_owner_list(container_owner_list)
+                marked_assets = await NAU.get_asset_in_container_owner_list(
+                    container_owner_list
+                )
                 # 使用 (item_id, owner_id) 作为唯一标识
                 for asset in marked_assets:
-                    item_id = asset.get('item_id')
-                    owner_id = asset.get('owner_id')
+                    item_id = asset.get("item_id")
+                    owner_id = asset.get("owner_id")
                     if item_id and owner_id:
                         marked_asset_keys.add((item_id, owner_id))
 
         # 筛选出非标记资产
         unmarked_assets = []
         for asset in all_assets:
-            item_id = asset.get('item_id')
-            owner_id = asset.get('owner_id')
+            item_id = asset.get("item_id")
+            owner_id = asset.get("owner_id")
             if item_id and owner_id:
                 key = (item_id, owner_id)
                 if key not in marked_asset_keys:
@@ -835,11 +903,18 @@ async def get_unmarked_asset_value(
                 price_cache[type_id] = await market_manager.get_jita_buy_price(type_id)
             return price_cache[type_id]
 
+        # 过滤掉蓝图拷贝(BPC)，只计算蓝图原图(BPO)和其他资产
+        filtered_assets = [
+            asset
+            for asset in unmarked_assets
+            if not asset.get("is_blueprint_copy", False)
+        ]
+
         # 计算总价值
         total_value = 0.0
-        for asset in unmarked_assets:
-            type_id = asset.get('type_id')
-            quantity = asset.get('quantity', 0)
+        for asset in filtered_assets:
+            type_id = asset.get("type_id")
+            quantity = asset.get("quantity", 0)
 
             if not type_id or quantity <= 0:
                 continue
@@ -868,44 +943,45 @@ def process_overview_data_for_history(overview_data: dict) -> dict:
     processed = {}
 
     # 处理walletValue：如果是对象，对values求和；如果是数字，直接使用
-    wallet_value = overview_data.get('walletValue', 0)
+    wallet_value = overview_data.get("walletValue", 0)
     if isinstance(wallet_value, dict):
-        processed['walletValue'] = sum(wallet_value.values())
+        processed["walletValue"] = sum(wallet_value.values())
     elif isinstance(wallet_value, (int, float)):
-        processed['walletValue'] = wallet_value
+        processed["walletValue"] = wallet_value
     else:
-        processed['walletValue'] = 0.0
+        processed["walletValue"] = 0.0
 
     # 处理orderValue：同上
-    order_value = overview_data.get('orderValue', 0)
+    order_value = overview_data.get("orderValue", 0)
     if isinstance(order_value, dict):
-        processed['orderValue'] = sum(order_value.values())
+        processed["orderValue"] = sum(order_value.values())
     elif isinstance(order_value, (int, float)):
-        processed['orderValue'] = order_value
+        processed["orderValue"] = order_value
     else:
-        processed['orderValue'] = 0.0
+        processed["orderValue"] = 0.0
 
     # 其他字段直接使用数值
-    processed['runningProcessValue'] = float(
-        overview_data.get('runningProcessValue', 0.0))
-    processed['markedAssetValue'] = float(
-        overview_data.get('markedAssetValue', 0.0))
-    processed['unmarkedAssetValue'] = float(
-        overview_data.get('unmarkedAssetValue', 0.0))
+    processed["runningProcessValue"] = float(
+        overview_data.get("runningProcessValue", 0.0)
+    )
+    processed["markedAssetValue"] = float(overview_data.get("markedAssetValue", 0.0))
+    processed["unmarkedAssetValue"] = float(
+        overview_data.get("unmarkedAssetValue", 0.0)
+    )
 
     # 计算总价值
-    processed['totalValue'] = (
-        processed['walletValue'] +
-        processed['orderValue'] +
-        processed['runningProcessValue'] +
-        processed['markedAssetValue'] +
-        processed['unmarkedAssetValue']
+    processed["totalValue"] = (
+        processed["walletValue"]
+        + processed["orderValue"]
+        + processed["runningProcessValue"]
+        + processed["markedAssetValue"]
+        + processed["unmarkedAssetValue"]
     )
 
     return processed
 
 
-def get_today_date_beijing() -> 'date':
+def get_today_date_beijing() -> "date":
     """
     获取+8时区的今日日期（仅年月日）
 
@@ -930,7 +1006,9 @@ async def get_character_name(character_id: int) -> str:
     """
     try:
         # 1. 先检查本地数据库缓存
-        char_info = await EvePublicCharacterInfoDBUtils.select_public_character_info_by_character_id(character_id)
+        char_info = await EvePublicCharacterInfoDBUtils.select_public_character_info_by_character_id(
+            character_id
+        )
         if char_info and char_info.name:
             return char_info.name
 
@@ -945,11 +1023,13 @@ async def get_character_name(character_id: int) -> str:
         # 3. 通过ESI API获取
         try:
             char_info_data = await eveesi.characters_character(character_id)
-            if char_info_data and 'name' in char_info_data:
+            if char_info_data and "name" in char_info_data:
                 # 保存到缓存（使用CharacterManager的方法）
                 char_manager = CharacterManager()
-                await char_manager.get_public_character_info_by_character_id(character_id)
-                return char_info_data['name']
+                await char_manager.get_public_character_info_by_character_id(
+                    character_id
+                )
+                return char_info_data["name"]
         except Exception as e:
             logger.warning(f"通过ESI获取角色 {character_id} 信息失败: {e}")
 
@@ -973,12 +1053,12 @@ def calculate_job_progress(start_date: str, end_date: str) -> float:
     try:
         # 解析时间字符串
         if isinstance(start_date, str):
-            start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
         else:
             start = start_date
 
         if isinstance(end_date, str):
-            end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
         else:
             end = end_date
 
@@ -1027,17 +1107,13 @@ async def get_running_jobs_details(user_id: str) -> dict:
         # 提取所有 asset_container_id 作为目标库存列表
         target_container_ids = set()
         for conf in load_asset_confs:
-            asset_container_id = conf.get('asset_container_id')
+            asset_container_id = conf.get("asset_container_id")
             if asset_container_id:
                 target_container_ids.add(asset_container_id)
 
         if not target_container_ids:
             # 如果没有配置的库存，返回空列表
-            return {
-                "detail_list": [],
-                "summary_list": [],
-                "character_summary_list": []
-            }
+            return {"detail_list": [], "summary_list": [], "character_summary_list": []}
 
         # 获取所有jobs
         corp_jobs = await get_corporation_jobs(user_id)
@@ -1061,7 +1137,9 @@ async def get_running_jobs_details(user_id: str) -> dict:
         async def get_product_quantity_per_run(type_id: int) -> int:
             """获取每次运行的产出数量，带缓存"""
             if type_id not in product_quantity_cache:
-                product_quantity_cache[type_id] = await BPM.get_bp_product_quantity_typeid(type_id)
+                product_quantity_cache[
+                    type_id
+                ] = await BPM.get_bp_product_quantity_typeid(type_id)
             return product_quantity_cache[type_id]
 
         # 角色名缓存，避免重复查询
@@ -1070,7 +1148,9 @@ async def get_running_jobs_details(user_id: str) -> dict:
         async def get_installer_name(character_id: int) -> str:
             """获取启动角色名，带缓存"""
             if character_id not in character_name_cache:
-                character_name_cache[character_id] = await get_character_name(character_id)
+                character_name_cache[character_id] = await get_character_name(
+                    character_id
+                )
             return character_name_cache[character_id]
 
         # 详细信息列表
@@ -1078,21 +1158,21 @@ async def get_running_jobs_details(user_id: str) -> dict:
 
         # 处理公司jobs
         for job in corp_jobs:
-            output_location_id = job.get('output_location_id')
+            output_location_id = job.get("output_location_id")
             if output_location_id not in target_container_ids:
                 continue
 
             # 只识别制造（activity_id=1）和反应（activity_id=11）
-            activity_id = job.get('activity_id')
+            activity_id = job.get("activity_id")
             if activity_id not in (1, 9, 11):
                 continue
 
-            product_type_id = job.get('product_type_id')
+            product_type_id = job.get("product_type_id")
             if not product_type_id:
                 continue
 
             # 获取运行次数
-            runs = job.get('runs', 0)
+            runs = job.get("runs", 0)
             if runs <= 0:
                 continue
 
@@ -1105,23 +1185,25 @@ async def get_running_jobs_details(user_id: str) -> dict:
                 product_name_zh = product_name
 
             # 获取每次运行的产出数量
-            product_quantity_per_run = await get_product_quantity_per_run(product_type_id)
+            product_quantity_per_run = await get_product_quantity_per_run(
+                product_type_id
+            )
 
             # 计算总产出数量
             total_quantity = runs * product_quantity_per_run
 
             # 计算任务进度
-            start_date = job.get('start_date')
-            end_date = job.get('end_date')
+            start_date = job.get("start_date")
+            end_date = job.get("end_date")
             progress_percent = 0.0
             if start_date and end_date:
                 progress_percent = calculate_job_progress(start_date, end_date)
 
             # 获取cost
-            cost = job.get('cost', 0.0) or 0.0
+            cost = job.get("cost", 0.0) or 0.0
 
             # 获取启动角色名
-            installer_id = job.get('installer_id')
+            installer_id = job.get("installer_id")
             installer_name = "未知"
             if installer_id:
                 installer_name = await get_installer_name(installer_id)
@@ -1130,42 +1212,44 @@ async def get_running_jobs_details(user_id: str) -> dict:
             price = await get_price(product_type_id)
             value = total_quantity * price
 
-            detail_list.append({
-                "job_type": "公司",
-                "activity_id": activity_id,
-                "activity_type": "制造" if activity_id == 1 else "反应",
-                "product_type_id": product_type_id,
-                "product_name": product_name,
-                "product_name_zh": product_name_zh,
-                "runs": runs,
-                "product_quantity_per_run": product_quantity_per_run,
-                "total_quantity": total_quantity,
-                "progress_percent": round(progress_percent, 2),
-                "cost": cost,
-                "installer_id": installer_id,
-                "installer_name": installer_name,
-                "value": value,
-                "start_date": start_date,
-                "end_date": end_date
-            })
+            detail_list.append(
+                {
+                    "job_type": "公司",
+                    "activity_id": activity_id,
+                    "activity_type": "制造" if activity_id == 1 else "反应",
+                    "product_type_id": product_type_id,
+                    "product_name": product_name,
+                    "product_name_zh": product_name_zh,
+                    "runs": runs,
+                    "product_quantity_per_run": product_quantity_per_run,
+                    "total_quantity": total_quantity,
+                    "progress_percent": round(progress_percent, 2),
+                    "cost": cost,
+                    "installer_id": installer_id,
+                    "installer_name": installer_name,
+                    "value": value,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+            )
 
         # 处理个人jobs
         for job in character_jobs:
-            output_location_id = job.get('output_location_id')
+            output_location_id = job.get("output_location_id")
             if output_location_id not in target_container_ids:
                 continue
 
             # 只识别制造（activity_id=1）和反应（activity_id=11）
-            activity_id = job.get('activity_id')
+            activity_id = job.get("activity_id")
             if activity_id not in (1, 9, 11):
                 continue
 
-            product_type_id = job.get('product_type_id')
+            product_type_id = job.get("product_type_id")
             if not product_type_id:
                 continue
 
             # 获取运行次数
-            runs = job.get('runs', 0)
+            runs = job.get("runs", 0)
             if runs <= 0:
                 continue
 
@@ -1178,23 +1262,25 @@ async def get_running_jobs_details(user_id: str) -> dict:
                 product_name_zh = product_name
 
             # 获取每次运行的产出数量
-            product_quantity_per_run = await get_product_quantity_per_run(product_type_id)
+            product_quantity_per_run = await get_product_quantity_per_run(
+                product_type_id
+            )
 
             # 计算总产出数量
             total_quantity = runs * product_quantity_per_run
 
             # 计算任务进度
-            start_date = job.get('start_date')
-            end_date = job.get('end_date')
+            start_date = job.get("start_date")
+            end_date = job.get("end_date")
             progress_percent = 0.0
             if start_date and end_date:
                 progress_percent = calculate_job_progress(start_date, end_date)
 
             # 获取cost
-            cost = job.get('cost', 0.0) or 0.0
+            cost = job.get("cost", 0.0) or 0.0
 
             # 获取启动角色名
-            installer_id = job.get('installer_id')
+            installer_id = job.get("installer_id")
             installer_name = "未知"
             if installer_id:
                 installer_name = await get_installer_name(installer_id)
@@ -1203,24 +1289,26 @@ async def get_running_jobs_details(user_id: str) -> dict:
             price = await get_price(product_type_id)
             value = total_quantity * price
 
-            detail_list.append({
-                "job_type": "个人",
-                "activity_id": activity_id,
-                "activity_type": "制造" if activity_id == 1 else "反应",
-                "product_type_id": product_type_id,
-                "product_name": product_name,
-                "product_name_zh": product_name_zh,
-                "runs": runs,
-                "product_quantity_per_run": product_quantity_per_run,
-                "total_quantity": total_quantity,
-                "progress_percent": round(progress_percent, 2),
-                "cost": cost,
-                "installer_id": installer_id,
-                "installer_name": installer_name,
-                "value": value,
-                "start_date": start_date,
-                "end_date": end_date
-            })
+            detail_list.append(
+                {
+                    "job_type": "个人",
+                    "activity_id": activity_id,
+                    "activity_type": "制造" if activity_id == 1 else "反应",
+                    "product_type_id": product_type_id,
+                    "product_name": product_name,
+                    "product_name_zh": product_name_zh,
+                    "runs": runs,
+                    "product_quantity_per_run": product_quantity_per_run,
+                    "total_quantity": total_quantity,
+                    "progress_percent": round(progress_percent, 2),
+                    "cost": cost,
+                    "installer_id": installer_id,
+                    "installer_name": installer_name,
+                    "value": value,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+            )
 
         # 按物品种类分类汇总
         summary_dict = {}
@@ -1232,7 +1320,7 @@ async def get_running_jobs_details(user_id: str) -> dict:
                     "product_name": detail["product_name"],
                     "product_name_zh": detail["product_name_zh"],
                     "total_quantity": 0,
-                    "total_value": 0.0
+                    "total_value": 0.0,
                 }
             summary_dict[product_type_id]["total_quantity"] += detail["total_quantity"]
             summary_dict[product_type_id]["total_value"] += detail["value"]
@@ -1256,34 +1344,36 @@ async def get_running_jobs_details(user_id: str) -> dict:
                     "manufacturing_running_count": 0,
                     "manufacturing_completed_count": 0,
                     "reaction_running_count": 0,
-                    "reaction_completed_count": 0
+                    "reaction_completed_count": 0,
                 }
 
             # 统计运行中任务数量（分别统计制造和反应）
             progress_percent = detail.get("progress_percent", 0)
             if activity_id == 1:  # 制造
                 if progress_percent < 100:
-                    character_summary_dict[installer_id]["manufacturing_running_count"] += 1
+                    character_summary_dict[installer_id][
+                        "manufacturing_running_count"
+                    ] += 1
                 else:
-                    character_summary_dict[installer_id]["manufacturing_completed_count"] += 1
+                    character_summary_dict[installer_id][
+                        "manufacturing_completed_count"
+                    ] += 1
             elif activity_id == 11 or activity_id == 9:  # 反应
                 if progress_percent < 100:
                     character_summary_dict[installer_id]["reaction_running_count"] += 1
                 else:
-                    character_summary_dict[installer_id]["reaction_completed_count"] += 1
+                    character_summary_dict[installer_id][
+                        "reaction_completed_count"
+                    ] += 1
 
         character_summary_list = list(character_summary_dict.values())
 
         return {
             "detail_list": detail_list,
             "summary_list": summary_list,
-            "character_summary_list": character_summary_list
+            "character_summary_list": character_summary_list,
         }
 
     except Exception as e:
         logger.error(f"获取运行中任务详情失败: {traceback.format_exc()}")
-        return {
-            "detail_list": [],
-            "summary_list": [],
-            "character_summary_list": []
-        }
+        return {"detail_list": [], "summary_list": [], "character_summary_list": []}

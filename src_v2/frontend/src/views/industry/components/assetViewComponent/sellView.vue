@@ -615,4 +615,91 @@ const filteredAssetView = computed(() => {
         font-size: 9px;
     }
 }
+
+/* Theme override */
+.sell-view-content,
+.sell-view-container,
+.config-card,
+.toolbar,
+.search-container,
+.asset-grid,
+.asset-item-card,
+.asset-item-content,
+.asset-info-section {
+    border-color: var(--k-color-border) !important;
+}
+
+.sell-view-content,
+.sell-view-container,
+.toolbar,
+.search-container,
+.asset-item-card {
+    background: var(--k-color-surface) !important;
+    color: var(--k-color-text) !important;
+}
+
+.asset-item-card {
+    box-shadow: var(--k-shadow-sm) !important;
+}
+
+.asset-item-card:hover {
+    box-shadow: var(--k-shadow-md) !important;
+    background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+}
+
+.config-card {
+    background: linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface-soft)) 0%,
+        color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-surface)) 100%
+    ) !important;
+    color: var(--k-color-text) !important;
+}
+
+.config-label,
+.time-label,
+.asset-name-en,
+.price-unit {
+    color: var(--k-color-text-secondary) !important;
+}
+
+.time-value,
+.price-value {
+    color: var(--k-color-primary) !important;
+}
+
+.asset-name-zh {
+    color: var(--k-color-text) !important;
+}
+
+.asset-sellable-badge {
+    background: linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--k-color-warning) 90%, #0000) 0%,
+        color-mix(in srgb, var(--k-color-warning) 65%, #0000) 100%
+    ) !important;
+}
+
+.quantity-number {
+    color: var(--k-color-success) !important;
+}
+
+.quantity-unit {
+    color: color-mix(in srgb, var(--k-color-success) 72%, var(--k-color-text-secondary)) !important;
+}
+
+.sell-view-container :deep(.el-input__wrapper),
+.sell-view-container :deep(.el-card),
+.sell-view-container :deep(.el-button),
+.sell-view-container :deep(.el-tag) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+.sell-view-container :deep(.el-button:not(.el-button--primary):hover) {
+    color: var(--k-color-primary) !important;
+    background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
+    border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
+}
 </style>

@@ -17,7 +17,7 @@ const form = ref({
 })
 
 type Mission = {
-  id: string | number
+  id?: string | number
   subject_type: 'character' | 'corp'
   subject_name: string
   subject_id: number
@@ -27,6 +27,7 @@ type Mission = {
   step_name?: string
   is_indeterminate?: boolean
   user_name?: string  // 任务创建者（管理员可见）
+  is_abnormal?: boolean  // 主体已不存在，仅支持删除
 }
 
 const missions = ref<Mission[]>([])
@@ -432,6 +433,10 @@ const handleCreateMission = async () => {
 
 // 检查是否可以立刻拉取（距离上次拉取超过5分钟，或者从未拉取过）
 const canPullNow = (row: Mission): boolean => {
+  // 异常任务（主体已不存在）无法拉取
+  if (row.is_abnormal) {
+    return false
+  }
   // 如果任务正在拉取中，不能再次拉取
   const missionKey = getMissionKey(row)
   if (pullingMissions.value.has(missionKey)) {
@@ -606,7 +611,12 @@ onUnmounted(() => {
             <el-tag type="warning" v-else>corp</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="主体名称" prop="subject_name" min-width="auto" />
+        <el-table-column label="主体名称" prop="subject_name" min-width="auto">
+          <template #default="{ row }">
+            <span>{{ row.subject_name }}</span>
+            <el-tag v-if="row.is_abnormal" type="danger" size="small" style="margin-left: 6px;">异常</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column v-if="isAdmin" label="创建者" prop="user_name" width="120" />
         <el-table-column label="上次拉取时间" prop="last_pull_time" width="190px">
           <template #default="{ row }">
@@ -615,7 +625,8 @@ onUnmounted(() => {
         </el-table-column>
         <el-table-column label="拉取状态" prop="pull_status" width="250px">
           <template #default="{ row }">
-            <div>
+            <div v-if="row.is_abnormal" style="color: #f56c6c; font-size: 12px;">主体已不存在，无法拉取</div>
+            <div v-else>
               <el-progress :percentage="row.is_indeterminate ? 50 : (row.pull_status ?? 0)"
                 :indeterminate="row.is_indeterminate === true" :striped="!row.is_indeterminate"
                 :striped-flow="!row.is_indeterminate" />
@@ -627,12 +638,11 @@ onUnmounted(() => {
         </el-table-column>
         <el-table-column label="操作" width="300px" fixed="right">
           <template #default="{ row }">
-            <!-- 立刻拉取 -->
-            <!-- 如果上次拉取时间超过5分钟，或者从未拉取过，则可点击 -->
+            <!-- 立刻拉取：异常任务禁用 -->
             <el-tooltip
-              :content="canPullNow(row) ? '可以立刻拉取' : (isPulling(row) ? '正在拉取中...' : formatRemainingTime(getRemainingSeconds(row.last_pull_time)))"
+              :content="row.is_abnormal ? '主体已不存在，无法拉取' : (canPullNow(row) ? '可以立刻拉取' : (isPulling(row) ? '正在拉取中...' : formatRemainingTime(getRemainingSeconds(row.last_pull_time))))"
               placement="top">
-              <el-button size="small" type="primary" plain @click="handlePullMission(row)">
+              <el-button size="small" type="primary" plain :disabled="row.is_abnormal" @click="handlePullMission(row)">
                 <el-icon style="margin-right:4px">
                   <Refresh />
                 </el-icon>

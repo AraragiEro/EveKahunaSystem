@@ -4,6 +4,7 @@ import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
 import { ElMessage } from 'element-plus'
 import { ArrowUp, ArrowDown, Refresh } from '@element-plus/icons-vue'
+import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
 
 // 资产数据结构
 interface AssetItem {
@@ -249,9 +250,11 @@ const containerChartRef = ref<HTMLElement>()
 const typeChartRef = ref<HTMLElement>()
 let containerChartInstance: echarts.ECharts | null = null
 let typeChartInstance: echarts.ECharts | null = null
+let cleanupThemeWatcher: (() => void) | null = null
 
 // 初始化容器分类饼图
 const initContainerChart = () => {
+    const c = getChartThemeColors()
     if (!containerChartRef.value) return
     
     const data = containerStats.value
@@ -279,10 +282,12 @@ const initContainerChart = () => {
             text: '容器分类占比',
             left: 'center',
             textStyle: {
-                fontSize: 16
+                fontSize: 16,
+                color: c.text
             }
         },
         tooltip: {
+            ...themedTooltip(c),
             trigger: 'item',
             formatter: (params: any) => {
                 const percentage = ((params.value / total) * 100).toFixed(2)
@@ -292,7 +297,8 @@ const initContainerChart = () => {
         legend: {
             orient: 'vertical',
             left: 'left',
-            top: 'middle'
+            top: 'middle',
+            textStyle: { color: c.textSecondary }
         },
         series: [
             {
@@ -302,11 +308,12 @@ const initContainerChart = () => {
                 avoidLabelOverlap: false,
                 itemStyle: {
                     borderRadius: 10,
-                    borderColor: '#fff',
+                    borderColor: c.surface,
                     borderWidth: 2
                 },
                 label: {
                     show: true,
+                    color: c.text,
                     formatter: (params: any) => {
                         const percentage = ((params.value / total) * 100).toFixed(1)
                         return `${params.name}\n${percentage}%`
@@ -316,7 +323,8 @@ const initContainerChart = () => {
                     label: {
                         show: true,
                         fontSize: 16,
-                        fontWeight: 'bold'
+                        fontWeight: 'bold',
+                        color: c.text
                     }
                 },
                 data: chartData
@@ -330,6 +338,7 @@ const initContainerChart = () => {
 
 // 初始化类型分类饼图
 const initTypeChart = () => {
+    const c = getChartThemeColors()
     if (!typeChartRef.value) return
     
     const data = typeStats.value
@@ -357,10 +366,12 @@ const initTypeChart = () => {
             text: '类型分类占比',
             left: 'center',
             textStyle: {
-                fontSize: 16
+                fontSize: 16,
+                color: c.text
             }
         },
         tooltip: {
+            ...themedTooltip(c),
             trigger: 'item',
             formatter: (params: any) => {
                 const percentage = ((params.value / total) * 100).toFixed(2)
@@ -370,7 +381,8 @@ const initTypeChart = () => {
         legend: {
             orient: 'vertical',
             left: 'left',
-            top: 'middle'
+            top: 'middle',
+            textStyle: { color: c.textSecondary }
         },
         series: [
             {
@@ -380,11 +392,12 @@ const initTypeChart = () => {
                 avoidLabelOverlap: false,
                 itemStyle: {
                     borderRadius: 10,
-                    borderColor: '#fff',
+                    borderColor: c.surface,
                     borderWidth: 2
                 },
                 label: {
                     show: true,
+                    color: c.text,
                     formatter: (params: any) => {
                         const percentage = ((params.value / total) * 100).toFixed(1)
                         return `${params.name}\n${percentage}%`
@@ -394,7 +407,8 @@ const initTypeChart = () => {
                     label: {
                         show: true,
                         fontSize: 16,
-                        fontWeight: 'bold'
+                        fontWeight: 'bold',
+                        color: c.text
                     }
                 },
                 data: chartData
@@ -494,6 +508,9 @@ onMounted(async () => {
     }, 300)
     
     window.addEventListener('resize', handleResize)
+    cleanupThemeWatcher = onThemeTokenChange(() => {
+        updateCharts()
+    })
 })
 
 // 组件卸载
@@ -513,6 +530,9 @@ onUnmounted(() => {
     }
     
     window.removeEventListener('resize', handleResize)
+
+    cleanupThemeWatcher?.()
+    cleanupThemeWatcher = null
 })
 
 </script>
@@ -1048,6 +1068,67 @@ onUnmounted(() => {
         width: 100%;
         text-align: left;
     }
+}
+
+/* Theme override */
+.statistics-view-content,
+.statistics-view-container,
+.toolbar,
+.summary-card,
+.total-value-card,
+.charts-container,
+.chart-card,
+.outer-card,
+.inner-card,
+.detail-content {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+.summary-card,
+.chart-card,
+.outer-card,
+.inner-card {
+    box-shadow: var(--k-shadow-sm) !important;
+}
+
+.outer-card:hover,
+.chart-card:hover,
+.summary-card:hover {
+    box-shadow: var(--k-shadow-md) !important;
+}
+
+.header-title,
+.asset-name-zh,
+.stat-value {
+    color: var(--k-color-text) !important;
+}
+
+.total-value-label,
+.asset-name-en,
+.stat-label {
+    color: var(--k-color-text-secondary) !important;
+}
+
+.asset-avatar {
+    border-color: var(--k-color-border) !important;
+}
+
+.statistics-view-container :deep(.el-card),
+.statistics-view-container :deep(.el-dialog),
+.statistics-view-container :deep(.el-dialog__header),
+.statistics-view-container :deep(.el-dialog__body),
+.statistics-view-container :deep(.el-dialog__footer),
+.statistics-view-container :deep(.el-button),
+.statistics-view-container :deep(.el-tag) {
+    border-color: var(--k-color-border) !important;
+}
+
+.statistics-view-container :deep(.el-button:not(.el-button--primary):hover) {
+    color: var(--k-color-primary) !important;
+    background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
+    border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
 }
 </style>
 

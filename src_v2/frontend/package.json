@@ -26,6 +26,7 @@
     "epic-spinners": "^2.0.0",
     "lz-string": "^1.5.0",
     "marked": "^12.0.0",
+    "mermaid": "^11.12.2",
     "pinia": "^3.0.3",
     "sortablejs": "^1.15.6",
     "vue": "^3.5.17",

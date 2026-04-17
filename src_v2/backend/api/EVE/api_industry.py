@@ -342,7 +342,9 @@ async def get_plan_table_data():
         else:
             plan_table_data = await IndustryManager.get_plan(user_id)
 
-        logger.info(f"获取计划表格数据: {plan_table_data} ")
+        plan_count = len(plan_table_data) if isinstance(plan_table_data, list) else 0
+        logger.info(f"获取计划表格数据完成: user={user_id}, 计划条目数={plan_count}")
+        logger.debug(f"获取计划表格数据明细: {plan_table_data}")
         return jsonify({"data": plan_table_data, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
@@ -1768,6 +1770,11 @@ async def get_config_flow_list():
                 f"管理员 {current_user_id} 获取用户 {user_id} 的计划配置流: {data['plan_name']}")
 
         config_flow_list = await IndustryManager.get_config_flow_list(user_id, data["plan_name"])
+        logger.info(
+            f"获取计划配置流完成: operator={current_user_id}, target={user_id}, "
+            f"plan_name={data['plan_name']}, 配置条目数={len(config_flow_list)}"
+        )
+        logger.debug(f"获取计划配置流明细: {config_flow_list}")
         return jsonify({"data": config_flow_list, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
@@ -1819,10 +1826,29 @@ async def save_config_flow_to_plan():
             "message": "保存配置流成功"
         }
     """
-    data = await request.json
-    current_user_id = g.current_user["user_id"]
-
     try:
+        data = await request.get_json()
+        current_user = getattr(g, "current_user", {}) or {}
+        current_user_id = current_user.get("user_id")
+
+        logger.info(
+            f"[saveConfigFlowToPlan] 请求进入 current_user_id={current_user_id}, "
+            f"has_data={data is not None}, keys={list(data.keys()) if isinstance(data, dict) else 'not_dict'}"
+        )
+
+        if not isinstance(data, dict):
+            logger.warning("[saveConfigFlowToPlan] 请求体不是JSON对象")
+            return jsonify({"status": 400, "message": "请求体必须是JSON对象"}), 400
+        if not current_user_id:
+            logger.warning("[saveConfigFlowToPlan] 当前用户信息缺失，token可能无user_id")
+            return jsonify({"status": 401, "message": "用户认证信息无效"}), 401
+        if "plan_name" not in data:
+            logger.warning("[saveConfigFlowToPlan] 缺少必填参数 plan_name")
+            return jsonify({"status": 400, "message": "缺少参数 plan_name"}), 400
+        if "config_list" not in data or not isinstance(data["config_list"], list):
+            logger.warning("[saveConfigFlowToPlan] 缺少或非法参数 config_list")
+            return jsonify({"status": 400, "message": "缺少参数 config_list 或类型错误"}), 400
+
         # 检查用户是否有admin角色
         user_roles = await permission_manager.get_user_roles(current_user_id)
         # 获取所有角色（直接角色 + 所有父角色）
@@ -1846,13 +1872,18 @@ async def save_config_flow_to_plan():
             user_id = current_user_id
 
         await IndustryManager.save_config_flow_to_plan(user_id, data["plan_name"], data)
+        logger.info(
+            f"[saveConfigFlowToPlan] 保存成功 operator={current_user_id}, target={user_id}, "
+            f"plan_name={data['plan_name']}, config_count={len(data['config_list'])}"
+        )
         return jsonify({"message": "保存配置流成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
+        logger.error(f"[saveConfigFlowToPlan] 业务异常: {str(e)}", exc_info=True)
         return jsonify({"status": 500, "message": str(e)}), 500
     except Exception as e:
         traceback.print_exc()
-        logger.error(f"保存配置流失败: {traceback.format_exc()}")
+        logger.error(f"[saveConfigFlowToPlan] 未知异常: {str(e)}", exc_info=True)
         return jsonify({"status": 500, "message": "保存配置流失败"}), 500
 
 # 保存配置流预设

@@ -130,10 +130,16 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
 </template>
 
 <style scoped>
+/* 浅色主题：缺失材料行使用较深的红色背景，与白色/浅色背景形成强烈对比 */
 :deep(.el-table .lack-row) {
-    background-color: #ffc6c6 !important;
+    background-color: #ff6b6b !important;
     font-weight: bold !important;
-    color: #000000 !important;
+    color: #ffffff !important;
+}
+
+/* 确保 el-table 行样式优先级 */
+:deep(.el-table__body .el-table__row.lack-row) {
+    background-color: #ff6b6b !important;
 }
 
 /* 可点击复制的单元格样式 */
@@ -154,6 +160,36 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
 .copyable-cell:active {
     background-color: #e1f5ff;
     transform: scale(0.98);
+}
+</style>
+
+<style>
+/* 浅色主题：缺失材料行使用较深的红色背景 */
+.el-table .el-table__row.lack-row {
+    background-color: #ff6b6b !important;
+    font-weight: bold !important;
+    color: #ffffff !important;
+}
+
+.el-table__body .el-table__row.lack-row {
+    background-color: #ff6b6b !important;
+}
+
+/* 深色主题：使用全局样式确保能匹配到 data-theme="dark" 在 html 元素上的情况 */
+[data-theme="dark"] .el-table .el-table__row.lack-row {
+    background-color: #ff4444 !important;
+    font-weight: bold !important;
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] .el-table__body .el-table__row.lack-row {
+    background-color: #ff4444 !important;
+}
+
+/* 深色主题下可点击单元格的悬停效果调整 */
+[data-theme="dark"] .copyable-cell:hover {
+    background-color: rgba(64, 158, 255, 0.2);
+    color: #66b1ff;
 }
 </style>
 

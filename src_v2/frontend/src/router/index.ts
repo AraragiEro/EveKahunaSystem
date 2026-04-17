@@ -24,6 +24,12 @@ const baseRoutes = [
       meta: { requiresAuth: false }
     },
     {
+      path: '/announcements',
+      name: 'announcements',
+      component: () => import('../views/announcements/AnnouncementView.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
       path: '/',
       redirect: '/landing'
     },
@@ -175,6 +181,12 @@ const baseRoutes = [
       path: '/storage/:sid',
       name: 'publicStorage',
       component: () => import('../views/public/storage.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
+      path: '/workflow/:token',
+      name: 'publicWorkflow',
+      component: () => import('../views/public/workflow.vue'),
       meta: { requiresAuth: false }
     },
     {

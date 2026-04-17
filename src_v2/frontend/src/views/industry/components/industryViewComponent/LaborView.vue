@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
+import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
 
 // 定义接口类型
 interface RunningJobData {
@@ -228,9 +229,11 @@ const salaryChartRef = ref<HTMLElement>()
 const costSalaryChartRef = ref<HTMLElement>()
 let salaryChartInstance: echarts.ECharts | null = null
 let costSalaryChartInstance: echarts.ECharts | null = null
+let cleanupThemeWatcher: (() => void) | null = null
 
 // 初始化工资占比饼图
 const initSalaryChart = () => {
+    const c = getChartThemeColors()
     if (!salaryChartRef.value) return
     
     // 如果数据为空，不初始化图表
@@ -257,10 +260,12 @@ const initSalaryChart = () => {
             text: '工资占比',
             left: 'center',
             textStyle: {
-                fontSize: 16
+                fontSize: 16,
+                color: c.text
             }
         },
         tooltip: {
+            ...themedTooltip(c),
             trigger: 'item',
             formatter: (params: any) => {
                 const percentage = ((params.value / laborSummary.value.reduce((sum, item) => sum + item.total_salary, 0)) * 100).toFixed(2)
@@ -270,7 +275,8 @@ const initSalaryChart = () => {
         legend: {
             orient: 'vertical',
             left: 'left',
-            top: 'middle'
+            top: 'middle',
+            textStyle: { color: c.textSecondary }
         },
         series: [
             {
@@ -280,11 +286,12 @@ const initSalaryChart = () => {
                 avoidLabelOverlap: false,
                 itemStyle: {
                     borderRadius: 10,
-                    borderColor: '#fff',
+                    borderColor: c.surface,
                     borderWidth: 2
                 },
                 label: {
                     show: true,
+                    color: c.text,
                     formatter: (params: any) => {
                         const percentage = ((params.value / laborSummary.value.reduce((sum, item) => sum + item.total_salary, 0)) * 100).toFixed(1)
                         return `${params.name}\n${percentage}%`
@@ -294,7 +301,8 @@ const initSalaryChart = () => {
                     label: {
                         show: true,
                         fontSize: 16,
-                        fontWeight: 'bold'
+                        fontWeight: 'bold',
+                        color: c.text
                     }
                 },
                 data: data
@@ -309,6 +317,7 @@ const initSalaryChart = () => {
 
 // 初始化 cost 和工资占比饼图
 const initCostSalaryChart = () => {
+    const c = getChartThemeColors()
     if (!costSalaryChartRef.value) return
     
     // 如果数据为空，不初始化图表
@@ -353,10 +362,12 @@ const initCostSalaryChart = () => {
             text: '成本与工资占比',
             left: 'center',
             textStyle: {
-                fontSize: 16
+                fontSize: 16,
+                color: c.text
             }
         },
         tooltip: {
+            ...themedTooltip(c),
             trigger: 'item',
             formatter: (params: any) => {
                 const percentage = ((params.value / total) * 100).toFixed(2)
@@ -379,7 +390,7 @@ const initCostSalaryChart = () => {
                             r: 6
                         },
                         style: {
-                            fill: '#409EFF'
+                            fill: c.primary
                         },
                         x: 0,
                         y: 0
@@ -388,7 +399,7 @@ const initCostSalaryChart = () => {
                         type: 'text',
                         style: {
                             text: '成本',
-                            fill: '#333',
+                            fill: c.text,
                             fontSize: 14
                         },
                         x: 15,
@@ -408,7 +419,7 @@ const initCostSalaryChart = () => {
                             r: 6
                         },
                         style: {
-                            fill: '#67C23A'
+                            fill: c.success
                         },
                         x: 0,
                         y: 0
@@ -417,7 +428,7 @@ const initCostSalaryChart = () => {
                         type: 'text',
                         style: {
                             text: '工资',
-                            fill: '#333',
+                            fill: c.text,
                             fontSize: 14
                         },
                         x: 15,
@@ -435,11 +446,12 @@ const initCostSalaryChart = () => {
                 avoidLabelOverlap: false,
                 itemStyle: {
                     borderRadius: 10,
-                    borderColor: '#fff',
+                    borderColor: c.surface,
                     borderWidth: 2
                 },
                 label: {
                     show: true,
+                    color: c.text,
                     formatter: (params: any) => {
                         const percentage = ((params.value / total) * 100).toFixed(1)
                         // 显示"成本"或"工资"以及占比
@@ -455,7 +467,8 @@ const initCostSalaryChart = () => {
                     label: {
                         show: true,
                         fontSize: 16,
-                        fontWeight: 'bold'
+                        fontWeight: 'bold',
+                        color: c.text
                     }
                 },
                 data: chartData
@@ -564,6 +577,9 @@ onMounted(async () => {
     
     // 响应式调整图表大小
     window.addEventListener('resize', handleResize)
+    cleanupThemeWatcher = onThemeTokenChange(() => {
+        updateCharts()
+    })
 })
 
 // 组件卸载
@@ -585,6 +601,9 @@ onUnmounted(() => {
     }
     // 移除事件监听
     window.removeEventListener('resize', handleResize)
+
+    cleanupThemeWatcher?.()
+    cleanupThemeWatcher = null
 })
 </script>
 
@@ -812,5 +831,48 @@ onUnmounted(() => {
 :deep(.el-form-item) {
     margin-bottom: 0;
 }
-</style>
 
+/* Theme override */
+.labor-view,
+.config-card,
+.table-card,
+.chart-card {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+.card-header,
+.activity-name {
+    color: var(--k-color-text) !important;
+}
+
+.activity-value {
+    color: var(--k-color-text-secondary) !important;
+}
+
+.copyable-cell:hover {
+    background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
+    color: var(--k-color-primary) !important;
+}
+
+:deep(.el-card),
+:deep(.el-card__header),
+:deep(.el-card__body),
+:deep(.el-form-item__label),
+:deep(.el-input__wrapper),
+:deep(.el-input-number .el-input__wrapper),
+:deep(.el-input-number__decrease),
+:deep(.el-input-number__increase),
+:deep(.el-table),
+:deep(.el-table th.el-table__cell),
+:deep(.el-table td.el-table__cell) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+:deep(.el-table th.el-table__cell) {
+    background: var(--k-color-surface-soft) !important;
+}
+</style>

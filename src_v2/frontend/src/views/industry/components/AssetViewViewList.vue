@@ -1053,9 +1053,10 @@ onMounted(async () => {
 .admin-user-selector {
     margin-bottom: 20px;
     padding: 16px;
-    background-color: #f5f7fa;
-    border-radius: 4px;
-    border: 1px solid #e4e7ed;
+    background: var(--k-color-surface-soft);
+    border-radius: 8px;
+    border: 1px solid var(--k-color-border);
+    color: var(--k-color-text);
 }
 
 /* 网格布局 */
@@ -1070,14 +1071,52 @@ onMounted(async () => {
 .add-monitor-card {
     min-height: 200px;
     cursor: pointer;
-    transition: all 0.3s ease;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border: none;
+    transition: transform 0.28s ease, box-shadow 0.28s ease, border-color 0.28s ease;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--k-color-primary) 42%, var(--k-color-border));
+    background:
+        radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--k-color-primary) 30%, transparent) 0%, transparent 45%),
+        linear-gradient(140deg,
+            color-mix(in srgb, var(--k-color-primary) 56%, #ffffff) 0%,
+            color-mix(in srgb, var(--k-color-primary) 42%, #eaf2ff) 55%,
+            color-mix(in srgb, var(--k-color-primary) 30%, #f5f9ff) 100%);
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--k-color-primary) 28%, transparent),
+        0 14px 34px color-mix(in srgb, var(--k-color-primary) 20%, transparent);
+}
+
+:global([data-theme='dark']) .add-monitor-card {
+    background:
+        radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--k-color-primary) 30%, transparent) 0%, transparent 45%),
+        linear-gradient(140deg,
+            color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface)) 55%,
+            color-mix(in srgb, #0b1120 65%, var(--k-color-surface)) 100%);
 }
 
 .add-monitor-card:hover {
     transform: translateY(-4px);
-    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+    border-color: color-mix(in srgb, var(--k-color-primary) 66%, var(--k-color-border));
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--k-color-primary) 44%, transparent),
+        0 20px 42px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
+}
+
+.add-monitor-card::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    pointer-events: none;
+    background: linear-gradient(120deg, transparent 18%, color-mix(in srgb, var(--k-color-primary) 34%, transparent) 50%, transparent 82%);
+    opacity: 0;
+    transform: translateX(-120%);
+    transition: transform 0.55s ease, opacity 0.28s ease;
+}
+
+.add-monitor-card:hover::before {
+    opacity: 1;
+    transform: translateX(120%);
 }
 
 .add-monitor-content {
@@ -1105,13 +1144,41 @@ onMounted(async () => {
 .asset-view-card {
     min-height: 200px;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
     position: relative;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--k-color-primary) 24%, var(--k-color-border)) !important;
+    background:
+        linear-gradient(160deg,
+            color-mix(in srgb, var(--k-color-surface) 92%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
+    box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 12%, transparent),
+        0 8px 24px color-mix(in srgb, #0b1120 16%, transparent);
 }
 
 .asset-view-card:hover {
     transform: translateY(-4px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    border-color: color-mix(in srgb, var(--k-color-primary) 46%, var(--k-color-border)) !important;
+    box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 22%, transparent),
+        0 16px 36px color-mix(in srgb, var(--k-color-primary) 18%, transparent);
+}
+
+.asset-view-card::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    pointer-events: none;
+    background: linear-gradient(125deg, transparent 15%, color-mix(in srgb, var(--k-color-primary) 26%, transparent) 46%, transparent 74%);
+    opacity: 0;
+    transform: translateX(-120%);
+    transition: transform 0.6s ease, opacity 0.24s ease;
+}
+
+.asset-view-card:hover::after {
+    opacity: 0.95;
+    transform: translateX(120%);
 }
 
 .card-header {
@@ -1128,14 +1195,14 @@ onMounted(async () => {
 .card-title {
     font-size: 16px;
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-text);
     margin-bottom: 8px;
     word-break: break-word;
 }
 
 .card-sid {
     font-size: 12px;
-    color: #909399;
+    color: var(--k-color-text-secondary);
 }
 
 .public-badge {
@@ -1155,7 +1222,8 @@ onMounted(async () => {
     justify-content: flex-end;
     margin-top: 16px;
     padding-top: 16px;
-    border-top: 1px solid #f0f0f0;
+    border-top: 1px solid var(--k-color-border);
+    position: relative;
 }
 
 /* 资产视图对话框 */
@@ -1179,7 +1247,7 @@ onMounted(async () => {
 .form-hint {
     margin-left: 12px;
     font-size: 12px;
-    color: #909399;
+    color: var(--k-color-text-secondary);
 }
 
 .filter-groups {
@@ -1188,13 +1256,18 @@ onMounted(async () => {
 
 .filter-group-card {
     margin-bottom: 16px;
-    border: 1px solid #e4e7ed;
+    border: 1px solid var(--k-color-border);
+    background:
+        linear-gradient(160deg,
+            color-mix(in srgb, var(--k-color-surface) 94%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 5%, var(--k-color-surface)) 100%) !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 12%, transparent);
 }
 
 .filter-group-card :deep(.el-card__header) {
     padding: 12px 16px;
-    background-color: #f5f7fa;
-    border-bottom: 1px solid #e4e7ed;
+    background: var(--k-color-surface-soft);
+    border-bottom: 1px solid var(--k-color-border);
 }
 
 .filter-group-header {
@@ -1202,7 +1275,7 @@ onMounted(async () => {
     justify-content: space-between;
     align-items: center;
     font-weight: 500;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .add-filter-btn {
@@ -1215,7 +1288,7 @@ onMounted(async () => {
     gap: 12px;
     margin-top: 24px;
     padding-top: 20px;
-    border-top: 1px solid #e4e7ed;
+    border-top: 1px solid var(--k-color-border);
 }
 
 /* 增加监控对话框 */
@@ -1230,7 +1303,7 @@ onMounted(async () => {
 .add-monitor-form .dialog-actions {
     margin-top: 20px;
     padding-top: 20px;
-    border-top: 1px solid #e4e7ed;
+    border-top: 1px solid var(--k-color-border);
 }
 
 .container-selector {
@@ -1247,7 +1320,7 @@ onMounted(async () => {
 .selected-count {
     margin-left: auto;
     font-size: 14px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .loading-tip {
@@ -1256,10 +1329,44 @@ onMounted(async () => {
     gap: 8px;
     padding: 12px;
     margin-bottom: 12px;
-    background-color: #f5f7fa;
+    background: var(--k-color-surface-soft);
     border-radius: 4px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
     font-size: 14px;
+}
+
+.asset-view-container :deep(.el-card),
+.asset-view-container :deep(.el-card__header),
+.asset-view-container :deep(.el-card__body) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+.asset-view-container :deep(.el-card) {
+    border-radius: 12px !important;
+}
+
+.asset-view-container :deep(.el-card.add-monitor-card),
+.asset-view-container :deep(.el-card.add-monitor-card .el-card__body) {
+    border: 1px solid color-mix(in srgb, var(--k-color-primary) 42%, var(--k-color-border)) !important;
+    background:
+        radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--k-color-primary) 30%, transparent) 0%, transparent 45%),
+        linear-gradient(140deg,
+            color-mix(in srgb, var(--k-color-primary) 56%, #ffffff) 0%,
+            color-mix(in srgb, var(--k-color-primary) 42%, #eaf2ff) 55%,
+            color-mix(in srgb, var(--k-color-primary) 30%, #f5f9ff) 100%) !important;
+    color: #fff !important;
+}
+
+:global([data-theme='dark']) .asset-view-container :deep(.el-card.add-monitor-card),
+:global([data-theme='dark']) .asset-view-container :deep(.el-card.add-monitor-card .el-card__body) {
+    background:
+        radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--k-color-primary) 30%, transparent) 0%, transparent 45%),
+        linear-gradient(140deg,
+            color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface)) 55%,
+            color-mix(in srgb, #0b1120 65%, var(--k-color-surface)) 100%) !important;
 }
 
 .loading-tip .el-icon {

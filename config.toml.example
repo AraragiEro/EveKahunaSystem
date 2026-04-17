@@ -27,6 +27,12 @@ PORT = 7890
 # SECRET_KEY
 SECRET_KEY = "生成一个安全的随机密钥"
 
+[GOOGLE]
+# Google 服务账号密钥 JSON 文件路径
+CREDENTIALS = "credentials/google-service-account.json"
+# Google Sheet 的 spreadsheetId（不是 URL）
+MARKET_MONITOR_SPREADSHEET_ID = ""
+
 [ADMIN]
 # 是否创建默认管理员账号
 create_admin = false

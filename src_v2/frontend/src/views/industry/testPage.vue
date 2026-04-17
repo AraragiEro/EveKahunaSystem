@@ -3,12 +3,14 @@
   </template>
   
   <script setup lang="ts">
-  import { ref, onMounted, watch } from 'vue'
+  import { ref, onMounted, onUnmounted, watch } from 'vue'
   import * as echarts from 'echarts'
   import type { EChartsOption } from 'echarts'
+  import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
   
   const graphContainer = ref<HTMLElement>()
   let chartInstance: echarts.ECharts | null = null
+  let cleanupThemeWatcher: (() => void) | null = null
   
   const graphData = ref({
     nodes: [
@@ -26,11 +28,12 @@
   
   const initChart = () => {
     if (!graphContainer.value) return
+    const c = getChartThemeColors()
     
     chartInstance = echarts.init(graphContainer.value)
     const option: EChartsOption = {
-      title: { text: 'EVE 工业制造关系图' },
-      tooltip: {},
+      title: { text: 'EVE 工业制造关系图', textStyle: { color: c.text } },
+      tooltip: { ...themedTooltip(c) },
       series: [{
         type: 'graph',
         layout: 'force',
@@ -42,7 +45,7 @@
           { name: 'product' }
         ],
         roam: true,
-        label: { show: true, position: 'right' },
+        label: { show: true, position: 'right', color: c.text },
         force: {
           repulsion: 1000,
           edgeLength: 200
@@ -53,7 +56,19 @@
   }
   
   onMounted(() => {
+    cleanupThemeWatcher = onThemeTokenChange(() => {
+      initChart()
+    })
     initChart()
+  })
+
+  onUnmounted(() => {
+    cleanupThemeWatcher?.()
+    cleanupThemeWatcher = null
+    if (chartInstance) {
+      chartInstance.dispose()
+      chartInstance = null
+    }
   })
   
   watch(graphData, () => {

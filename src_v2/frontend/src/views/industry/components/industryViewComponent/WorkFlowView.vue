@@ -1,19 +1,49 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
+import { CircleCheckFilled, CircleCloseFilled, Share, Management } from '@element-plus/icons-vue'
 
 // Props定义
 const props = defineProps<{
     workFlowData: any[]
     selectedPlan: string | null
+    // 新增：从父组件接收过滤快照（用于公开页面）
+    filterSnapshot?: {
+        showFake?: boolean
+        materialUnavailable?: boolean
+        activeIdFilter?: string
+        classTypeFilter?: string[]
+    }
+    // 新增：只读模式
+    readonly?: boolean
+    // 新增：分享token（用于接取管理）
+    shareToken?: string | null
 }>()
 
-// 过滤器状态
-const showFake = ref(false)
-const materialUnavailable = ref(false)
-const activeIdFilter = ref('all')
-const classTypeFilter = ref<string[]>([])
+// 定义事件
+const emit = defineEmits<{
+    share: [filterSnapshot: object]
+    'manage-claims': []
+}>()
+
+// 过滤器状态 - 如果有快照则使用快照值
+const showFake = ref(props.filterSnapshot?.showFake ?? false)
+const materialUnavailable = ref(props.filterSnapshot?.materialUnavailable ?? false)
+const activeIdFilter = ref(props.filterSnapshot?.activeIdFilter ?? 'all')
+const classTypeFilter = ref<string[]>(props.filterSnapshot?.classTypeFilter ?? [])
+
+// 如果传入快照，同步更新过滤器
+watch(() => props.filterSnapshot, (newSnapshot) => {
+    if (newSnapshot) {
+        showFake.value = newSnapshot.showFake ?? false
+        materialUnavailable.value = newSnapshot.materialUnavailable ?? false
+        activeIdFilter.value = newSnapshot.activeIdFilter ?? 'all'
+        classTypeFilter.value = newSnapshot.classTypeFilter ?? []
+    }
+}, { deep: true, immediate: true })
+
+// 是否只读模式
+const isReadonly = computed(() => props.readonly ?? false)
 
 // 会计格式格式化函数
 const formatAccounting = (value: number | string | null | undefined): string => {
@@ -186,20 +216,77 @@ const workFlowTableView = computed(() => {
     return result
 })
 
+// 计算当前筛选结果下的线总计
+const totalRunsCount = computed(() => {
+    return workFlowTableView.value.reduce((sum, row) => sum + (Number(row.runs_count) || 0), 0)
+})
+
 // 计算总EIV
 const totalEIV = computed(() => {
     return workFlowTableView.value.reduce((sum, row) => sum + (row.eiv || 0), 0)
 })
+
+// ============ 分享功能 ============
+
+// 处理分享按钮点击
+const handleShare = () => {
+    const snapshot = {
+        showFake: showFake.value,
+        materialUnavailable: materialUnavailable.value,
+        activeIdFilter: activeIdFilter.value,
+        classTypeFilter: classTypeFilter.value
+    }
+    emit('share', snapshot)
+}
+
+// 处理接取管理按钮点击
+const handleManageClaims = () => {
+    emit('manage-claims')
+}
+
+// 获取当前过滤快照（供父组件调用）
+const getCurrentFilterSnapshot = () => {
+    return {
+        showFake: showFake.value,
+        materialUnavailable: materialUnavailable.value,
+        activeIdFilter: activeIdFilter.value,
+        classTypeFilter: classTypeFilter.value
+    }
+}
+
+// 暴露方法给父组件
+defineExpose({
+    getCurrentFilterSnapshot
+})
 </script>
 
 <template>
-    <el-table
-        :data="workFlowTableView"
-        :key="`workflow-table-${selectedPlan || 'default'}`"
-        border
-        max-height="75vh"
-        show-overflow-tooltip
-    >
+    <div class="workflow-view-container">
+        <!-- 工具栏 -->
+        <div v-if="!isReadonly" class="workflow-toolbar">
+            <el-button
+                type="success"
+                :icon="Management"
+                @click="handleManageClaims"
+            >
+                接取管理
+            </el-button>
+            <el-button 
+                type="primary" 
+                :icon="Share" 
+                @click="handleShare"
+            >
+                分享当前过滤
+            </el-button>
+        </div>
+        
+        <el-table
+            :data="workFlowTableView"
+            :key="`workflow-table-${selectedPlan || 'default'}`"
+            border
+            max-height="75vh"
+            show-overflow-tooltip
+        >
         <el-table-column label="icon" width="120">
             <template #default="{ row }">
                 <img :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" alt="类型" width="40" height="40" />
@@ -228,7 +315,10 @@ const totalEIV = computed(() => {
                 </div>
             </template>
         </el-table-column>
-        <el-table-column label="线" prop="runs_count" width="120" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)">
+        <el-table-column prop="runs_count" width="120" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)">
+            <template #header>
+                <span>线 (总计: {{ formatAccounting(totalRunsCount) }})</span>
+            </template>
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
@@ -255,6 +345,7 @@ const totalEIV = computed(() => {
                 <span>有材料</span>
                 <el-switch
                     v-model="materialUnavailable"
+                    :disabled="isReadonly"
                     inline-prompt
                     active-text="有材料"
                     inactive-text="所有"
@@ -273,6 +364,7 @@ const totalEIV = computed(() => {
                 <span>有蓝图</span>
                 <el-switch
                     v-model="showFake"
+                    :disabled="isReadonly"
                     inline-prompt
                     active-text="没蓝图"
                     inactive-text="所有"
@@ -288,7 +380,7 @@ const totalEIV = computed(() => {
         <el-table-column label="活动id" width="100">
             <template #header>
                 <span>工作类型</span>
-                <el-select v-model="activeIdFilter">
+                <el-select v-model="activeIdFilter" :disabled="isReadonly">
                     <el-option value="all">所有</el-option>
                     <el-option value="1" label="制造">制造</el-option>
                     <el-option value="11" label="反应">反应</el-option>
@@ -303,7 +395,7 @@ const totalEIV = computed(() => {
         <el-table-column label="产物类型" width="150">
             <template #header>
                 <span>产物类型</span>
-                <el-select v-model="classTypeFilter" multiple collapse-tags collapse-tags-tooltip>
+                <el-select v-model="classTypeFilter" :disabled="isReadonly" multiple collapse-tags collapse-tags-tooltip>
                     <el-option value="低反">低反</el-option>
                     <el-option value="高反">高反</el-option>
                     <el-option value="分子熔铸">分子熔铸</el-option>
@@ -349,9 +441,22 @@ const totalEIV = computed(() => {
             </template>
         </el-table-column>
     </el-table>
+    </div>
 </template>
 
 <style scoped>
+.workflow-view-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.workflow-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 8px 0;
+}
+
 /* 可点击复制的单元格样式 */
 .copyable-cell {
     cursor: pointer;

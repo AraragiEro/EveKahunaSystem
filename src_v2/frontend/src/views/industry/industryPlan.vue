@@ -215,7 +215,13 @@ const getPlanTableData = async () => {
     }
 
     if (plan) {
-      flatPlanProducts.value = flattenProducts(plan.products || [])
+      // #region agent log
+      const apiGroups = (plan.products || []).filter((p: any) => p.type === 'group').map((g: any) => ({ name: g.name, productCount: (g.products || []).length, type_ids: (g.products || []).map((p: any) => p.type_id) }))
+      const flat = flattenProducts(plan.products || [])
+      const flatProductCount = flat.filter(r => r.type === 'product').length
+      fetch('http://127.0.0.1:7242/ingest/7048bd83-86df-46f6-886b-1c2c54b42b3f', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'industryPlan.vue:getPlanTableData:afterFetch', message: 'API plan.products and flat', data: { planName: plan.plan_name, apiGroups, flatLen: flat.length, flatProductCount }, timestamp: Date.now(), hypothesisId: 'api' }) }).catch(() => {})
+      // #endregion
+      flatPlanProducts.value = flat
       currentPlanProducts.value = plan.products || []
       current_plan_settings.value = plan.plan_settings || {
         name: '',
@@ -822,50 +828,75 @@ function flattenProducts(nested: PlanProductTableData[]): PlanRow[] {
 // 数据转换：扁平化 → 嵌套
 function nestProducts(flat: PlanRow[]): PlanProductTableData[] {
   const nested: PlanProductTableData[] = []
-  const groups = new Map<string, PlanProductTableData>()
+  const validGroupNames = new Set<string>()
+  const groupedProducts = new Map<string, PlanProductTableData[]>()
+  const seenProductRowIds = new Map<number, number>()
 
+  const toProductItem = (row: PlanRow): PlanProductTableData => ({
+    row_id: row.row_id,
+    type: 'product',
+    type_id: row.type_id || 0,
+    quantity: row.quantity || 0,
+    type_name: row.type_name || '',
+    type_name_zh: row.type_name_zh || '',
+    name: '',
+    products: [],
+    active: row.active !== undefined ? row.active : true
+  })
+
+  // 先收集有效分组名称
   for (const row of flat) {
+    if (row.type === 'group' && row.name) {
+      validGroupNames.add(row.name)
+    }
+  }
+
+  // 记录 row_id>0 产品最后一次出现位置，避免同一产品在瞬时重排中被重复保存
+  for (let i = 0; i < flat.length; i++) {
+    const row = flat[i]
+    if (row.type === 'product' && row.row_id > 0) {
+      seenProductRowIds.set(row.row_id, i)
+    }
+  }
+
+  // 按 group_id 收集组内产品（与组行先后顺序无关）
+  for (let i = 0; i < flat.length; i++) {
+    const row = flat[i]
+    if (row.type !== 'product') continue
+    if (row.row_id > 0 && seenProductRowIds.get(row.row_id) !== i) continue
+
+    if (row.group_id != null && validGroupNames.has(row.group_id)) {
+      const list = groupedProducts.get(row.group_id) || []
+      list.push(toProductItem(row))
+      groupedProducts.set(row.group_id, list)
+    }
+  }
+
+  // 组与独立产品仍按扁平顺序输出，保证显示顺序稳定
+  for (let i = 0; i < flat.length; i++) {
+    const row = flat[i]
+
     if (row.type === 'group') {
-      const group: PlanProductTableData = {
+      const groupName = row.name || ''
+      nested.push({
         row_id: row.row_id,
         type: 'group',
-        name: row.name || '',
+        name: groupName,
         type_id: 0,
         quantity: 0,
         type_name: '',
         type_name_zh: '',
-        products: []
-      }
-      groups.set(row.name || '', group)
-      nested.push(group)
-    } else if (row.type === 'product') {
-      if (row.group_id != null && groups.has(row.group_id)) {
-        // 添加到组内
-        groups.get(row.group_id)!.products.push({
-          row_id: row.row_id,
-          type: 'product',
-          type_id: row.type_id || 0,
-          quantity: row.quantity || 0,
-          type_name: row.type_name || '',
-          type_name_zh: row.type_name_zh || '',
-          name: '',
-          products: [],
-          active: row.active !== undefined ? row.active : true
-        })
-      } else {
-        // 独立产品
-        nested.push({
-          row_id: row.row_id,
-          type: 'product',
-          type_id: row.type_id || 0,
-          quantity: row.quantity || 0,
-          type_name: row.type_name || '',
-          type_name_zh: row.type_name_zh || '',
-          name: '',
-          products: [],
-          active: row.active !== undefined ? row.active : true
-        })
-      }
+        products: groupedProducts.get(groupName) || []
+      })
+      continue
+    }
+
+    if (row.type !== 'product') continue
+    if (row.row_id > 0 && seenProductRowIds.get(row.row_id) !== i) continue
+
+    // group_id 无效时按独立产品保存
+    if (row.group_id == null || !validGroupNames.has(row.group_id)) {
+      nested.push(toProductItem(row))
     }
   }
 
@@ -940,6 +971,10 @@ const saveCurrentPlan = async () => {
 
   // 将扁平结构转换为嵌套结构用于保存
   const nestedProducts = nestProducts(flatPlanProducts.value)
+  // #region agent log
+  const groupSummary = nestedProducts.filter((p: any) => p.type === 'group').map((g: any) => ({ name: g.name, productCount: (g.products || []).length, type_ids: (g.products || []).map((p: any) => p.type_id) }))
+  fetch('http://127.0.0.1:7242/ingest/7048bd83-86df-46f6-886b-1c2c54b42b3f', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'industryPlan.vue:saveCurrentPlan:beforeSend', message: 'nestedProducts to send', data: { groupSummary, flatLen: flatPlanProducts.value.length }, timestamp: Date.now(), hypothesisId: 'send' }) }).catch(() => {})
+  // #endregion
 
   const requestData: any = {
     plan_name: planInfo.plan_name,
@@ -2666,5 +2701,315 @@ onUnmounted(() => {
   .plan-select {
     width: 100%;
   }
+}
+
+/* Theme override */
+.industry-plan-layout,
+.industry-plan-table-main,
+.industry-plan-table-product-list,
+.industry-plan-table-config-flow,
+.product-table-wrapper,
+.plan-control-panel,
+.market-root-tree-container,
+.search-results,
+.auxiliary-condition-group {
+  background: var(--k-color-surface) !important;
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text) !important;
+}
+
+.market-root-tree-container,
+.industry-plan-table-config-flow {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--k-color-primary) 24%, var(--k-color-border)) !important;
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 8% 12%, color-mix(in srgb, var(--k-color-primary) 8%, transparent) 0%, transparent 34%),
+    linear-gradient(155deg,
+      color-mix(in srgb, var(--k-color-surface) 97%, var(--k-color-surface-soft)) 0%,
+      color-mix(in srgb, var(--k-color-primary) 3%, var(--k-color-surface)) 100%) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 10%, transparent),
+    0 8px 24px color-mix(in srgb, #0b1120 16%, transparent);
+}
+
+.market-root-tree-container::before,
+.industry-plan-table-config-flow::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 0;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--k-color-primary) 52%, transparent) 18%,
+      color-mix(in srgb, var(--k-color-primary) 22%, transparent) 82%,
+      transparent 100%);
+  opacity: 0.9;
+}
+
+.market-root-tree-container::after,
+.industry-plan-table-config-flow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.55;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--k-color-primary) 42%, transparent) 0 8px, transparent 8px) left 10px top 10px / 16px 1px no-repeat,
+    linear-gradient(180deg, color-mix(in srgb, var(--k-color-primary) 42%, transparent) 0 8px, transparent 8px) left 10px top 10px / 1px 16px no-repeat,
+    linear-gradient(270deg, color-mix(in srgb, var(--k-color-primary) 42%, transparent) 0 8px, transparent 8px) right 10px top 10px / 16px 1px no-repeat,
+    linear-gradient(180deg, color-mix(in srgb, var(--k-color-primary) 42%, transparent) 0 8px, transparent 8px) right 10px top 10px / 1px 16px no-repeat;
+}
+
+.market-root-tree-container:hover,
+.industry-plan-table-config-flow:hover {
+  border-color: color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-border)) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 18%, transparent),
+    0 12px 30px color-mix(in srgb, var(--k-color-primary) 12%, transparent);
+}
+
+.market-root-tree-table :deep(.el-table tr:hover > td.el-table__cell),
+.industry-plan-table-config-flow :deep(.el-table tr:hover > td.el-table__cell) {
+  background: linear-gradient(90deg,
+      color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface-soft)) 0%,
+      color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
+}
+
+.auxiliary-condition-title,
+.results-header,
+.market-group-separator {
+  color: var(--k-color-text-secondary) !important;
+}
+
+.market-group-text {
+  background: var(--k-color-surface-soft) !important;
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text) !important;
+}
+
+.market-group-text:hover {
+  background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+}
+
+.splitter {
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-border)) 0%,
+      color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border)) 50%,
+      color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-border)) 100%) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--k-color-primary) 18%, transparent),
+    0 0 8px color-mix(in srgb, var(--k-color-primary) 18%, transparent);
+}
+
+.plan-buttons-row :deep(.el-button),
+.plan-control-panel :deep(.el-button),
+.results-actions :deep(.el-button),
+.market-root-tree-container :deep(.el-button) {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px !important;
+  border-width: 1px !important;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--k-color-surface) 90%, var(--k-color-surface-soft)) 0%,
+      color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) 100%) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border)) !important;
+  color: var(--k-color-text) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 14%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--k-color-primary) 10%, transparent) !important;
+  transition: transform 0.2s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
+}
+
+.plan-buttons-row :deep(.el-button:hover),
+.plan-control-panel :deep(.el-button:hover),
+.results-actions :deep(.el-button:hover),
+.market-root-tree-container :deep(.el-button:hover) {
+  transform: translateY(-1px);
+  color: var(--k-color-primary) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 44%, var(--k-color-border)) !important;
+  background: linear-gradient(140deg,
+      color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface-soft)) 0%,
+      color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-border)),
+    0 8px 20px color-mix(in srgb, var(--k-color-primary) 28%, transparent) !important;
+}
+
+.industry-plan-main-container :deep(.el-button--primary) {
+  color: #ffffff !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border)) !important;
+  background: linear-gradient(135deg,
+      color-mix(in srgb, var(--k-color-primary) 80%, #ffffff) 0%,
+      var(--k-color-primary) 58%,
+      color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
+}
+
+.industry-plan-main-container :deep(.el-button--warning) {
+  color: #1d1300 !important;
+  border-color: color-mix(in srgb, var(--k-color-warning) 62%, var(--k-color-border)) !important;
+  background: linear-gradient(135deg,
+      color-mix(in srgb, var(--k-color-warning) 82%, #ffffff) 0%,
+      var(--k-color-warning) 100%) !important;
+}
+
+.industry-plan-main-container :deep(.el-button--danger) {
+  color: #ffffff !important;
+  border-color: color-mix(in srgb, var(--k-color-danger) 62%, var(--k-color-border)) !important;
+  background: linear-gradient(135deg,
+      color-mix(in srgb, var(--k-color-danger) 80%, #ffffff) 0%,
+      var(--k-color-danger) 100%) !important;
+}
+
+.industry-plan-main-container :deep(.el-button.is-text),
+.industry-plan-main-container :deep(.el-button--text),
+.industry-plan-main-container :deep(.el-button--link) {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: color-mix(in srgb, var(--k-color-primary) 86%, #ffffff) !important;
+  box-shadow: none !important;
+}
+
+.industry-plan-main-container :deep(.el-button.is-circle) {
+  border-radius: 999px !important;
+}
+
+.industry-plan-main-container :deep(.el-radio-button__inner) {
+  border-radius: 10px !important;
+  border-width: 1px !important;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+  color: var(--k-color-text-secondary) !important;
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--k-color-surface) 90%, var(--k-color-surface-soft)) 0%,
+      color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) 100%) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 14%, transparent) !important;
+  transition: transform 0.2s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
+}
+
+.industry-plan-main-container :deep(.el-radio-button__inner:hover) {
+  transform: translateY(-1px);
+  color: var(--k-color-primary) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 44%, var(--k-color-border)) !important;
+  background: linear-gradient(140deg,
+      color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface-soft)) 0%,
+      color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
+}
+
+.industry-plan-main-container :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  color: #ffffff !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border)) !important;
+  background: linear-gradient(135deg,
+      color-mix(in srgb, var(--k-color-primary) 80%, #ffffff) 0%,
+      var(--k-color-primary) 58%,
+      color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--k-color-primary) 34%, transparent),
+    0 8px 20px color-mix(in srgb, var(--k-color-primary) 24%, transparent) !important;
+}
+
+.industry-plan-main-container :deep(.el-radio-button.is-disabled .el-radio-button__inner) {
+  opacity: 0.62;
+  color: var(--k-color-text-secondary) !important;
+  background: color-mix(in srgb, var(--k-color-surface-soft) 84%, var(--k-color-surface)) !important;
+  border-color: var(--k-color-border) !important;
+  box-shadow: none !important;
+}
+
+.meta-level-high,
+.meta-level-medium,
+.meta-level-low,
+.meta-level-default {
+  background-color: color-mix(in srgb, var(--k-color-surface-soft) 75%, var(--k-color-surface)) !important;
+  border-color: var(--k-color-border) !important;
+}
+
+.meta-level-high {
+  color: var(--k-color-danger) !important;
+}
+
+.meta-level-medium {
+  color: var(--k-color-warning) !important;
+}
+
+.meta-level-low {
+  color: var(--k-color-success) !important;
+}
+
+.meta-level-default {
+  color: var(--k-color-text-secondary) !important;
+}
+
+.market-group-text.copyable:hover {
+  background: color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface-soft)) !important;
+  color: var(--k-color-primary) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 38%, var(--k-color-border)) !important;
+  box-shadow: var(--k-shadow-sm) !important;
+}
+
+.item-info-dialog :deep(.el-dialog__footer) {
+  border-top-color: var(--k-color-border) !important;
+  background: var(--k-color-surface) !important;
+}
+
+.auxiliary-condition-header {
+  border-bottom-color: var(--k-color-border) !important;
+}
+
+.selected-count {
+  color: var(--k-color-primary) !important;
+}
+
+:deep(.el-dialog [style*='color: #e6a23c']),
+:deep(.el-dialog [style*='color:#e6a23c']) {
+  color: var(--k-color-warning) !important;
+}
+
+.market-root-tree-container :deep(.el-input__wrapper),
+.market-root-tree-container :deep(.el-select__wrapper),
+.plan-select :deep(.el-select__wrapper),
+.plan-control-panel :deep(.el-input__wrapper),
+.plan-control-panel :deep(.el-select__wrapper),
+.plan-control-panel :deep(.el-input-number .el-input__wrapper),
+.plan-control-panel :deep(.el-input-number__decrease),
+.plan-control-panel :deep(.el-input-number__increase) {
+  background: var(--k-color-surface-soft) !important;
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text) !important;
+}
+
+.plan-control-panel :deep(.el-input__inner),
+.plan-control-panel :deep(.el-input-number .el-input__inner),
+.market-root-tree-container :deep(.el-input__inner) {
+  color: var(--k-color-text) !important;
+}
+
+.market-root-tree-container :deep(.el-tree),
+.market-root-tree-container :deep(.el-tree-node__content),
+.market-root-tree-container :deep(.el-tree-node__label),
+.market-root-tree-container :deep(.el-table),
+.market-root-tree-container :deep(.el-table .cell),
+.market-root-tree-container :deep(.el-table td),
+.market-root-tree-container :deep(.el-table th) {
+  color: var(--k-color-text) !important;
+}
+
+.market-root-tree-container :deep(.el-tree-node:focus > .el-tree-node__content),
+.market-root-tree-container :deep(.el-tree-node__content:hover),
+.market-root-tree-container :deep(.el-table tr:hover > td.el-table__cell) {
+  background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+}
+
+.market-root-tree-container :deep([style*='color: gray']),
+.market-root-tree-container :deep([style*='color:gray']) {
+  color: var(--k-color-text-secondary) !important;
 }
 </style>

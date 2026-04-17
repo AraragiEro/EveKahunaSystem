@@ -38,6 +38,13 @@ class MarketManager(metaclass=SingletonMeta):
         self.update_jita_price_lock = asyncio.Lock()
         self.update_frt_price_lock = asyncio.Lock()
 
+    @staticmethod
+    def _resolve_region_id_for_type(region_id: int, type_id: int) -> int:
+        # PLEX uses a dedicated virtual region after the EVE update.
+        if type_id == PLEX_ID:
+            return REGION_PLEX_ID
+        return region_id
+
     async def _save_orders_to_database(self, region_id: int, orders: list[dict]):
         """
         将指定 region 的订单原始数据写入 PostgreSQL。
@@ -137,6 +144,28 @@ class MarketManager(metaclass=SingletonMeta):
         for type_id, price_data in batch:
             await get_redis_manager().r.hset(f"market_price:{market_zone}:{type_id}", mapping=price_data)
 
+    async def _fetch_plex_orders_and_price(self) -> tuple[list[dict], dict | None]:
+        logger.info("Requesting PLEX market.")
+        plex_order = await eveesi.markets_region_orders(REGION_PLEX_ID)
+
+        flat_plex_orders: list[dict] = [
+            order for order_list in plex_order for order in order_list
+        ]
+
+        if not flat_plex_orders:
+            return flat_plex_orders, None
+
+        plex_price = {"max_buy": 0, "min_sell": 1000000000000}
+        for order in flat_plex_orders:
+            if order.get("type_id") != PLEX_ID:
+                continue
+            if order.get("is_buy_order"):
+                plex_price["max_buy"] = max(plex_price["max_buy"], order["price"])
+            else:
+                plex_price["min_sell"] = min(plex_price["min_sell"], order["price"])
+
+        return flat_plex_orders, plex_price
+
     async def update_market_price(self, market_zone: str, main_character_id: int = None):
         if market_zone == "jita":
             await self.update_jita_price()
@@ -217,6 +246,7 @@ class MarketManager(metaclass=SingletonMeta):
 
         type_price_cache = {}
         jita_order = await eveesi.markets_region_orders(REGION_FORGE_ID)
+        plex_orders, plex_price = await self._fetch_plex_orders_and_price()
 
         # 仅保留 Jita 交易中心的订单，并构造用于写库的列表
         flat_jita_orders: list[dict] = []
@@ -248,6 +278,11 @@ class MarketManager(metaclass=SingletonMeta):
 
         # 保存原始订单到 Postgre
         await self._save_orders_to_database(REGION_FORGE_ID, flat_jita_orders)
+        if plex_orders:
+            await self._save_orders_to_database(REGION_PLEX_ID, plex_orders)
+
+        if plex_price:
+            type_price_cache[PLEX_ID] = plex_price
 
         # 分批处理并并发插入Redis
         batch_size = 100  # 每批处理100个type_id
@@ -271,6 +306,7 @@ class MarketManager(metaclass=SingletonMeta):
         数据写入到 Postgre 表 `eve_market_region_history_statistic`，
         以 (type_id, region_id, date) 作为唯一键做插入/更新。
         """
+        region_id = self._resolve_region_id_for_type(region_id, type_id)
         try:
             # 调用 ESI 接口获取历史数据
             history_list = await eveesi.markets_region_history(
@@ -364,6 +400,7 @@ class MarketManager(metaclass=SingletonMeta):
         - market_region_history:{region_id}:{type_id}:30DAverPrice
         - market_region_history:{region_id}:{type_id}:30DTotalVolume
         """
+        region_id = self._resolve_region_id_for_type(region_id, type_id)
         try:
             # 获取当前时间（+8时区）
             tz = timezone(timedelta(hours=8))
@@ -443,6 +480,7 @@ class MarketManager(metaclass=SingletonMeta):
         :param type_id: 物品类型ID
         :return: 包含历史统计数据的字典，如果数据不存在则返回默认值
         """
+        region_id = self._resolve_region_id_for_type(region_id, type_id)
         redis_key_base = f"market_region_history:{region_id}:{type_id}"
 
         # 从 Redis 读取数据，如果为 None 则使用默认值 0.0

@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
-const router = useRouter()
-
-// 定义 props
 interface MenuItem {
   index: number
   label: string
@@ -16,63 +13,63 @@ interface Props {
   menuItems?: MenuItem[]
 }
 
-// 定义 props 并设置默认值
 const props = withDefaults(defineProps<Props>(), {
-  menuItems: () => [
-    { index: 1, label: '菜单载入错误', route: ''},
-  ]
+  menuItems: () => [{ index: 1, label: '菜单加载错误', route: '' }],
 })
 
-// 切换菜单项激活状态
-const toggleActive = (itemId: number) => {
-  props.menuItems.forEach(item => {
-    item.active = item.index === itemId
-  })
-  router.push(props.menuItems.find(item => item.index === itemId)?.route || '/')
-}
+const route = useRoute()
+const router = useRouter()
 
+const activeRoute = computed(() => route.path)
+
+const goRoute = (target: string) => {
+  if (target) router.push(target)
+}
 </script>
 
 <template>
-<el-menu class="custom-menu">
+  <el-menu :default-active="activeRoute" class="custom-menu" :router="false">
     <el-menu-item
-        v-for="item in menuItems"
-        :key="item.index"
-        :index="item.index"
-        @click="router.push(item.route)"
-        class="menu-item"
+      v-for="item in props.menuItems"
+      :key="item.index"
+      :index="item.route"
+      class="menu-item"
+      @click="goRoute(item.route)"
     >
-        {{ item.label }}
+      {{ item.label }}
     </el-menu-item>
-</el-menu>
+  </el-menu>
 </template>
 
 <style scoped>
-/* 方法1: 通过CSS变量设置菜单项高度 */
 .custom-menu {
-  --el-menu-item-height: 50px;
-  --el-menu-bg-color: #ffffff; /* 菜单背景色 */
-  --el-menu-text-color: #303133; /* 文字颜色 */
-  --el-menu-active-color: #ffffff; /* 激活状态文字颜色 */
-  --el-menu-item-font-size: 18px;
-  
-  border-radius: 12px;
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: var(--k-color-text-secondary);
+  --el-menu-active-color: var(--k-color-text);
+  border-right: none;
+  background: transparent;
+  padding: 8px;
 }
 
-.custom-menu .el-menu-item {
-  border-radius: 12px;
-  background-color: #ffffff;
-  margin-top: 10px;
-  transition: all 0.3s ease;
+.menu-item {
+  height: 44px;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  transition: all 0.2s ease;
 }
 
-.custom-menu .el-menu-item:hover {
-  background-color: #e2e2e2;
+.menu-item:hover {
+  background: var(--k-color-surface-soft);
+  color: var(--k-color-text);
 }
 
-.custom-menu .el-menu-item.is-active {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+.menu-item.is-active {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--k-color-primary) 20%, transparent) 0%,
+    color-mix(in srgb, var(--k-color-primary) 8%, transparent) 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--k-color-primary) 36%, var(--k-color-border));
+  box-shadow: var(--k-shadow-sm);
 }
-
 </style>

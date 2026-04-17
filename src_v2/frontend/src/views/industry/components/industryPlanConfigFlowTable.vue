@@ -13,8 +13,11 @@
           <tr v-for="item in list" :key="item.config_id" class="card-row cursor-move"
             :class="{ 'compact-mode': cardStyleMode === 'compact' }">
             <td class="config-type-name">
-              <el-tag :size="cardStyleMode === 'compact' ? 'small' : undefined"
-                :color="configTypeColorMap[item.config_type]" type="light">
+              <el-tag
+                :size="cardStyleMode === 'compact' ? 'small' : undefined"
+                :class="['config-type-tag', `config-type-tag-${item.config_type}`]"
+                type="light"
+              >
                 {{ configTypeMap[item.config_type] }}
               </el-tag>
             </td>
@@ -174,7 +177,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
   text-align: left;
   font-weight: 600;
   font-size: 14px;
-  color: #606266;
+  color: var(--k-color-text-secondary);
   border: none;
   background: transparent;
 }
@@ -198,7 +201,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 }
 
 .card-row {
-  background: #ffffff;
+  background: var(--k-color-surface);
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -210,7 +213,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 .card-row:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   transform: translateY(-2px);
-  background: #ffffff;
+  background: var(--k-color-surface);
 }
 
 .card-row td {
@@ -245,7 +248,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 .config-type-name {
   font-size: 15px;
   font-weight: 500;
-  color: #303133;
+  color: var(--k-color-text);
   width: 110px;
   /* 固定第一列宽度 */
   min-width: 110px;
@@ -258,7 +261,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 
 .config-description {
   font-size: 14px;
-  color: #606266;
+  color: var(--k-color-text-secondary);
   position: relative;
   /* 中间列自动填充剩余空间，不设置宽度 */
   overflow: hidden;
@@ -278,7 +281,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
   cursor: help;
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
+  color: var(--k-color-text);
   /* 单行显示，超出部分用省略号，完整内容通过 tooltip 显示 */
 }
 
@@ -319,7 +322,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 /* 拖拽时的视觉反馈 */
 .card-row.sortable-ghost {
   opacity: 0.5;
-  background: #f5f7fa;
+  background: var(--k-color-surface-soft);
 }
 
 .card-row.sortable-drag {
@@ -385,7 +388,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
   display: block;
   text-align: center;
   padding: 40px;
-  color: #909399;
+  color: var(--k-color-text-secondary);
   font-size: 14px;
 }
 
@@ -405,5 +408,115 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
   max-width: 500px;
   word-break: break-word;
   white-space: normal;
+}
+
+/* Theme override */
+.table-container,
+.card-table,
+.card-row,
+.table-header,
+.industry-plan-config-flow-table {
+  background: var(--k-color-surface) !important;
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text) !important;
+}
+
+.table-header th,
+.config-description {
+  color: var(--k-color-text-secondary) !important;
+}
+
+.config-type-name,
+.config-description-text {
+  color: var(--k-color-text) !important;
+}
+
+.card-row {
+  box-shadow: var(--k-shadow-sm) !important;
+}
+
+.card-row:hover {
+  box-shadow: var(--k-shadow-md) !important;
+  background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+}
+
+:deep(.el-tag) {
+  border-color: color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-border)) !important;
+  color: var(--k-color-text) !important;
+}
+
+:deep(.config-type-tag) {
+  border-width: 1px !important;
+  border-style: solid !important;
+}
+
+:deep(.config-type-tag-StructureRigConfig) {
+  background: color-mix(in srgb, #3b82f6 18%, var(--k-color-surface-soft)) !important;
+  border-color: color-mix(in srgb, #3b82f6 42%, var(--k-color-border)) !important;
+  color: color-mix(in srgb, #3b82f6 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-StructureAssignConf) {
+  background: color-mix(in srgb, #22c55e 18%, var(--k-color-surface-soft)) !important;
+  border-color: color-mix(in srgb, #22c55e 42%, var(--k-color-border)) !important;
+  color: color-mix(in srgb, #22c55e 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-MaterialTagConf) {
+  background: color-mix(in srgb, #f59e0b 18%, var(--k-color-surface-soft)) !important;
+  border-color: color-mix(in srgb, #f59e0b 42%, var(--k-color-border)) !important;
+  color: color-mix(in srgb, #f59e0b 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-DefaultBlueprintConf) {
+  background: color-mix(in srgb, #ef4444 18%, var(--k-color-surface-soft)) !important;
+  border-color: color-mix(in srgb, #ef4444 42%, var(--k-color-border)) !important;
+  color: color-mix(in srgb, #ef4444 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-LoadAssetConf) {
+  background: color-mix(in srgb, #14b8a6 18%, var(--k-color-surface-soft)) !important;
+  border-color: color-mix(in srgb, #14b8a6 42%, var(--k-color-border)) !important;
+  color: color-mix(in srgb, #14b8a6 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-MaxJobSplitCountConf) {
+  background: color-mix(in srgb, #8b5cf6 18%, var(--k-color-surface-soft)) !important;
+  border-color: color-mix(in srgb, #8b5cf6 42%, var(--k-color-border)) !important;
+  color: color-mix(in srgb, #8b5cf6 78%, var(--k-color-text)) !important;
+}
+
+.action-cell :deep(.el-button) {
+  border-radius: 9px !important;
+  border-width: 1px !important;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--k-color-surface) 90%, var(--k-color-surface-soft)) 0%,
+      color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) 100%) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border)) !important;
+  color: var(--k-color-text) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 14%, transparent) !important;
+}
+
+.action-cell :deep(.el-button:hover) {
+  transform: translateY(-1px);
+  color: var(--k-color-primary) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 44%, var(--k-color-border)) !important;
+  background: linear-gradient(140deg,
+      color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface-soft)) 0%,
+      color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-border)),
+    0 8px 20px color-mix(in srgb, var(--k-color-primary) 28%, transparent) !important;
+}
+
+.action-cell :deep(.el-button--primary) {
+  color: #ffffff !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border)) !important;
+  background: linear-gradient(135deg,
+      color-mix(in srgb, var(--k-color-primary) 80%, #ffffff) 0%,
+      var(--k-color-primary) 58%,
+      color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
 }
 </style>

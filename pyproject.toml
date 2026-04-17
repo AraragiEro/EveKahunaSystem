@@ -10,12 +10,14 @@ dependencies = [
     "cachetools>=6.2.2",
     "colorlog>=6.10.1",
     "httpx>=0.28.1",
+    "httplib2[socks]>=0.22.0",
     "imgkit>=1.2.3",
     "jinja2>=3.1.6",
     "neo4j>=6.0.3",
     "networkx>=3.5",
     "oauthlib>=3.3.1",
     "peewee>=3.18.3",
+    "pypinyin>=0.51.0",
     "pydantic>=2.12.4",
     "pyjwt>=2.10.1",
     "pyppeteer>=2.0.0",
@@ -35,6 +37,11 @@ dependencies = [
     "ortools>=9.14.6206",
     "cryptography>=46.0.3",
     "quart-schema>=0.23.0",
+    "google-api-python-client>=2.167.0",
+    "google-auth>=2.40.3",
+    "google-auth-httplib2>=0.2.0",
+    "pysocks>=1.7.1",
+    "mcp>=1.12.0",
 ]
 
 [[tool.uv.index]]

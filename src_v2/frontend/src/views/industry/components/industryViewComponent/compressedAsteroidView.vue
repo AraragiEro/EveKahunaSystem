@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { DocumentCopy, Check } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
+import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
 
 const props = withDefaults(defineProps<{
     materialData?: any[]
@@ -791,6 +792,7 @@ const sankeyData = computed(() => {
 // 步骤6：桑吉图实现
 const sankeyChartRef = ref<HTMLElement>()
 let sankeyChartInstance: echarts.ECharts | null = null
+let cleanupThemeWatcher: (() => void) | null = null
 
 // 防抖定时器
 let resizeTimer: number | null = null
@@ -879,6 +881,7 @@ const initSankeyChart = () => {
 
 // 更新桑吉图
 const updateSankeyChart = () => {
+    const c = getChartThemeColors()
     // 如果图表实例不存在，先初始化
     if (!sankeyChartInstance) {
         if (compressedAsteroidData.value && sankeyChartRef.value) {
@@ -901,6 +904,7 @@ const updateSankeyChart = () => {
     try {
         const option: EChartsOption = {
             tooltip: {
+                ...themedTooltip(c),
                 trigger: 'item',
                 triggerOn: 'mousemove',
                 formatter: (params: any) => {
@@ -935,7 +939,8 @@ const updateSankeyChart = () => {
                     data: nodes,
                     links: links,
                     label: {
-                        fontSize: 12
+                        fontSize: 12,
+                        color: c.text
                     },
                     lineStyle: {
                         color: 'gradient',
@@ -1106,6 +1111,9 @@ watch(
 )
 
 onMounted(() => {
+    cleanupThemeWatcher = onThemeTokenChange(() => {
+        updateSankeyChart()
+    })
     // 加载本地数据
     loadFromLocalStorage()
     
@@ -1122,6 +1130,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+    cleanupThemeWatcher?.()
+    cleanupThemeWatcher = null
     // 清理防抖定时器
     if (resizeTimer) {
         clearTimeout(resizeTimer)
@@ -2310,5 +2320,59 @@ const openImportDialog = () => {
 
 .layout-item:last-child {
     margin-bottom: 0;
+}
+
+/* Theme override */
+.compressed-asteroid-container,
+.layout-item,
+.statistics-card,
+.statistic-item {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+.statistic-item {
+    box-shadow: var(--k-shadow-sm) !important;
+}
+
+.statistic-item:hover {
+    box-shadow: var(--k-shadow-md) !important;
+    background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+}
+
+.statistic-item-volume .volume-details,
+.statistic-item-total-cost .total-cost-details,
+.statistic-item-purchase .purchase-details,
+.statistic-item-produced .produced-details {
+    color: var(--k-color-text-secondary) !important;
+}
+
+:deep(.el-card),
+:deep(.el-card__header),
+:deep(.el-card__body),
+:deep(.el-form-item__label),
+:deep(.el-input__wrapper),
+:deep(.el-input-number .el-input__wrapper),
+:deep(.el-input-number__decrease),
+:deep(.el-input-number__increase),
+:deep(.el-table),
+:deep(.el-table th.el-table__cell),
+:deep(.el-table td.el-table__cell),
+:deep(.el-tabs__content) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+:deep(.el-table th.el-table__cell) {
+    background: var(--k-color-surface-soft) !important;
+}
+
+:deep([style*='color: #909399']),
+:deep([style*='color:#909399']),
+:deep([style*='color: #606266']),
+:deep([style*='color:#606266']) {
+    color: var(--k-color-text-secondary) !important;
 }
 </style>

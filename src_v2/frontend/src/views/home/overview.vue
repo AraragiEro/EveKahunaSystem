@@ -7,6 +7,7 @@ import { ElMessage } from 'element-plus'
 import { http } from '@/http'
 import { handleApiResponse } from '@/utils/apiResponse'
 import { useTransition } from '@vueuse/core'
+import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
 
 // 数据接口
 interface OverviewData {
@@ -340,6 +341,7 @@ const isEmpty = computed(() => overviewData.value === null)
 // 图表引用
 const pieChartRef = ref<HTMLElement>()
 let pieChartInstance: echarts.ECharts | null = null
+let cleanupThemeWatcher: (() => void) | null = null
 
 // 格式化数字（千分位）
 const formatNumber = (value: number): string => {
@@ -584,6 +586,7 @@ const pieChartData = computed(() => {
 
 // 初始化饼状图
 const initPieChart = () => {
+  const c = getChartThemeColors()
   if (!pieChartRef.value) return
 
   const data = pieChartData.value
@@ -606,10 +609,12 @@ const initPieChart = () => {
       text: '资产价值分布',
       left: 'center',
       textStyle: {
-        fontSize: 16
+        fontSize: 16,
+        color: c.text
       }
     },
     tooltip: {
+      ...themedTooltip(c),
       trigger: 'item',
       formatter: (params: unknown) => {
         const p = params as { name: string; value: number }
@@ -620,7 +625,10 @@ const initPieChart = () => {
     legend: {
       orient: 'vertical',
       left: 'left',
-      top: 'middle'
+      top: 'middle',
+      textStyle: {
+        color: c.textSecondary
+      }
     },
     series: [
       {
@@ -630,11 +638,12 @@ const initPieChart = () => {
         avoidLabelOverlap: false,
         itemStyle: {
           borderRadius: 10,
-          borderColor: '#fff',
+          borderColor: c.surface,
           borderWidth: 2
         },
         label: {
           show: true,
+          color: c.text,
           formatter: (params: unknown) => {
             const p = params as { name: string; value: number }
             const percentage = total > 0 ? ((p.value / total) * 100).toFixed(1) : '0'
@@ -645,7 +654,8 @@ const initPieChart = () => {
           label: {
             show: true,
             fontSize: 16,
-            fontWeight: 'bold'
+            fontWeight: 'bold',
+            color: c.text
           }
         },
         data: data
@@ -814,11 +824,13 @@ const clearFilter = () => {
 const fetchAssetMissionList = async () => {
   try {
     const response = await http.get('/EVE/asset/getAssetPullMissions')
-    const data = await handleApiResponse<ApiResponse<Array<{ subject_type: string; subject_name: string; subject_id: number }>>>(response)
+    const data = await handleApiResponse<ApiResponse<Array<{ subject_type: string; subject_name: string; subject_id: number; is_abnormal?: boolean }>>>(response)
 
     if (data && data.data) {
+      // 排除异常任务，只将正常任务加入资产筛选选项
+      const validMissions = data.data.filter(mission => !mission.is_abnormal)
       // 转换为选项数组，value 格式为 "{subject_type}_{subject_id}"
-      assetMissionOptions.value = data.data.map(mission => ({
+      assetMissionOptions.value = validMissions.map(mission => ({
         value: `${mission.subject_type}_${mission.subject_id}`,
         label: mission.subject_name
       }))
@@ -1063,6 +1075,9 @@ const handleResize = () => {
 }
 
 onMounted(async () => {
+  cleanupThemeWatcher = onThemeTokenChange(() => {
+    updateChart()
+  })
   await nextTick()
   // 从本地存储加载"考虑非标记资产"设置
   includeMarkedAssets.value = loadIncludeUnmarkedFromStorage()
@@ -1076,6 +1091,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  cleanupThemeWatcher?.()
+  cleanupThemeWatcher = null
   if (pieChartInstance) {
     pieChartInstance.dispose()
     pieChartInstance = null
@@ -2225,5 +2242,43 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
   color: #67c23a;
   font-weight: 600;
   font-size: 16px;
+}
+
+/* Theme override */
+.overview-container,
+.toolbar,
+.chart-section :deep(.el-card),
+.data-card,
+.summary-card,
+.wallet-detail-total,
+.order-detail-total,
+.running-jobs-detail-total,
+.running-jobs-summary-total,
+.running-jobs-character-total {
+  background: var(--k-color-surface) !important;
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text) !important;
+}
+
+.toolbar {
+  background: var(--k-color-surface-soft) !important;
+}
+
+.data-label,
+.switch-label,
+.time-range-label,
+.summary-label,
+.summary-name-en {
+  color: var(--k-color-text-secondary) !important;
+}
+
+.data-value,
+.data-value-total,
+.summary-name {
+  color: var(--k-color-text) !important;
+}
+
+.overview-container :deep(.el-loading-mask) {
+  background-color: color-mix(in srgb, var(--k-color-surface) 92%, transparent) !important;
 }
 </style>

@@ -669,6 +669,8 @@ class IndustryManager(metaclass=SingletonMeta):
             # 计算完成，将结果存储到 Redis
             if result_key:
                 if has_error:
+                    # 存储结果（不设置过期时间，作为缓存）
+                    await rdm().r.set(result_key, json.dumps(cost_dict))
                     # 如果有错误，标记为失败
                     await rdm().r.hset(progress_key, mapping={
                         "status": "failed",
@@ -685,8 +687,8 @@ class IndustryManager(metaclass=SingletonMeta):
                         "total": total_count,
                         "current_step": "计算完成"
                     })
-                    logger.info(
-                        f"result save complete. result_key:{result_key}")
+                logger.info(
+                    f"result save complete. result_key:{result_key}")
         await tqdm_manager.complete_mission(f"calculate_cost_{op.user_name}_{market_id}")
 
         return cost_dict

@@ -145,6 +145,30 @@ class BPManager:
 
     @classmethod
     @cached(ttl=3600)
+    async def get_invention_source_bp_typeid_by_target_bp_typeid(cls, target_bp_typeid: int, pdm = None) -> Optional[int]:
+        """
+        根据目标蓝图type_id，获取其发明来源的蓝图type_id（activityID = 8）。
+        典型场景：Tech II 蓝图通过 Tech I 蓝图发明得到。
+        """
+        if pdm:
+            m = pdm
+        else:
+            m = await get_db_manager()
+        async with m.get_session() as session:
+            stmt = (
+                select(IndustryActivityProducts.blueprintTypeID)
+                .where(
+                    (IndustryActivityProducts.activityID == 8) &
+                    (IndustryActivityProducts.productTypeID == target_bp_typeid) &
+                    (IndustryActivityProducts.blueprintTypeID != 45732)
+                )
+                .limit(1)
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    @classmethod
+    @cached(ttl=3600)
     async def get_bp_id_by_pbpname(cls, bp_name) -> Optional[int]:
         bp_maybe_type_id = await SdeUtils.get_id_by_name(bp_name)
         if not bp_maybe_type_id:

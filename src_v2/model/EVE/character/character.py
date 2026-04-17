@@ -45,7 +45,7 @@ class Character():
         try:
             refresh_res_dict = refresh_token(token_state.refresh_token)
             logger.info(f"{self.character_name} token refreshed.")
-        except (InvalidClientIdError, InvalidScopeError) as e:
+        except Exception as e:
             logger.error(f"Caught an exception: {type(e).__name__}, message: {str(e)}")
             raise KahunaException(f"{self.character_name} 角色token获取失败，请重新授权")
         if refresh_res_dict:

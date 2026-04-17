@@ -1,8 +1,17 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { Cpu, TrendCharts, Money, ShoppingCart, DataAnalysis, Setting, ZoomIn, ArrowLeft, ArrowRight, Tools } from '@element-plus/icons-vue'
-import { ref, computed } from 'vue'
+import {
+  ArrowRight,
+  Cpu,
+  DataAnalysis,
+  Money,
+  ShoppingCart,
+  Tools,
+  TrendCharts,
+  ZoomIn,
+} from '@element-plus/icons-vue'
 import VipPricingPlans from '@/components/VipPricingPlans.vue'
 import mainViewImage from '@/assets/landing-page-mainView.png'
 import githubIconWhite from '@/assets/github-mark-white.svg'
@@ -19,959 +28,413 @@ import oreRefiningImage from '@/assets/landing-page-化矿计算.png'
 
 const router = useRouter()
 const authStore = useAuthStore()
-
-// GitHub 仓库地址
-const GITHUB_REPO_URL = 'https://github.com/AraragiEro/EveKahunaSystem.git'
-
-// 打开 GitHub 仓库
-const openGitHub = () => {
-  window.open(GITHUB_REPO_URL, '_blank')
-}
-
-// 捐赠链接（从环境变量读取）
-const donateLink = computed(() => import.meta.env.VITE_DONATE_LINK as string | undefined)
-const showDonateButton = computed(() => !!donateLink.value)
-
-// 社交群号
-const QQGroupNumber = computed(() => import.meta.env.VITE_QQ_GROUP as string | undefined)
-const showQQGroupButton = computed(() => !!QQGroupNumber.value)
-
-// 打开捐赠链接
-const openDonate = () => {
-  if (donateLink.value) {
-    window.open(donateLink.value, '_blank')
-  }
-}
-
-// 图片预览状态
 const previewVisible = ref(false)
 const previewImageList = ref<string[]>([])
 const previewInitialIndex = ref(0)
 
-// 打开图片预览
-const openPreview = (images: string | string[], index: number = 0) => {
-  if (Array.isArray(images)) {
-    previewImageList.value = images
-  } else {
-    previewImageList.value = [images]
-  }
+const GITHUB_REPO_URL = 'https://github.com/AraragiEro/EveKahunaSystem.git'
+const donateLink = computed(() => import.meta.env.VITE_DONATE_LINK as string | undefined)
+const qqGroupNumber = computed(() => import.meta.env.VITE_QQ_GROUP as string | undefined)
+
+const showDonateButton = computed(() => !!donateLink.value)
+const showQQGroupButton = computed(() => !!qqGroupNumber.value)
+
+const openGitHub = () => window.open(GITHUB_REPO_URL, '_blank')
+const openDonate = () => donateLink.value && window.open(donateLink.value, '_blank')
+const goToHome = () => router.push(authStore.isAuthenticated ? '/home' : '/login')
+const goToAnnouncements = () => router.push('/announcements')
+
+const openPreview = (images: string | string[], index = 0) => {
+  previewImageList.value = Array.isArray(images) ? images : [images]
   previewInitialIndex.value = index
   previewVisible.value = true
 }
 
-// 跳转到登录页
-const goToLogin = () => {
-  router.push('/login')
-}
-
-// 如果已登录，跳转到主页
-const goToHome = () => {
-  if (authStore.isAuthenticated) {
-    router.push('/home')
-  } else {
-    router.push('/login')
-  }
-}
-
-// 核心功能列表
 const features = [
   {
     icon: Cpu,
     title: '工业规划',
-    description: '智能工业制造规划与报表输出，支持计划分解树、材料清单、工作流等详细数据',
-    color: '#409eff',
-    image: industryPlanImage
+    description: '从目标产物自动拆解出制造链路，输出可执行的计划与报表。',
+    image: industryPlanImage,
   },
   {
     icon: TrendCharts,
     title: '市场与利润分析',
-    description: '实时市场价格查询、自选清单价格监控、利润计算与深度分析，帮助您发现市场机会并做出最佳决策',
-    color: '#67c23a',
-    image: marketAnalysisImage
+    description: '多维价格视角和利润测算联动，快速定位可交易机会。',
+    image: marketAnalysisImage,
   },
   {
     icon: Money,
     title: '成本计算',
-    description: '精确计算制造和采购成本，提供详略得当的成本报表，让您心中有数',
-    color: '#e6a23c',
-    image: costCalculationImage
+    description: '统一汇总制造、采购、物流成本，让定价决策更可控。',
+    image: costCalculationImage,
   },
   {
     icon: ShoppingCart,
     title: '采购清单',
-    description: '支持可复制的采购清单导出',
-    color: '#f56c6c',
-    image: procurementListImage
-  },
-  {
-    icon: Setting,
-    title: '资产管理',
-    description: '角色和公司资产统计与管理，全面掌握您的资产状况，对库存状况了如指掌',
-    color: '#606266',
-    images: [assetManagementImage1, assetManagementImage2, assetManagementImage3]
+    description: '一键生成可执行采购列表，减少生产准备时间。',
+    image: procurementListImage,
   },
   {
     icon: DataAnalysis,
-    title: '合作生产',
-    description: '支持多角色协作生产，优化资源配置，提高生产效率',
-    color: '#909399',
-    image: cooperativeProductionImage
+    title: '资产管理',
+    description: '角色与公司资产联动统计，支持跨账号的库存掌控。',
+    images: [assetManagementImage1, assetManagementImage2, assetManagementImage3],
   },
   {
     icon: Tools,
-    title: '化矿解算',
-    description: '智能矿石精炼计算，帮助您优化化矿方案，最大化资源利用效率',
-    color: '#9c27b0',
-    image: oreRefiningImage
-  }
-]
-
-// 系统特色
-const highlights = [
-  {
-    title: '易理解',
-    description: '通过简单易懂的方式回答"我该搓什么"、"搓出来赚钱吗"、"我该怎么搓"等核心问题'
+    title: '化矿与协作生产',
+    description: '覆盖精炼计算与协作链路，让多人生产更稳定。',
+    image: oreRefiningImage || cooperativeProductionImage,
   },
-  {
-    title: '可操作',
-    description: '提供可参考可执行的工作流建议和物流建议，照着搬运和进行工作即可'
-  },
-  {
-    title: '降低门槛',
-    description: '为熟练度不足或希望节省精力的玩家提供一整套易理解、可操作的执行方案'
-  }
 ]
-
 </script>
 
 <template>
   <div class="landing-page">
-    <!-- Hero 区域 -->
-    <section class="hero-section">
-      <div class="hero-container">
-        <div class="hero-content">
-          <h1 class="hero-title">
-            <span class="title-main">Kahuna System</span>
-            <span class="title-sub">EVE Online 工业辅助平台</span>
-          </h1>
-          <p class="hero-description">
-            面向流程的工业辅助平台，以简单易懂的方式回答"我该搓什么"、"我该怎么搓"等核心问题，为熟练度不足或希望节省精力的玩家提供一整套易理解、可操作的执行方案
+    <section class="hero">
+      <div class="hero-noise" />
+      <div class="hero-grid" />
+      <div class="hero-content">
+        <div class="hero-text">
+          <p class="eyebrow">Kahuna System</p>
+          <h1>面向 EVE 工业的可执行决策平台</h1>
+          <p class="desc">
+            用统一的数据与流程，把“做什么、怎么做、赚不赚钱”这三件事讲清楚。
           </p>
           <div class="hero-actions">
-            <el-button
-              type="primary"
-              size="large"
-              @click="goToHome"
-              class="hero-button"
-            >
+            <el-button type="primary" size="large" class="cta-btn" @click="goToHome">
               {{ authStore.isAuthenticated ? '进入系统' : '立即开始' }}
+              <el-icon><ArrowRight /></el-icon>
             </el-button>
-            <el-button
-              size="large"
-              @click="openGitHub"
-              class="hero-button github-button"
-              title="打开 GitHub 仓库"
-            >
+            <el-button size="large" class="ghost-btn" @click="openGitHub">
               <img :src="githubIconWhite" alt="GitHub" class="github-icon" />
               GitHub
             </el-button>
-            <el-button
-              v-if="showDonateButton"
-              size="large"
-              @click="openDonate"
-              class="hero-button donate-button"
-              title="支持作者"
-            >
+            <el-button size="large" class="ghost-btn" @click="goToAnnouncements">公告</el-button>
+            <el-button v-if="showDonateButton" size="large" class="ghost-btn donate" @click="openDonate">
               <img :src="aifadianLogo" alt="爱发电" class="donate-icon" />
             </el-button>
           </div>
-          <div class="hero-tagline">
-            <span>🥰 爱来自 凛冬联盟群 紫竹梅重工</span>
-          </div>
-          <div class="hero-tagline" v-if="showQQGroupButton">
-            <span>邀请码获取请加入QQ交流群：{{ QQGroupNumber }}</span>
-          </div>
+          <p v-if="showQQGroupButton" class="qq-tip">邀请码获取请加入 QQ 交流群：{{ qqGroupNumber }}</p>
         </div>
-        <div class="hero-image-wrapper">
-          <div class="hero-image-container">
-            <img :src="mainViewImage" alt="Kahuna System 主界面" class="hero-image" />
-            <div class="hero-image-glow"></div>
-          </div>
+        <div class="hero-card">
+          <img :src="mainViewImage" alt="Kahuna 主界面预览" loading="eager" />
         </div>
       </div>
     </section>
 
-    <!-- 功能展示区域 -->
-    <section class="features-section">
-      <div class="section-container">
-        <h2 class="section-title">核心功能</h2>
-        <p class="section-subtitle">为 EVE Online 玩家提供全方位的工业辅助服务</p>
-        <div class="features-grid">
-          <el-card
-            v-for="(feature, index) in features"
-            :key="index"
-            shadow="hover"
-            class="feature-card"
-          >
-            <!-- 功能图片区域 -->
-            <div class="feature-image-wrapper">
-              <!-- 资产管理功能：展示三张图片 -->
-              <div v-if="feature.images" class="feature-images-multi">
-                <div
-                  v-for="(img, imgIndex) in feature.images"
-                  :key="imgIndex"
-                  class="feature-image-item"
-                  @click="openPreview(feature.images, imgIndex)"
-                >
-                  <img :src="img" :alt="`${feature.title} - 图片 ${imgIndex + 1}`" class="feature-image" />
-                  <div class="feature-image-overlay">
-                    <el-icon :size="32" class="preview-icon">
-                      <ZoomIn />
-                    </el-icon>
-                  </div>
-                </div>
-              </div>
-              <!-- 单张图片功能 -->
-              <div v-else class="feature-image-single" @click="openPreview(feature.image, 0)">
-                <img :src="feature.image" :alt="feature.title" class="feature-image" />
-                <div class="feature-image-overlay">
-                  <el-icon :size="32" class="preview-icon">
-                    <ZoomIn />
-                  </el-icon>
-                </div>
-              </div>
+    <section class="feature-section">
+      <div class="section-header">
+        <h2>核心能力</h2>
+        <p>为工业链路提供从规划到执行的完整闭环</p>
+      </div>
+      <div class="feature-grid">
+        <article v-for="(feature, index) in features" :key="feature.title + index" class="feature-card">
+          <div class="feature-image-wrap">
+            <div v-if="feature.images" class="multi-image-grid">
+              <button
+                v-for="(img, imgIndex) in feature.images"
+                :key="imgIndex"
+                type="button"
+                class="feature-image-btn"
+                @click="openPreview(feature.images, imgIndex)"
+              >
+                <img :src="img" :alt="`${feature.title}-${imgIndex + 1}`" loading="lazy" />
+                <span class="zoom-layer"><el-icon><ZoomIn /></el-icon></span>
+              </button>
             </div>
-            <!-- 功能信息区域 -->
-            <div class="feature-content">
-              <div class="feature-icon" :style="{ color: feature.color }">
-                <el-icon :size="48">
-                  <component :is="feature.icon" />
-                </el-icon>
-              </div>
-              <h3 class="feature-title">{{ feature.title }}</h3>
-              <p class="feature-description">{{ feature.description }}</p>
-            </div>
-          </el-card>
-        </div>
-      </div>
-      <!-- 图片预览对话框 -->
-      <el-dialog
-        v-model="previewVisible"
-        :width="'90%'"
-        :show-close="true"
-        :close-on-click-modal="true"
-        :close-on-press-escape="true"
-        align-center
-        class="image-preview-dialog"
-        @close="previewVisible = false"
-      >
-        <div class="image-preview-container">
-          <img
-            v-for="(img, index) in previewImageList"
-            :key="index"
-            v-show="index === previewInitialIndex"
-            :src="img"
-            class="image-preview-img"
-            @click.stop
-          />
-          <!-- 多图导航 -->
-          <div v-if="previewImageList.length > 1" class="image-preview-nav">
-            <el-button
-              circle
-              :disabled="previewInitialIndex === 0"
-              @click="previewInitialIndex = Math.max(0, previewInitialIndex - 1)"
-            >
-              <el-icon><ArrowLeft /></el-icon>
-            </el-button>
-            <span class="image-preview-counter">
-              {{ previewInitialIndex + 1 }} / {{ previewImageList.length }}
-            </span>
-            <el-button
-              circle
-              :disabled="previewInitialIndex === previewImageList.length - 1"
-              @click="previewInitialIndex = Math.min(previewImageList.length - 1, previewInitialIndex + 1)"
-            >
-              <el-icon><ArrowRight /></el-icon>
-            </el-button>
+            <button v-else type="button" class="feature-image-btn" @click="openPreview(feature.image, 0)">
+              <img :src="feature.image" :alt="feature.title" loading="lazy" />
+              <span class="zoom-layer"><el-icon><ZoomIn /></el-icon></span>
+            </button>
           </div>
-        </div>
-      </el-dialog>
-    </section>
-
-    <!-- 特色介绍区域 -->
-    <section class="highlights-section">
-      <div class="section-container">
-        <h2 class="section-title">系统特色</h2>
-        <p class="section-subtitle">让工业制造变得简单高效</p>
-        <div class="highlights-grid">
-          <div
-            v-for="(highlight, index) in highlights"
-            :key="index"
-            class="highlight-item"
-          >
-            <div class="highlight-number">{{ index + 1 }}</div>
-            <h3 class="highlight-title">{{ highlight.title }}</h3>
-            <p class="highlight-description">{{ highlight.description }}</p>
+          <div class="feature-body">
+            <el-icon :size="26"><component :is="feature.icon" /></el-icon>
+            <h3>{{ feature.title }}</h3>
+            <p>{{ feature.description }}</p>
           </div>
-        </div>
+        </article>
       </div>
     </section>
 
-    <!-- 定价展示区域 -->
     <section class="pricing-section">
-      <div class="section-container">
-        <h2 class="section-title">订阅方案</h2>
-        <p class="section-subtitle">可领取Omega 7天试用</p>
-        <p class="pricing-notice">
-          收费策略可能会根据服务器资源、联盟政策等因素变动，暂不接受年卡等长期订阅
-        </p>
-        <VipPricingPlans />
+      <div class="section-header">
+        <h2>订阅方案</h2>
+        <p>支持试用，按阶段升级</p>
       </div>
+      <VipPricingPlans />
     </section>
 
-    <!-- 页脚 -->
-    <footer class="landing-footer">
-      <div class="footer-content">
-        <p>© 2025 Kahuna System. 紫竹梅重工.</p>
-        <p class="footer-subtitle">基于 Quart 和 Vue3 的 EVE Online 一体化 Web 应用平台</p>
+    <footer class="landing-footer">© 2026 Kahuna System</footer>
+
+    <el-dialog v-model="previewVisible" width="88%" top="6vh" class="image-preview-dialog">
+      <div class="preview-wrap">
+        <img
+          v-for="(img, index) in previewImageList"
+          :key="img"
+          v-show="index === previewInitialIndex"
+          :src="img"
+          alt="预览图"
+          class="preview-img"
+        />
       </div>
-    </footer>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .landing-page {
-  min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100%;
+  color: var(--k-color-text);
+  background: var(--k-app-bg);
 }
 
-/* Hero 区域 */
-.hero-section {
-  min-height: 90vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 80px 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+.hero {
   position: relative;
+  min-height: 88dvh;
   overflow: hidden;
+  background: var(--k-hero-bg);
 }
 
-.hero-section::before {
-  content: '';
+.hero-noise {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: url('data:image/svg+xml,<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse"><path d="M 100 0 L 0 0 0 100" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>');
-  opacity: 0.3;
+  inset: 0;
+  opacity: 0.16;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.4) 1px, transparent 1px);
+  background-size: 3px 3px;
 }
 
-.hero-container {
-  max-width: 1400px;
-  width: 100%;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 60px;
-  align-items: center;
-  position: relative;
-  z-index: 1;
+.hero-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.9), transparent 85%);
 }
 
 .hero-content {
-  text-align: left;
   position: relative;
   z-index: 1;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 90px 20px 70px;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 38px;
+  align-items: center;
 }
 
-.hero-title {
-  margin: 0 0 24px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.hero-text {
+  color: #e8f2ff;
 }
 
-.title-main {
-  font-size: 64px;
-  font-weight: 700;
-  color: white;
-  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.2);
-  line-height: 1.2;
+.eyebrow {
+  margin: 0 0 12px;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #98c8ff;
 }
 
-.title-sub {
-  font-size: 28px;
-  font-weight: 400;
-  color: rgba(255, 255, 255, 0.9);
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+.hero-text h1 {
+  margin: 0;
+  font-size: clamp(34px, 6vw, 58px);
+  line-height: 1.08;
+  letter-spacing: 0.02em;
 }
 
-.hero-description {
-  font-size: 20px;
-  color: rgba(255, 255, 255, 0.95);
-  line-height: 1.8;
-  margin: 0 0 40px 0;
-  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.1);
+.desc {
+  margin: 20px 0 0;
+  max-width: 640px;
+  font-size: 18px;
+  line-height: 1.7;
+  color: rgba(232, 242, 255, 0.92);
 }
 
 .hero-actions {
+  margin-top: 30px;
   display: flex;
-  gap: 16px;
-  justify-content: flex-start;
-  margin-bottom: 32px;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
-.hero-button {
-  padding: 16px 40px;
-  font-size: 18px;
-  font-weight: 500;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  transition: all 0.3s ease;
+.cta-btn {
+  height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2b74ff 0%, #36a9ff 100%);
+  box-shadow: 0 12px 28px rgba(50, 125, 255, 0.35);
 }
 
-.hero-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
-}
-
-.hero-button.secondary {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(255, 255, 255, 0.3);
-  color: white;
-  backdrop-filter: blur(10px);
-}
-
-.hero-button.secondary:hover {
-  background: rgba(255, 255, 255, 0.3);
-  border-color: rgba(255, 255, 255, 0.5);
-}
-
-.hero-button.github-button {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
-  color: white;
-  backdrop-filter: blur(10px);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.hero-button.github-button:hover {
-  background: rgba(255, 255, 255, 0.25);
-  border-color: rgba(255, 255, 255, 0.5);
-}
-
-.hero-button.donate-button {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
-  color: white;
-  backdrop-filter: blur(10px);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.hero-button.donate-button:hover {
-  background: rgba(255, 255, 255, 0.25);
-  border-color: rgba(255, 255, 255, 0.5);
-}
-
-.donate-icon {
-  height: 80px;
-  width: auto;
-  object-fit: contain;
+.ghost-btn {
+  height: 48px;
+  color: #dce9ff;
+  border: 1px solid rgba(171, 199, 255, 0.4);
+  border-radius: 12px;
+  background: rgba(8, 22, 48, 0.36);
 }
 
 .github-icon {
-  width: 20px;
-  height: 20px;
-  filter: brightness(0) invert(1);
+  width: 16px;
+  height: 16px;
 }
 
-.hero-tagline {
-  margin-top: 24px;
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.8);
+.donate-icon {
+  height: 30px;
+  width: auto;
 }
 
-/* Hero 图片区域 */
-.hero-image-wrapper {
+.qq-tip {
+  margin-top: 16px;
+  color: #a6c8ff;
+}
+
+.hero-card {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  perspective: 1000px;
+  padding: 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(131, 178, 255, 0.32);
+  background: linear-gradient(145deg, rgba(12, 31, 68, 0.72), rgba(11, 27, 58, 0.4));
+  box-shadow: 0 24px 64px rgba(4, 9, 24, 0.5);
 }
 
-.hero-image-container {
-  position: relative;
+.hero-card img {
   width: 100%;
-  max-width: 700px;
-  transform-style: preserve-3d;
-  animation: float 6s ease-in-out infinite;
-}
-
-.hero-image {
-  width: 100%;
-  height: auto;
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3),
-              0 0 0 1px rgba(255, 255, 255, 0.1);
-  object-fit: contain;
   display: block;
-  position: relative;
-  z-index: 2;
-  transition: transform 0.3s ease;
+  border-radius: 14px;
 }
 
-.hero-image:hover {
-  transform: translateY(-5px) scale(1.02);
-}
-
-.hero-image-glow {
-  position: absolute;
-  top: -20px;
-  left: -20px;
-  right: -20px;
-  bottom: -20px;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.4) 0%, rgba(118, 75, 162, 0.4) 100%);
-  border-radius: 24px;
-  filter: blur(30px);
-  opacity: 0.6;
-  z-index: 1;
-  animation: pulse 3s ease-in-out infinite;
-}
-
-@keyframes float {
-  0%, 100% {
-    transform: translateY(0px) rotateY(0deg);
-  }
-  50% {
-    transform: translateY(-20px) rotateY(2deg);
-  }
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 0.4;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.7;
-    transform: scale(1.05);
-  }
-}
-
-/* 功能展示区域 */
-.features-section {
-  padding: 100px 24px;
-  background: #f5f7fa;
-}
-
-.section-container {
-  max-width: 1200px;
+.feature-section,
+.pricing-section {
+  max-width: 1240px;
   margin: 0 auto;
+  padding: 72px 20px 12px;
 }
 
-.section-title {
-  font-size: 42px;
-  font-weight: 700;
-  color: #2c3e50;
-  text-align: center;
-  margin: 0 0 16px 0;
+.section-header h2 {
+  margin: 0;
+  font-size: 34px;
 }
 
-.section-subtitle {
-  font-size: 18px;
-  color: #64748b;
-  text-align: center;
-  margin: 0 0 60px 0;
+.section-header p {
+  margin: 10px 0 0;
+  color: var(--k-color-text-secondary);
 }
 
-.features-grid {
+.feature-grid {
+  margin-top: 26px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-  gap: 40px;
-  margin-top: 40px;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
 }
 
 .feature-card {
-  border-radius: 16px;
-  transition: all 0.3s ease;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: white;
+  border: 1px solid var(--k-color-border);
+  border-radius: 14px;
+  background: var(--k-color-surface);
+  box-shadow: var(--k-shadow-sm);
 }
 
-.feature-card:hover {
-  transform: translateY(-8px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+.feature-image-wrap {
+  background: var(--k-color-surface-soft);
 }
 
-/* 功能图片区域 */
-.feature-image-wrapper {
+.feature-image-btn {
   width: 100%;
+  border: 0;
+  padding: 0;
+  display: block;
   position: relative;
-  overflow: hidden;
-  background: #f8f9fa;
-}
-
-.feature-image-single {
-  position: relative;
-  width: 100%;
   cursor: pointer;
-  overflow: hidden;
+  background: transparent;
 }
 
-.feature-images-multi {
+.feature-image-btn img {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+}
+
+.zoom-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e8f2ff;
+  opacity: 0;
+  background: rgba(4, 14, 30, 0.5);
+  transition: opacity 0.2s ease;
+}
+
+.feature-image-btn:hover .zoom-layer {
+  opacity: 1;
+}
+
+.multi-image-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   padding: 8px;
 }
 
-.feature-image-item {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  cursor: pointer;
-  overflow: hidden;
-  border-radius: 8px;
-  background: #f0f0f0;
+.feature-body {
+  padding: 14px 16px 18px;
 }
 
-.feature-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transition: transform 0.3s ease;
-  display: block;
+.feature-body :deep(.el-icon) {
+  color: var(--k-color-primary);
 }
 
-.feature-image-single .feature-image {
-  aspect-ratio: 16 / 9;
+.feature-body h3 {
+  margin: 8px 0 4px;
+  font-size: 18px;
 }
 
-.feature-image-item:hover .feature-image,
-.feature-image-single:hover .feature-image {
-  transform: scale(1.05);
-}
-
-.feature-image-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.feature-image-item:hover .feature-image-overlay,
-.feature-image-single:hover .feature-image-overlay {
-  opacity: 1;
-}
-
-.preview-icon {
-  color: white;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-}
-
-/* 功能内容区域 */
-.feature-content {
-  padding: 32px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-
-.feature-icon {
-  margin-bottom: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.feature-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: #2c3e50;
-  margin: 0 0 12px 0;
-}
-
-.feature-description {
-  font-size: 15px;
-  color: #64748b;
+.feature-body p {
+  margin: 0;
+  color: var(--k-color-text-secondary);
   line-height: 1.6;
-  margin: 0;
 }
 
-/* 图片预览对话框样式 */
-:deep(.image-preview-dialog) {
-  .el-dialog__body {
-    padding: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 70vh;
-    background-color: rgba(0, 0, 0, 0.9);
-  }
-  
-  .el-dialog__header {
-    background-color: rgba(0, 0, 0, 0.9);
-    color: white;
-  }
-  
-  .el-dialog__close {
-    color: white;
-  }
-}
-
-.image-preview-container {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  padding: 20px;
-  position: relative;
-}
-
-.image-preview-img {
-  max-width: 100%;
-  max-height: 75vh;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-}
-
-.image-preview-nav {
-  position: absolute;
-  bottom: 40px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  background: rgba(0, 0, 0, 0.6);
-  padding: 12px 24px;
-  border-radius: 24px;
-  backdrop-filter: blur(10px);
-}
-
-.image-preview-counter {
-  color: white;
-  font-size: 16px;
-  font-weight: 500;
-  min-width: 60px;
-  text-align: center;
-}
-
-/* 特色介绍区域 */
-.highlights-section {
-  padding: 100px 24px;
-  background: white;
-}
-
-.highlights-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 40px;
-  margin-top: 60px;
-}
-
-.highlight-item {
-  text-align: center;
-  position: relative;
-}
-
-.highlight-number {
-  width: 60px;
-  height: 60px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  font-size: 28px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 24px;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-}
-
-.highlight-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: #2c3e50;
-  margin: 0 0 16px 0;
-}
-
-.highlight-description {
-  font-size: 16px;
-  color: #64748b;
-  line-height: 1.8;
-  margin: 0;
-}
-
-/* 定价展示区域 */
 .pricing-section {
-  padding: 100px 24px;
-  background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
+  padding-bottom: 64px;
 }
 
-.pricing-notice {
-  font-size: 14px;
-  color: #909399;
-  text-align: center;
-  margin: 0 0 60px 0;
-  font-style: italic;
-}
-
-
-/* 技术栈展示 */
-.tech-section {
-  padding: 80px 24px;
-  background: #f5f7fa;
-}
-
-.tech-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  justify-content: center;
-  margin-top: 40px;
-}
-
-.tech-tags .el-tag {
-  padding: 12px 24px;
-  font-size: 16px;
-  font-weight: 500;
-}
-
-/* 页脚 */
 .landing-footer {
-  background: #2c3e50;
-  color: rgba(255, 255, 255, 0.8);
-  padding: 40px 24px;
   text-align: center;
+  padding: 18px 20px 26px;
+  border-top: 1px solid var(--k-color-border);
+  color: var(--k-color-text-secondary);
 }
 
-.footer-content p {
-  margin: 8px 0;
-  font-size: 14px;
+.preview-wrap {
+  min-height: 62dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.footer-subtitle {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+.preview-img {
+  max-width: 100%;
+  max-height: 80dvh;
+  object-fit: contain;
 }
 
-/* 响应式设计 */
-@media (max-width: 1024px) {
-  .hero-container {
-    grid-template-columns: 1fr;
-    gap: 40px;
-    text-align: center;
-  }
-
+@media (max-width: 960px) {
   .hero-content {
-    text-align: center;
-  }
-
-  .hero-actions {
-    justify-content: center;
-  }
-
-  .hero-image-container {
-    max-width: 100%;
-  }
-}
-
-@media (max-width: 768px) {
-  .hero-section {
-    min-height: auto;
-    padding: 60px 16px;
-  }
-
-  .title-main {
-    font-size: 42px;
-  }
-
-  .title-sub {
-    font-size: 20px;
-  }
-
-  .hero-description {
-    font-size: 16px;
-  }
-
-  .hero-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .hero-button {
-    width: 100%;
-  }
-
-  .hero-container {
-    gap: 30px;
-  }
-
-  .hero-image-container {
-    max-width: 100%;
-  }
-
-  .section-title {
-    font-size: 32px;
-  }
-
-  .features-grid {
     grid-template-columns: 1fr;
-    gap: 24px;
+    padding-top: 70px;
   }
 
-  .feature-images-multi {
+  .feature-grid {
     grid-template-columns: 1fr;
-    gap: 8px;
-  }
-
-  .feature-content {
-    padding: 24px;
-  }
-
-  .highlights-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .image-preview-nav {
-    bottom: 20px;
-    padding: 8px 16px;
-  }
-  
-  .image-preview-img {
-    max-height: 60vh;
-  }
-
-}
-
-@media (max-width: 1024px) {
-  .features-grid {
-    grid-template-columns: 1fr;
-    gap: 32px;
   }
 }
 </style>
-

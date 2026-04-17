@@ -1,0 +1,149 @@
+# ============================================
+# KahunaBot Docker 配置文件（仅后端 + MCP）
+# ============================================
+# 复制此文件为 config.toml 并修改 EVE API 配置
+
+[EDITION]
+Edition = "community"
+ENABLE_API_DOCS = false
+API_DOCS_PATH = "/api/docs"
+API_OPENAPI_PATH = "/api/openapi.json"
+
+[APP]
+PIC_RENDER_PROXY = ""
+PROXY = ""
+PORT = 0
+SECRET_KEY = "change-me-to-a-random-secret-key"
+
+[GOOGLE]
+CREDENTIALS = "credentials/google-service-account.json"
+MARKET_MONITOR_SPREADSHEET_ID = ""
+
+[ADMIN]
+create_admin = true
+admin_user = "kahuna"
+admin_passwd = "kahuna"
+
+[POSTGREDB]
+Host = ""
+Port = 5432
+Database = ""
+User = ""
+Password = ""
+
+[REDIS]
+Host = ""
+Port = 6379
+
+[NEO4J]
+Host = ""
+Port = 7687
+Username = ""
+Password = ""
+
+[SQLITEDB]
+CONFIG_DB = "data/kahuna_config.db"
+CACHE_DB = "data/kahuna_cache.db"
+SDEDB = ""
+CN_SDEDB = ""
+
+[SDEDB]
+Host = ""
+Port = 5432
+Database = ""
+User = ""
+Password = ""
+
+[SDE_BUILDER]
+Latest_Version_URL = "https://developers.eveonline.com/static-data/tranquility/latest.jsonl"
+Latest_Download_URL = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip"
+Download_Path = "download_resource/sde"
+Extract_Path = "tmp/sde"
+Current_Build_Number = 0
+Parse_Whitelist = [
+    "types",
+    "blueprints",
+    "MetaGroups",
+    "metaGroups",
+    "groups",
+    "categories",
+    "marketGroups",
+    "mapSolarSystems",
+    "mapRegions",
+    "typeMaterials",
+]
+Auto_Update = false
+Update_Interval = 24
+
+[EVE]
+CLIENT_ID = ""
+SECRET_KEY = ""
+CALLBACK_LOCAL_HOST = "localhost:9527/"
+
+[ESI]
+publicData = false
+"esi-calendar.respond_calendar_events.v1" = false
+"esi-calendar.read_calendar_events.v1" = false
+"esi-location.read_location.v1" = false
+"esi-location.read_ship_type.v1" = false
+"esi-mail.organize_mail.v1" = false
+"esi-mail.read_mail.v1" = false
+"esi-mail.send_mail.v1" = false
+"esi-skills.read_skills.v1" = true
+"esi-skills.read_skillqueue.v1" = false
+"esi-wallet.read_character_wallet.v1" = true
+"esi-wallet.read_corporation_wallet.v1" = false
+"esi-search.search_structures.v1" = true
+"esi-clones.read_clones.v1" = false
+"esi-characters.read_contacts.v1" = false
+"esi-universe.read_structures.v1" = true
+"esi-killmails.read_killmails.v1" = false
+"esi-corporations.read_corporation_membership.v1" = true
+"esi-assets.read_assets.v1" = true
+"esi-planets.manage_planets.v1" = false
+"esi-fleets.read_fleet.v1" = false
+"esi-fleets.write_fleet.v1" = false
+"esi-ui.open_window.v1" = false
+"esi-ui.write_waypoint.v1" = false
+"esi-characters.write_contacts.v1" = false
+"esi-fittings.read_fittings.v1" = false
+"esi-fittings.write_fittings.v1" = false
+"esi-markets.structure_markets.v1" = true
+"esi-corporations.read_structures.v1" = false
+"esi-characters.read_loyalty.v1" = false
+"esi-characters.read_chat_channels.v1" = false
+"esi-characters.read_medals.v1" = false
+"esi-characters.read_standings.v1" = false
+"esi-characters.read_agents_research.v1" = false
+"esi-industry.read_character_jobs.v1" = true
+"esi-markets.read_character_orders.v1" = true
+"esi-characters.read_blueprints.v1" = true
+"esi-characters.read_corporation_roles.v1" = true
+"esi-location.read_online.v1" = false
+"esi-contracts.read_character_contracts.v1" = true
+"esi-clones.read_implants.v1" = false
+"esi-characters.read_fatigue.v1" = false
+"esi-killmails.read_corporation_killmails.v1" = false
+"esi-corporations.track_members.v1" = false
+"esi-wallet.read_corporation_wallets.v1" = false
+"esi-characters.read_notifications.v1" = false
+"esi-corporations.read_divisions.v1" = false
+"esi-corporations.read_contacts.v1" = false
+"esi-assets.read_corporation_assets.v1" = true
+"esi-corporations.read_titles.v1" = false
+"esi-corporations.read_blueprints.v1" = true
+"esi-contracts.read_corporation_contracts.v1" = true
+"esi-corporations.read_standings.v1" = false
+"esi-corporations.read_starbases.v1" = false
+"esi-industry.read_corporation_jobs.v1" = true
+"esi-markets.read_corporation_orders.v1" = false
+"esi-corporations.read_container_logs.v1" = false
+"esi-industry.read_character_mining.v1" = false
+"esi-industry.read_corporation_mining.v1" = false
+"esi-planets.read_customs_offices.v1" = false
+"esi-corporations.read_facilities.v1" = false
+"esi-corporations.read_medals.v1" = false
+"esi-characters.read_titles.v1" = false
+"esi-alliances.read_contacts.v1" = false
+"esi-characters.read_fw_stats.v1" = false
+"esi-corporations.read_fw_stats.v1" = false

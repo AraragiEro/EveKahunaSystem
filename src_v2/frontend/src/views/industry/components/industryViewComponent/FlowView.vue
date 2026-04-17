@@ -308,10 +308,19 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
     gap: 10px;
 }
 
-:deep(.el-table__body tr.complete-row) {
+:deep(.el-table__body tr.complete-row),
+:deep(.el-table__body tr.complete-row > td.el-table__cell),
+:deep(.el-table__body tr.complete-row:hover > td.el-table__cell) {
     background-color: #e7ffc8 !important;
     font-weight: bold !important;
     color: #000000 !important;
+}
+
+:global([data-theme='dark']) .flow-view-container :deep(.el-table__body tr.complete-row),
+:global([data-theme='dark']) .flow-view-container :deep(.el-table__body tr.complete-row > td.el-table__cell),
+:global([data-theme='dark']) .flow-view-container :deep(.el-table__body tr.complete-row:hover > td.el-table__cell) {
+    background-color: color-mix(in srgb, var(--k-color-success) 22%, var(--k-color-surface)) !important;
+    color: var(--k-color-text) !important;
 }
 
 /* 可点击复制的单元格样式 */
@@ -334,4 +343,3 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
     transform: scale(0.98);
 }
 </style>
-

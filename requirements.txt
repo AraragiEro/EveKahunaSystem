@@ -14,6 +14,7 @@ itsdangerous==2.2.0
 networkx==3.4.2
 oauthlib==3.2.2
 peewee==3.17.9
+pypinyin==0.51.0
 pulp==3.1.1
 PyJWT==2.10.1
 pyppeteer==2.0.0

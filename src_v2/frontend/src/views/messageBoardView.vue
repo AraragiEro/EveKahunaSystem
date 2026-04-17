@@ -1709,4 +1709,128 @@ onMounted(async () => {
     order: 1;
   }
 }
+
+/* Theme override */
+.message-board-page,
+.header-bar,
+.filter-panel,
+.list-panel,
+.filter-card,
+.list-card,
+.message-card,
+.detail-header,
+.detail-body,
+.detail-content,
+.reply-item,
+.reply-input,
+.status-action-text {
+  background: var(--k-color-surface) !important;
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text) !important;
+}
+
+.subtitle,
+.filter-label,
+.card-content-snippet,
+.time,
+.last-reply,
+.reply-section-count,
+.reply-time,
+.reply-empty,
+.reply-action-icon,
+.reply-hidden-placeholder {
+  color: var(--k-color-text-secondary) !important;
+}
+
+.card-title,
+.name,
+.detail-title-text,
+.reply-author,
+.reply-content,
+.reply-section-title {
+  color: var(--k-color-text) !important;
+}
+
+.message-card {
+  box-shadow: var(--k-shadow-sm) !important;
+}
+
+.message-card:hover {
+  box-shadow: var(--k-shadow-md) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 25%, var(--k-color-border)) !important;
+}
+
+.avatar,
+.reply-avatar {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface-soft)) 0%,
+    color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-surface)) 100%
+  ) !important;
+  color: var(--k-color-primary) !important;
+}
+
+.detail-content-text :deep(blockquote) {
+  border-left-color: var(--k-color-border) !important;
+  color: var(--k-color-text-secondary) !important;
+}
+
+.detail-content-text :deep(a) {
+  color: var(--k-color-primary) !important;
+}
+
+.reply-section-divider {
+  border-top-color: var(--k-color-border) !important;
+}
+
+.reply-section::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--k-color-surface-soft) 82%, var(--k-color-surface)) !important;
+}
+
+.reply-section::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--k-color-border) 85%, var(--k-color-surface)) !important;
+}
+
+.reply-section::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
+}
+
+.reply-content :deep(code),
+.reply-content :deep(pre) {
+  background: var(--k-color-surface-soft) !important;
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text) !important;
+}
+
+.reply-hidden-placeholder {
+  border-color: var(--k-color-border) !important;
+}
+
+.status-action-text:hover {
+  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
+  color: var(--k-color-primary) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
+}
+
+.message-board-page :deep(.el-card),
+.message-board-page :deep(.el-dialog),
+.message-board-page :deep(.el-dialog__header),
+.message-board-page :deep(.el-dialog__body),
+.message-board-page :deep(.el-dialog__footer),
+.message-board-page :deep(.el-input__wrapper),
+.message-board-page :deep(.el-textarea__inner),
+.message-board-page :deep(.el-select__wrapper),
+.message-board-page :deep(.el-button),
+.message-board-page :deep(.el-tag),
+.message-board-page :deep(.el-date-editor.el-input__wrapper) {
+  background: var(--k-color-surface) !important;
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text) !important;
+}
+
+.message-board-page :deep(.el-button:not(.el-button--primary):not(.el-button--danger):hover) {
+  color: var(--k-color-primary) !important;
+  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
+}
 </style>

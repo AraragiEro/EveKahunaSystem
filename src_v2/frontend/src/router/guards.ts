@@ -8,9 +8,9 @@ export function setupAuthGuards(router: Router): void {
     const { isEnterprise } = useEdition()
     
     // 定义公开页面列表（不需要认证即可访问）
-    const publicPages = ['/', '/login', '/landing', '/forbidden', '/setting/characterSetting/auth/close']
-    // 支持动态路径匹配：/storage/:sid
-    const isPublicPage = publicPages.includes(to.path) || to.path.startsWith('/storage/')
+    const publicPages = ['/', '/login', '/landing', '/announcements', '/forbidden', '/setting/characterSetting/auth/close']
+    // 支持动态路径匹配：/storage/:sid 和 /workflow/:token
+    const isPublicPage = publicPages.includes(to.path) || to.path.startsWith('/storage/') || to.path.startsWith('/workflow/')
     
     // 如果访问登录页，检查是否已经登录（验证 token 有效性）
     if (to.path === '/login') {

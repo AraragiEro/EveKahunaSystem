@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
+import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
 
 // Props定义
 const props = defineProps<{
@@ -140,6 +141,7 @@ const clearFilters = () => {
 // 图表相关
 const graphContainerRef = ref<HTMLElement>()
 let chartInstance: echarts.ECharts | null = null
+let cleanupThemeWatcher: (() => void) | null = null
 
 // 将3D坐标投影到2D平面（使用X-Y投影）
 const project3DTo2D = (coord: number[]): [number, number] => {
@@ -189,6 +191,7 @@ const normalizeCoordinates = (
 
 // 计算图表数据
 const graphData = computed(() => {
+    const c = getChartThemeColors()
     if (!props.logisticsData || !Array.isArray(props.logisticsData) || props.logisticsData.length === 0) {
         return { nodes: [], links: [] }
     }
@@ -340,7 +343,7 @@ const graphData = computed(() => {
             lineStyle: {
                 width: lineWidth,
                 curveness: edge.curveness,
-                color: '#F95EFF'
+                color: c.primary
             },
             label: {
                 show: true,
@@ -355,6 +358,7 @@ const graphData = computed(() => {
 
 // 初始化图表
 const initChart = () => {
+    const c = getChartThemeColors()
     if (!graphContainerRef.value) return
 
     const data = graphData.value
@@ -384,9 +388,11 @@ const initChart = () => {
         title: {
             text: '物流关系图',
             left: 'center',
-            top: 10
+            top: 10,
+            textStyle: { color: c.text }
         },
         tooltip: {
+            ...themedTooltip(c),
             trigger: 'item',
             formatter: (params: any) => {
                 if (params.dataType === 'node') {
@@ -407,14 +413,16 @@ const initChart = () => {
             label: {
                 show: true,
                 position: 'right',
+                color: c.text,
                 formatter: '{b}'
             },
             edgeLabel: {
                 show: true,
+                color: c.textSecondary,
                 formatter: '{c}'
             },
             lineStyle: {
-                color: '#5470c6',
+                color: c.primary,
                 width: 2,
                 curveness: 0
             },
@@ -591,6 +599,9 @@ onMounted(async () => {
     window.addEventListener('resize', handleResize)
     // 监听窗口大小变化以更新响应式布局
     window.addEventListener('resize', handleWindowResize)
+    cleanupThemeWatcher = onThemeTokenChange(() => {
+        updateChart()
+    })
 })
 
 // 组件卸载
@@ -609,6 +620,8 @@ onUnmounted(() => {
     // 移除事件监听
     window.removeEventListener('resize', handleResize)
     window.removeEventListener('resize', handleWindowResize)
+    cleanupThemeWatcher?.()
+    cleanupThemeWatcher = null
     // 清理拖拽事件
     stopDrag()
 })
@@ -1007,5 +1020,62 @@ onUnmounted(() => {
 .copyable-cell:hover {
     color: #409eff;
     text-decoration: underline;
+}
+
+/* Theme override */
+.logistics-view,
+.content-container,
+.split-pane,
+.chart-card,
+.table-card {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+.plan-name {
+    color: var(--k-color-text-secondary) !important;
+}
+
+.split-divider {
+    background-color: var(--k-color-border) !important;
+}
+
+.split-divider:hover,
+.split-divider.dragging,
+.split-divider:hover .split-handle,
+.split-divider.dragging .split-handle {
+    background-color: var(--k-color-primary) !important;
+}
+
+.split-handle {
+    background-color: color-mix(in srgb, var(--k-color-border) 85%, var(--k-color-surface)) !important;
+}
+
+.split-handle::before,
+.split-handle::after {
+    background-color: var(--k-color-text-secondary) !important;
+}
+
+.copyable-cell:hover {
+    color: var(--k-color-primary) !important;
+}
+
+:deep(.el-card),
+:deep(.el-card__header),
+:deep(.el-card__body),
+:deep(.el-form-item__label),
+:deep(.el-input__wrapper),
+:deep(.el-select__wrapper),
+:deep(.el-table),
+:deep(.el-table th.el-table__cell),
+:deep(.el-table td.el-table__cell) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+:deep(.el-table th.el-table__cell) {
+    background: var(--k-color-surface-soft) !important;
 }
 </style>

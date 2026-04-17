@@ -4,7 +4,7 @@ Neo4j CRUD 操作工具类
 import asyncio
 import stat
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, AnyStr, Dict, List, Optional, Tuple
 
 from neo4j.exceptions import TransientError
 
@@ -1964,3 +1964,26 @@ class Neo4jIndustryUtils:
             result = await session.run(query, {"structure_id": structure_id})
             record = await result.single()
             return dict(record["n"])
+
+
+class Neo4jAssetDBUtils:
+    """Neo4j 资产相关工具类"""
+
+    @classmethod
+    async def get_asset_summary_by_container_owner_list(cls, container_owner_list: list[list[AnyStr]]):
+        """
+        获取容器资产并按 type_id 汇总
+
+        Args:
+            container_owner_list: [[container_id, owner_id, location_flag], ...]
+        """
+        assets = await Neo4jAssetUtils.get_asset_in_container_owner_list(container_owner_list)
+        asset_summary: dict[int, int] = {}
+        for asset in assets:
+            type_id = asset.get('type_id')
+            quantity = asset.get('quantity', 0)
+            if type_id:
+                if type_id not in asset_summary:
+                    asset_summary[type_id] = 0
+                asset_summary[type_id] += quantity
+        return asset_summary

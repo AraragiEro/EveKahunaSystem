@@ -4,6 +4,7 @@ import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
 import { useAuthStore } from '@/stores/auth'
 import { http } from '@/http'
+import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
 
 // 定义接口类型
 interface childMaterial {
@@ -415,9 +416,11 @@ const productChartRef = ref<HTMLElement>()
 const categoryChartRef = ref<HTMLElement>()
 let productChartInstance: echarts.ECharts | null = null
 let categoryChartInstance: echarts.ECharts | null = null
+let cleanupThemeWatcher: (() => void) | null = null
 
 // 初始化产品维度饼图
 const initProductChart = () => {
+    const c = getChartThemeColors()
     if (!productChartRef.value) return
 
     const data = productCostSummary.value
@@ -445,10 +448,12 @@ const initProductChart = () => {
             text: '最终产品成本占比',
             left: 'center',
             textStyle: {
-                fontSize: 16
+                fontSize: 16,
+                color: c.text
             }
         },
         tooltip: {
+            ...themedTooltip(c),
             trigger: 'item',
             formatter: (params: any) => {
                 const percentage = ((params.value / total) * 100).toFixed(2)
@@ -458,7 +463,8 @@ const initProductChart = () => {
         legend: {
             orient: 'vertical',
             left: 'left',
-            top: 'middle'
+            top: 'middle',
+            textStyle: { color: c.textSecondary }
         },
         series: [
             {
@@ -468,11 +474,12 @@ const initProductChart = () => {
                 avoidLabelOverlap: false,
                 itemStyle: {
                     borderRadius: 10,
-                    borderColor: '#fff',
+                    borderColor: c.surface,
                     borderWidth: 2
                 },
                 label: {
                     show: true,
+                    color: c.text,
                     formatter: (params: any) => {
                         const percentage = ((params.value / total) * 100).toFixed(1)
                         return `${params.name}\n${percentage}%`
@@ -482,7 +489,8 @@ const initProductChart = () => {
                     label: {
                         show: true,
                         fontSize: 16,
-                        fontWeight: 'bold'
+                        fontWeight: 'bold',
+                        color: c.text
                     }
                 },
                 data: chartData
@@ -497,6 +505,7 @@ const initProductChart = () => {
 
 // 初始化分类维度饼图
 const initCategoryChart = () => {
+    const c = getChartThemeColors()
     if (!categoryChartRef.value) return
 
     const data = categoryCostSummary.value
@@ -524,10 +533,12 @@ const initCategoryChart = () => {
             text: '材料分类成本占比',
             left: 'center',
             textStyle: {
-                fontSize: 16
+                fontSize: 16,
+                color: c.text
             }
         },
         tooltip: {
+            ...themedTooltip(c),
             trigger: 'item',
             formatter: (params: any) => {
                 const percentage = ((params.value / total) * 100).toFixed(2)
@@ -537,7 +548,8 @@ const initCategoryChart = () => {
         legend: {
             orient: 'vertical',
             left: 'left',
-            top: 'middle'
+            top: 'middle',
+            textStyle: { color: c.textSecondary }
         },
         series: [
             {
@@ -547,11 +559,12 @@ const initCategoryChart = () => {
                 avoidLabelOverlap: false,
                 itemStyle: {
                     borderRadius: 10,
-                    borderColor: '#fff',
+                    borderColor: c.surface,
                     borderWidth: 2
                 },
                 label: {
                     show: true,
+                    color: c.text,
                     formatter: (params: any) => {
                         const percentage = ((params.value / total) * 100).toFixed(1)
                         return `${params.name}\n${percentage}%`
@@ -561,7 +574,8 @@ const initCategoryChart = () => {
                     label: {
                         show: true,
                         fontSize: 16,
-                        fontWeight: 'bold'
+                        fontWeight: 'bold',
+                        color: c.text
                     }
                 },
                 data: chartData
@@ -674,6 +688,9 @@ onMounted(async () => {
 
     // 响应式调整图表大小
     window.addEventListener('resize', handleResize)
+    cleanupThemeWatcher = onThemeTokenChange(() => {
+        updateCharts()
+    })
 })
 
 // 组件卸载
@@ -695,6 +712,9 @@ onUnmounted(() => {
     }
     // 移除事件监听
     window.removeEventListener('resize', handleResize)
+
+    cleanupThemeWatcher?.()
+    cleanupThemeWatcher = null
 })
 
 </script>
@@ -841,5 +861,38 @@ onUnmounted(() => {
 :deep(.el-table th) {
     background-color: #f5f7fa;
     font-weight: bold;
+}
+
+/* Theme override */
+.cost-view,
+.cost-card,
+.card-header {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+:deep(.el-card),
+:deep(.el-card__header),
+:deep(.el-card__body),
+:deep(.el-table),
+:deep(.el-table th.el-table__cell),
+:deep(.el-table td.el-table__cell) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+:deep(.el-table th.el-table__cell) {
+    background: var(--k-color-surface-soft) !important;
+}
+
+:deep([style*='color: #888']),
+:deep([style*='color:#888']),
+:deep([style*='color: #999']),
+:deep([style*='color:#999']),
+:deep([style*='color: #666']),
+:deep([style*='color:#666']) {
+    color: var(--k-color-text-secondary) !important;
 }
 </style>

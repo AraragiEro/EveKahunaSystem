@@ -163,7 +163,8 @@ const saveConfigFlowToPlan = async () => {
 
     const requestData: any = {
         plan_name: planInfo.plan_name,
-        config_list: configFlowList.value
+        // 保存到计划仅需 config_id，避免发送完整配置导致请求体过大
+        config_list: configFlowList.value.map((item: any) => ({ config_id: item.config_id }))
     }
     // 如果是管理员模式且计划属于其他用户，传递 user_name
     if (haveAdminRole.value && planInfo.user_name !== authStore.user?.username) {
@@ -233,11 +234,11 @@ const savePreset = async () => {
         console.warn('获取预设列表失败，继续保存:', error)
     }
 
-    // 执行保存
+    // 执行保存（只发送 config_id 列表，减少请求体大小）
     try {
         const res = await http.post('/EVE/industry/saveConfigFlowPreset', {
             preset_name: trimmedPresetName,
-            config_list: configFlowList.value
+            config_list: configFlowList.value.map(item => ({ config_id: item.config_id }))
         })
         const data = await res.json()
         if (data.status !== 200) {
@@ -1531,7 +1532,10 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                 <el-table :data="configFlowConfigList">
                     <el-table-column label="配置类型" prop="config_type" width="150px">
                         <template #default="{ row }">
-                            <el-tag :color="configTypeColorMap[row.config_type]" type="plain" size="large"
+                            <el-tag
+                                type="plain"
+                                size="large"
+                                :class="['config-type-tag', `config-type-tag-${row.config_type}`]"
                                 style="font-size: 16px; font-weight: 500;">
                                 {{ configTypeMap[row.config_type] }}
                             </el-tag>
@@ -1588,12 +1592,11 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                             左侧的市场树，右键任意物品点击信息，即可查看物品的属性。建议多查看几个物品，利于理解筛选机制。</div>
                     </div>
                 </template>
-                <el-button type="primary" :icon="Setting"
-                    style="margin: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); font-weight: 600;">
+                <el-button type="primary" :icon="Setting" class="config-help-btn">
                     如何使用关键词筛选？
                 </el-button>
             </el-tooltip>
-            <el-radio-group v-model="createConfigType" size="large" fill="#6cf">
+            <el-radio-group v-model="createConfigType" size="large" fill="var(--k-color-primary)">
                 <el-tooltips>
                     <template #content>
                         123
@@ -2073,14 +2076,16 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--k-color-text);
 }
 
 .json-tooltip-content {
     margin: 0;
     padding: 8px;
-    background: #1f1f1f;
-    color: #fff;
+    background: var(--k-color-surface-soft);
+    color: var(--k-color-text);
     border-radius: 4px;
+    border: 1px solid var(--k-color-border);
     max-width: 500px;
     max-height: 400px;
     overflow: auto;
@@ -2104,8 +2109,15 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
     flex-direction: row;
     align-items: center;
     gap: 12px;
-    padding: 12px 0;
+    padding: 10px 12px;
     flex-shrink: 0;
+    border: 1px solid color-mix(in srgb, var(--k-color-primary) 22%, var(--k-color-border));
+    border-radius: 10px;
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--k-color-surface) 95%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 3%, var(--k-color-surface)) 100%);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 10%, transparent);
 }
 
 /* 确保拖拽容器可以正确使用剩余空间 */
@@ -2115,5 +2127,293 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
     overflow: hidden;
     display: flex;
     flex-direction: column;
+}
+
+/* Theme override */
+.industry-plan-config-flow-container,
+.icon-buttons-container,
+:deep(.el-drawer__body),
+:deep(.el-drawer__header),
+:deep(.el-card),
+:deep(.el-dialog__body),
+:deep(.el-dialog__header) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+.industry-plan-config-flow-container {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--k-color-primary) 24%, var(--k-color-border)) !important;
+    border-radius: 12px;
+    background:
+        radial-gradient(circle at 10% 12%, color-mix(in srgb, var(--k-color-primary) 8%, transparent) 0%, transparent 34%),
+        linear-gradient(155deg,
+            color-mix(in srgb, var(--k-color-surface) 97%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 3%, var(--k-color-surface)) 100%) !important;
+    box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 10%, transparent),
+        0 8px 24px color-mix(in srgb, #0b1120 16%, transparent);
+}
+
+.industry-plan-config-flow-container::before {
+    content: '';
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    top: 0;
+    height: 2px;
+    pointer-events: none;
+    background: linear-gradient(90deg,
+            transparent 0%,
+            color-mix(in srgb, var(--k-color-primary) 52%, transparent) 18%,
+            color-mix(in srgb, var(--k-color-primary) 22%, transparent) 82%,
+            transparent 100%);
+    opacity: 0.9;
+}
+
+.industry-plan-config-flow-container::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.55;
+    background:
+        linear-gradient(90deg, color-mix(in srgb, var(--k-color-primary) 42%, transparent) 0 8px, transparent 8px) left 10px top 10px / 16px 1px no-repeat,
+        linear-gradient(180deg, color-mix(in srgb, var(--k-color-primary) 42%, transparent) 0 8px, transparent 8px) left 10px top 10px / 1px 16px no-repeat,
+        linear-gradient(270deg, color-mix(in srgb, var(--k-color-primary) 42%, transparent) 0 8px, transparent 8px) right 10px top 10px / 16px 1px no-repeat,
+        linear-gradient(180deg, color-mix(in srgb, var(--k-color-primary) 42%, transparent) 0 8px, transparent 8px) right 10px top 10px / 1px 16px no-repeat;
+}
+
+.industry-plan-config-flow-container:hover {
+    border-color: color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-border)) !important;
+    box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 18%, transparent),
+        0 12px 30px color-mix(in srgb, var(--k-color-primary) 12%, transparent);
+}
+
+:deep(.el-drawer__header),
+:deep(.el-dialog__header) {
+    border-bottom: 1px solid var(--k-color-border) !important;
+}
+
+:deep(.el-drawer__footer),
+:deep(.el-dialog__footer) {
+    border-top: 1px solid var(--k-color-border) !important;
+    background: var(--k-color-surface) !important;
+}
+
+:deep(.el-form-item__label),
+:deep(.el-radio-button__inner),
+:deep(.el-card__header) {
+    color: var(--k-color-text-secondary) !important;
+}
+
+:deep(.el-button) {
+    position: relative;
+    overflow: hidden;
+    border-radius: 10px !important;
+    border-width: 1px !important;
+    letter-spacing: 0.02em;
+    font-weight: 600;
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--k-color-surface) 90%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) 100%) !important;
+    border-color: color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border)) !important;
+    color: var(--k-color-text) !important;
+    box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 14%, transparent),
+        0 0 0 1px color-mix(in srgb, var(--k-color-primary) 10%, transparent) !important;
+    transition: transform 0.2s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
+}
+
+:deep(.el-button:hover) {
+    transform: translateY(-1px);
+    color: var(--k-color-primary) !important;
+    border-color: color-mix(in srgb, var(--k-color-primary) 44%, var(--k-color-border)) !important;
+    background: linear-gradient(140deg,
+            color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-border)),
+        0 8px 20px color-mix(in srgb, var(--k-color-primary) 28%, transparent) !important;
+}
+
+:deep(.el-button--primary) {
+    color: #ffffff !important;
+    border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border)) !important;
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--k-color-primary) 80%, #ffffff) 0%,
+            var(--k-color-primary) 58%,
+            color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
+}
+
+:deep(.el-button--warning) {
+    color: #1d1300 !important;
+    border-color: color-mix(in srgb, var(--k-color-warning) 62%, var(--k-color-border)) !important;
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--k-color-warning) 82%, #ffffff) 0%,
+            var(--k-color-warning) 100%) !important;
+}
+
+:deep(.el-button--danger) {
+    color: #ffffff !important;
+    border-color: color-mix(in srgb, var(--k-color-danger) 62%, var(--k-color-border)) !important;
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--k-color-danger) 80%, #ffffff) 0%,
+            var(--k-color-danger) 100%) !important;
+}
+
+:deep(.el-button.is-text),
+:deep(.el-button--text),
+:deep(.el-button--link) {
+    border-color: transparent !important;
+    background: transparent !important;
+    color: color-mix(in srgb, var(--k-color-primary) 86%, #ffffff) !important;
+    box-shadow: none !important;
+}
+
+:deep(.el-button.is-circle) {
+    border-radius: 999px !important;
+}
+
+.config-help-btn {
+    margin: 10px;
+    border: 1px solid color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--k-color-primary) 20%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-surface)) 100%) !important;
+    color: var(--k-color-primary) !important;
+    box-shadow: var(--k-shadow-sm) !important;
+    font-weight: 600;
+}
+
+.config-help-btn:hover {
+    background: color-mix(in srgb, var(--k-color-primary) 16%, var(--k-color-surface-soft)) !important;
+}
+
+:deep(.el-radio-button__inner) {
+    border-radius: 10px !important;
+    border-width: 1px !important;
+    letter-spacing: 0.02em;
+    font-weight: 600;
+    color: var(--k-color-text-secondary) !important;
+    background: linear-gradient(180deg,
+            color-mix(in srgb, var(--k-color-surface) 90%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) 100%) !important;
+    border-color: color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border)) !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 14%, transparent) !important;
+    transition: transform 0.2s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
+}
+
+:deep(.el-radio-button__inner:hover) {
+    transform: translateY(-1px);
+    color: var(--k-color-primary) !important;
+    border-color: color-mix(in srgb, var(--k-color-primary) 44%, var(--k-color-border)) !important;
+    background: linear-gradient(140deg,
+            color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
+}
+
+:deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+    color: #ffffff !important;
+    border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border)) !important;
+    background: linear-gradient(135deg,
+            color-mix(in srgb, var(--k-color-primary) 80%, #ffffff) 0%,
+            var(--k-color-primary) 58%,
+            color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
+    box-shadow:
+            0 0 0 1px color-mix(in srgb, var(--k-color-primary) 34%, transparent),
+            0 8px 20px color-mix(in srgb, var(--k-color-primary) 24%, transparent) !important;
+}
+
+:deep(.el-radio-button.is-disabled .el-radio-button__inner) {
+    opacity: 0.62;
+    color: var(--k-color-text-secondary) !important;
+    background: color-mix(in srgb, var(--k-color-surface-soft) 84%, var(--k-color-surface)) !important;
+    border-color: var(--k-color-border) !important;
+    box-shadow: none !important;
+}
+
+:deep(.el-form-item__content [style*='width: 240px']) {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+:deep(.el-drawer),
+:deep(.el-drawer__body),
+:deep(.el-drawer__header),
+:deep(.el-drawer__footer),
+:deep(.el-overlay-dialog) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+:deep(.el-table .config-type-tag),
+:deep(.config-type-tag) {
+    border-width: 1px !important;
+    border-style: solid !important;
+}
+
+:deep(.config-type-tag-StructureRigConfig) {
+    background: color-mix(in srgb, #3b82f6 18%, var(--k-color-surface-soft)) !important;
+    border-color: color-mix(in srgb, #3b82f6 42%, var(--k-color-border)) !important;
+    color: color-mix(in srgb, #3b82f6 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-StructureAssignConf) {
+    background: color-mix(in srgb, #22c55e 18%, var(--k-color-surface-soft)) !important;
+    border-color: color-mix(in srgb, #22c55e 42%, var(--k-color-border)) !important;
+    color: color-mix(in srgb, #22c55e 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-MaterialTagConf) {
+    background: color-mix(in srgb, #f59e0b 18%, var(--k-color-surface-soft)) !important;
+    border-color: color-mix(in srgb, #f59e0b 42%, var(--k-color-border)) !important;
+    color: color-mix(in srgb, #f59e0b 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-DefaultBlueprintConf) {
+    background: color-mix(in srgb, #ef4444 18%, var(--k-color-surface-soft)) !important;
+    border-color: color-mix(in srgb, #ef4444 42%, var(--k-color-border)) !important;
+    color: color-mix(in srgb, #ef4444 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-LoadAssetConf) {
+    background: color-mix(in srgb, #14b8a6 18%, var(--k-color-surface-soft)) !important;
+    border-color: color-mix(in srgb, #14b8a6 42%, var(--k-color-border)) !important;
+    color: color-mix(in srgb, #14b8a6 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-MaxJobSplitCountConf) {
+    background: color-mix(in srgb, #8b5cf6 18%, var(--k-color-surface-soft)) !important;
+    border-color: color-mix(in srgb, #8b5cf6 42%, var(--k-color-border)) !important;
+    color: color-mix(in srgb, #8b5cf6 78%, var(--k-color-text)) !important;
+}
+
+:deep(.el-drawer .el-table),
+:deep(.el-drawer .el-table .cell),
+:deep(.el-drawer .el-table td),
+:deep(.el-drawer .el-table th),
+:deep(.el-drawer .el-table__header-wrapper),
+:deep(.el-drawer .el-table__body-wrapper),
+:deep(.el-drawer .el-table__empty-text),
+:deep(.el-drawer .el-form-item__label),
+:deep(.el-drawer .el-radio-button__inner),
+:deep(.el-drawer .el-input__inner),
+:deep(.el-drawer .el-textarea__inner),
+:deep(.el-drawer .el-select__selected-item) {
+    color: var(--k-color-text) !important;
+}
+
+:deep(.el-drawer .el-table th .cell),
+:deep(.el-drawer .el-form-item__label),
+:deep(.el-drawer [style*='color: #606266']),
+:deep(.el-drawer [style*='color:#606266']),
+:deep(.el-drawer [style*='color: #909399']),
+:deep(.el-drawer [style*='color:#909399']) {
+    color: var(--k-color-text-secondary) !important;
 }
 </style>

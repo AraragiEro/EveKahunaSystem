@@ -1,4 +1,6 @@
 def init_api(app):
+    from src_v2.core.log import logger
+
     from .EVE.api_asset import api_EVE_asset_bp
     from .api_login import api_auth_bp
     from .api_EVE import api_EVE_bp
@@ -12,6 +14,7 @@ def init_api(app):
     from .api_statistics import api_statistics_bp
     from .api_message_board import api_message_board_bp
     from .EVE.api_home import api_home_bp
+    from .api_astrbot import api_astrbot_bp
 
     app.register_blueprint(api_EVE_asset_bp)
     app.register_blueprint(api_auth_bp)
@@ -26,19 +29,34 @@ def init_api(app):
     app.register_blueprint(api_statistics_bp)
     app.register_blueprint(api_message_board_bp)
     app.register_blueprint(api_home_bp)
+    app.register_blueprint(api_astrbot_bp)
+
+    # 注册内部 MCP API 路由
+    try:
+        from .internal_mcp import internal_mcp_bp
+
+        app.register_blueprint(internal_mcp_bp)
+        logger.info("内部 MCP API 路由已注册")
+    except Exception as e:
+        logger.warning(f"内部 MCP API 路由注册失败: {e}")
 
     # 条件注册企业版 API
     # 仅在版本为企业版且模块存在时注册
     from src_v2.core.edition import is_enterprise
-    from src_v2.core.log import logger
-    
+
     if is_enterprise():
         try:
             from src_v2.enterprise.api.api_enterprise import api_enterprise_bp
+
             app.register_blueprint(api_enterprise_bp)
             from src_v2.enterprise.api.api_contract import api_contract_bp
+
             app.register_blueprint(api_contract_bp)
+            # Load astrbot service to trigger _astrbot_* registration.
+            from src_v2.enterprise.api import api_astrbot_service  # noqa: F401
+
             logger.info("企业版 API 已注册")
+
         except ImportError as e:
             logger.warning(f"企业版 API 模块不存在，跳过注册: {e}")
         except Exception as e:

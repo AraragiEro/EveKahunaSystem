@@ -366,7 +366,7 @@ onMounted(async () => {
         <div style="min-width: 300px;">
             <!-- 管理员用户选择器 -->
             <div v-if="haveAdminRole"
-                style="margin-bottom: 16px; padding: 16px; background-color: #f5f7fa; border-radius: 4px; border: 1px solid #e4e7ed;">
+                class="admin-user-selector">
                 <el-form-item label="选择用户" style="margin-bottom: 0;">
                     <el-select v-model="selectedUserName" placeholder="选择用户（留空显示当前用户）" filterable clearable
                         :loading="userListLoading" style="width: 300px;">
@@ -469,3 +469,14 @@ onMounted(async () => {
         </template>
     </el-dialog>
 </template>
+
+<style scoped>
+.admin-user-selector {
+    margin-bottom: 16px;
+    padding: 16px;
+    background: var(--k-color-surface-soft);
+    border-radius: 8px;
+    border: 1px solid var(--k-color-border);
+    color: var(--k-color-text);
+}
+</style>

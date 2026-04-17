@@ -64,17 +64,19 @@ const utils = ref([
 }
 
 .utils-header {
-  background: #ffffff;
+  background: var(--k-color-surface);
   border-radius: 12px;
   height: 60px;
+  border: 1px solid var(--k-color-border);
 }
 
 .utils-card {
   width: 200px;
   height: 200px;
   border-radius: 12px;
-  background: #ffffff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  background: var(--k-color-surface);
+  box-shadow: var(--k-shadow-sm);
+  border: 1px solid var(--k-color-border);
   
 }
 
@@ -89,4 +91,29 @@ const utils = ref([
 .card-link:hover {
   text-decoration: none; /* 保持无下划线状态 */
 }
+
+/* Theme override */
+.utils-view,
+.utils-main,
+.utils-container,
+.utils-card {
+  background: var(--k-color-surface) !important;
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text) !important;
+}
+
+.utils-card:hover {
+  box-shadow: var(--k-shadow-md) !important;
+  background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+}
+
+.utils-header h1,
+.utils-card h3 {
+  color: var(--k-color-text) !important;
+}
+
+.utils-card p {
+  color: var(--k-color-text-secondary) !important;
+}
+
 </style>

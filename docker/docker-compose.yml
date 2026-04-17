@@ -1,0 +1,70 @@
+# ============================================
+# KahunaBot Docker Compose 配置
+# ============================================
+# 仅包含后端服务和 MCP 中间件
+#
+# 使用方法:
+#   1. 从 config.toml.docker 复制并创建 config.toml
+#   2. 修改 config.toml 中的 EVE API 配置
+#   3. 在 Docker 目录运行: docker-compose up -d
+#   4. 访问 http://localhost:9527
+#
+# 注意:
+#   - 需要外部 PostgreSQL、Redis、Neo4j 数据库
+#   - 首次启动前请确保 config.toml 已正确配置
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------
+  # KahunaBot 主应用（包含后端 + MCP）
+  # ---------------------------------------------------------
+  kahunabot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: kahunasystem
+    ports:
+      - "9527:9527"    # Web 服务
+      - "9274:9274"    # MCP 中间件
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # 配置文件（只读）
+      - ../config.toml:/app/config.toml:ro
+      # 数据持久化
+      - ./app_data:/app/data
+      - ./app_logs:/app/logs
+      - ./app_downloads:/app/download_resource
+      - ./app_tmp:/app/tmp
+      # 可选：Google 凭证目录
+      - ../credentials:/app/credentials:ro
+    restart: unless-stopped
+    networks:
+      - kahuna-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9527/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+# ---------------------------------------------------------
+# 数据卷定义
+# ---------------------------------------------------------
+volumes:
+  app_data:
+    driver: local
+  app_logs:
+    driver: local
+  app_downloads:
+    driver: local
+  app_tmp:
+    driver: local
+
+# ---------------------------------------------------------
+# 网络定义
+# ---------------------------------------------------------
+networks:
+  kahuna-network:
+    driver: bridge

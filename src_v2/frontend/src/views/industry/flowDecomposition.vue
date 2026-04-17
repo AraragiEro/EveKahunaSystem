@@ -14,6 +14,8 @@ import LogisticsView from './components/industryViewComponent/LogisticsView.vue'
 import CompressedAsteroidView from './components/industryViewComponent/compressedAsteroidView.vue'
 import { useAuthStore } from '@/stores/auth'
 import LZString from 'lz-string'
+import WorkflowShareDialog from '@/components/WorkflowShareDialog.vue'
+import WorkflowClaimManageDialog from '@/components/WorkflowClaimManageDialog.vue'
 
 const authStore = useAuthStore()
 const haveAlphaRole = computed(() => {
@@ -279,6 +281,70 @@ const calculationError = ref<string | null>(null)
 
 // 定时器
 let statusPollingInterval: number | null = null
+
+// ============ 分享功能 ============
+const workFlowViewRef = ref<InstanceType<typeof WorkFlowView> | null>(null)
+const shareDialogVisible = ref(false)
+const currentFilterSnapshot = ref({})
+const currentShareToken = ref<string | null>(null)
+
+// 处理分享按钮点击
+const handleShareWorkflow = () => {
+    // 获取当前过滤快照
+    if (workFlowViewRef.value) {
+        currentFilterSnapshot.value = workFlowViewRef.value.getCurrentFilterSnapshot()
+    }
+    shareDialogVisible.value = true
+}
+
+// 分享创建成功回调
+const handleShareCreated = (shareData: { shareToken: string; shareUrl: string }) => {
+    console.log('分享链接已创建:', shareData)
+    currentShareToken.value = shareData.shareToken
+}
+
+// shareToken 更新回调
+const handleShareTokenUpdated = (shareToken: string | null) => {
+    console.log('分享Token已更新:', shareToken)
+    currentShareToken.value = shareToken
+}
+
+// ============ 接取管理功能 ============
+const claimManageDialogVisible = ref(false)
+
+// 获取分享状态（用于接取管理）
+const fetchShareStatusForClaims = async () => {
+    if (!selectedPlan.value) {
+        ElMessage.warning('请先选择一个计划')
+        return null
+    }
+
+    try {
+        const planInfo = getSelectedPlanInfo()
+        const planName = planInfo ? planInfo.plan_name : selectedPlan.value
+        const res = await http.get(`/public/workflow/share/status?plan_name=${encodeURIComponent(planName)}`)
+        const data = await res.json()
+
+        if (data.status === 200 && data.data.share_token) {
+            currentShareToken.value = data.data.share_token
+            return data.data.share_token
+        }
+        return null
+    } catch (error) {
+        console.error('获取分享状态失败:', error)
+        return null
+    }
+}
+
+// 处理接取管理按钮点击
+const handleManageClaims = async () => {
+    // 如果没有 shareToken，先获取
+    if (!currentShareToken.value) {
+        ElMessage.info('正在获取分享信息...')
+        await fetchShareStatusForClaims()
+    }
+    claimManageDialogVisible.value = true
+}
 
 // 启动计算
 const getPlanCalculateResultTableViewStart = async () => {
@@ -789,9 +855,12 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
             
             <!-- 工作流视图 -->
             <el-tab-pane label="工作流">
-                <WorkFlowView 
+                <WorkFlowView
+                    ref="workFlowViewRef"
                     :work-flow-data="PlanCalculateWorkFlowTableView"
                     :selected-plan="selectedPlan"
+                    @share="handleShareWorkflow"
+                    @manage-claims="handleManageClaims"
                 />
             </el-tab-pane>
 
@@ -830,16 +899,43 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
         </el-tabs>
         </el-row>
     </div>
+    
+    <!-- 分享对话框 -->
+    <WorkflowShareDialog
+        v-model="shareDialogVisible"
+        :plan-name="selectedPlan || ''"
+        :filter-snapshot="currentFilterSnapshot"
+        @share-created="handleShareCreated"
+        @share-token-updated="handleShareTokenUpdated"
+    />
+    
+    <!-- 接取管理对话框 -->
+    <WorkflowClaimManageDialog
+        v-model="claimManageDialogVisible"
+        :plan-name="selectedPlan || ''"
+        :share-token="currentShareToken"
+    />
 </div>
 </template>
 
 <style scoped>
+/* 浅色主题：缺失材料行使用较深的红色背景 */
 :deep(.el-table .lack-row) {
-    background-color: #ffc6c6 !important;
+    background-color: #ff6b6b !important;
     font-weight: bold !important;
-    color: #000000 !important;
+    color: #ffffff !important;
 }
 
+/* 深色主题：缺失材料行使用亮红色背景 */
+.dark :deep(.el-table .lack-row),
+[data-theme="dark"] :deep(.el-table .lack-row),
+html.dark :deep(.el-table .lack-row) {
+    background-color: #ff4444 !important;
+    font-weight: bold !important;
+    color: #ffffff !important;
+}
+
+/* 完成任务的行样式 */
 :deep(.el-table .complete-job) {
     background-color: #e7ffc8 !important;
     font-weight: bold !important;
@@ -986,5 +1082,81 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
     .control-card :deep(.el-col) {
         margin-bottom: 16px;
     }
+}
+
+/* Theme override */
+.control-card,
+.control-item,
+.progress-container,
+.progress-item,
+.step-progress {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+.control-label,
+.label-text,
+.step-name {
+    color: var(--k-color-text-secondary) !important;
+}
+
+.progress-text {
+    color: var(--k-color-text) !important;
+}
+
+:deep(.el-tabs__item) {
+    color: var(--k-color-text-secondary) !important;
+}
+
+:deep(.el-tabs__item.is-active) {
+    color: var(--k-color-primary) !important;
+}
+
+:deep(.el-tabs--card > .el-tabs__header .el-tabs__item),
+:deep(.el-tabs--border-card > .el-tabs__header .el-tabs__item) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text-secondary) !important;
+}
+
+:deep(.el-tabs--card > .el-tabs__header .el-tabs__item.is-active),
+:deep(.el-tabs--border-card > .el-tabs__header .el-tabs__item.is-active) {
+    color: var(--k-color-primary) !important;
+    background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+}
+
+:deep(.el-tabs__content),
+:deep(.el-card),
+:deep(.el-card__header),
+:deep(.el-card__body),
+:deep(.el-input__wrapper),
+:deep(.el-select__wrapper),
+:deep(.el-input-number .el-input__wrapper),
+:deep(.el-input-number__decrease),
+:deep(.el-input-number__increase),
+:deep(.el-table),
+:deep(.el-table th.el-table__cell),
+:deep(.el-table td.el-table__cell) {
+    background: var(--k-color-surface) !important;
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text) !important;
+}
+
+:deep(.el-table th.el-table__cell) {
+    background: var(--k-color-surface-soft) !important;
+}
+</style>
+
+<style>
+/* 深色主题：使用全局样式确保能匹配到 data-theme="dark" 在 html 元素上的情况 */
+[data-theme="dark"] .el-table .el-table__row.lack-row {
+    background-color: #ff4444 !important;
+    font-weight: bold !important;
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] .el-table__body .el-table__row.lack-row {
+    background-color: #ff4444 !important;
 }
 </style>

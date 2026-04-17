@@ -97,7 +97,7 @@ class TomlConfigParser:
     def __getitem__(self, section: str) -> SectionProxy:
         """获取配置节"""
         if section not in self._data:
-            raise KeyError(f"Section '{section}' not found")
+            raise KeyError(f"Section '{section}' not found, config_path: {self.config_path}")
         return SectionProxy(self._data[section], section)
     
     def __contains__(self, section: str) -> bool:

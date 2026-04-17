@@ -1,4 +1,5 @@
 import traceback
+import uuid
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 
@@ -6,11 +7,16 @@ from quart import Quart, request, jsonify, g, Blueprint, redirect
 
 from src_v2.backend.auth import auth_required
 from src_v2.core.log import logger
+from src_v2.core.database.connect_manager import get_redis_manager as rdm
 
 from src_v2.core.user.user_manager import UserManager
 from src_v2.model.EVE.character.character import Character
 from src_v2.model.EVE.character.character_manager import CharacterManager
-from src_v2.core.database.kahuna_database_utils_v2 import EvePublicCharacterInfoDBUtils, EveAuthedCharacterDBUtils
+from src_v2.core.database.kahuna_database_utils_v2 import (
+    EvePublicCharacterInfoDBUtils,
+    EveAuthedCharacterDBUtils,
+    UserQQBindingDBUtils,
+)
 from src_v2.core.database.model import EveAliasCharacter as M_EveAliasCharacter
 from src_v2.core.database.kahuna_database_utils_v2 import EveAliasCharacterDBUtils
 from src_v2.model.EVE.eveesi import eveesi
@@ -148,6 +154,65 @@ class ErrorResponse:
     """错误响应"""
     status: int
     message: str
+
+
+QQ_BIND_REDIS_PREFIX = "kahunasystem:qq_bind"
+
+
+def _build_qq_bind_key(bind_uuid: str) -> str:
+    return f"{QQ_BIND_REDIS_PREFIX}:{bind_uuid}"
+
+
+@api_user_bp.route("/qqBinding", methods=["GET"])
+@auth_required
+async def get_qq_binding():
+    """获取当前用户 QQ 绑定"""
+    user_id = g.current_user["user_id"]
+    try:
+        binding = await UserQQBindingDBUtils.select_by_user_name(user_id)
+        user_qq = int(binding.user_qq) if binding else None
+        return {"status": 200, "userQQ": user_qq}
+    except Exception:
+        traceback.print_exc()
+        logger.error(f"获取 QQ 绑定失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "获取 QQ 绑定失败"}), 500
+
+
+@api_user_bp.route("/qqBinding/create", methods=["POST"])
+@auth_required
+async def create_qq_binding():
+    """创建 QQ 绑定指令"""
+    user_id = g.current_user["user_id"]
+    try:
+        bind_uuid = uuid.uuid4().hex
+        redis_key = _build_qq_bind_key(bind_uuid)
+        await rdm().redis.set(redis_key, user_id)
+        await rdm().redis.expire(redis_key, 300)
+        instruction = f".绑定kahunasystem {bind_uuid}"
+        return {
+            "status": 200,
+            "uuid": bind_uuid,
+            "instruction": instruction,
+            "expireSeconds": 300
+        }
+    except Exception:
+        traceback.print_exc()
+        logger.error(f"创建 QQ 绑定指令失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "创建 QQ 绑定指令失败"}), 500
+
+
+@api_user_bp.route("/qqBinding/unbind", methods=["POST"])
+@auth_required
+async def unbind_qq():
+    """解绑 QQ"""
+    user_id = g.current_user["user_id"]
+    try:
+        await UserQQBindingDBUtils.delete_by_user_name(user_id)
+        return {"status": 200, "message": "QQ 解绑成功"}
+    except Exception:
+        traceback.print_exc()
+        logger.error(f"QQ 解绑失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "QQ 解绑失败"}), 500
 
 
 @api_user_bp.route("/list", methods=["GET"])
