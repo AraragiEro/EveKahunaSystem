@@ -49,13 +49,66 @@ Kahuna System 是一个专为 EVE Online 玩家设计的 Web 应用平台，集�
 
 ## 快速开始
 
-### 环境要求
+### 方式一：Docker Compose 一键部署（推荐）
+
+使用 Docker Compose 可以快速部署完整的 KahunaSystem，无需安装 Python 和 Node.js。
+
+#### 1. 克隆项目
+
+```bash
+git clone https://github.com/AraragiEro/EveKahunaSystem.git
+cd EveKahunaSystem
+```
+
+#### 2. 启动数据库服务
+
+```bash
+cd docker_database
+cp docker-compose.yml.example docker-compose.yml
+docker-compose up -d
+cd ..
+```
+
+#### 3. 配置应用
+
+```bash
+cp docker/config.toml.docker config.toml
+```
+
+编辑 `config.toml`，填写 EVE API 配置：
+
+```toml
+[EVE]
+CLIENT_ID = "你的客户端ID"
+SECRET_KEY = "你的密钥"
+```
+
+#### 4. 启动 KahunaSystem
+
+```bash
+cd docker
+cp docker-compose.yml.example docker-compose.yml
+docker-compose up -d
+```
+
+#### 5. 访问服务
+
+- Web 界面: http://localhost:9527
+- MCP 端点: http://localhost:9274/sse
+
+更多 Docker 部署细节请参考 [docker/README.md](docker/README.md)。
+
+---
+
+### 方式二：手动安装
+
+#### 环境要求
 
 - Python 3.13
 - Node.js 18+ (用于前端开发)
 - 数据库：SQLite (默认) 或 PostgreSQL + Neo4j + Redis
 
-### 安装步骤
+#### 安装步骤
 
 1. **克隆项目**
 
@@ -520,7 +573,7 @@ python init_neo4j.py --clean
 
 脚本执行时会显示详细的进度信息：
 
-```
+
 - [EVE Online 官网](https://www.eveonline.com/)
 - [EVE Online 开发者中心](https://developers.eveonline.com/)
 
@@ -539,25 +592,25 @@ MCP (Model Context Protocol) 是一种开放协议，允许 AI 助手安全地�
 ### MCP 工具列表
 
 #### QQ 相关工具
-| 工具名 | 描述 |
-|--------|------|
+| 工具名         | 描述                                              |
+| -------------- | ------------------------------------------------- |
 | `qq_vip_state` | 查询 QQ 群 VIP 状态，返回已激活和未激活的用户列表 |
 
 #### 市场相关工具
-| 工具名 | 描述 |
-|--------|------|
-| `market_tag_list` | 获取市场价格标签列表 |
-| `market_price_detail` | 查询特定类型的市场价格详情 |
-| `market_type_cost` | 计算特定类型的采购成本 |
-| `market_fuzz_type_name` | 模糊搜索类型名称 |
-| `market_type_metrics` | 获取特定类型的市场指标 |
+| 工具名                  | 描述                       |
+| ----------------------- | -------------------------- |
+| `market_tag_list`       | 获取市场价格标签列表       |
+| `market_price_detail`   | 查询特定类型的市场价格详情 |
+| `market_type_cost`      | 计算特定类型的采购成本     |
+| `market_fuzz_type_name` | 模糊搜索类型名称           |
+| `market_type_metrics`   | 获取特定类型的市场指标     |
 
 #### 工业相关工具
-| 工具名 | 描述 |
-|--------|------|
-| `running_jobs_overview` | 获取正在进行的工业作业概览 |
+| 工具名                                    | 描述                       |
+| ----------------------------------------- | -------------------------- |
+| `running_jobs_overview`                   | 获取正在进行的工业作业概览 |
 | `plan_missing_blueprint_workflow_summary` | 获取缺失蓝图的工业规划摘要 |
-| `get_company_medica_vouchers` | 获取公司医疗券信息 |
+| `get_company_medica_vouchers`             | 获取公司医疗券信息         |
 
 ### 启动 MCP 服务
 
@@ -596,7 +649,7 @@ nohup python run_mcp_middleware.py > logs/mcp_server.log 2>&1 &
     "mcpServers": {
         "kahuna-system": {
             "transport": "http",
-            "url": "http://localhost:9000/sse"
+            "url": "http://localhost:9427/sse"
         }
     }
 }
@@ -623,13 +676,13 @@ PostgreSQL / Redis / Neo4j
 
 ### 端口说明
 
-| 服务 | 端口 | 用途 |
-|------|------|------|
+| 服务       | 端口 | 用途           |
+| ---------- | ---- | -------------- |
 | Quart 后端 | 9527 | Web 界面和 API |
-| MCP 中间件 | 9000 | MCP 协议服务 |
-| PostgreSQL | 5432 | 主数据库 |
-| Redis | 6379 | 缓存 |
-| Neo4j | 7687 | 图数据库 |
+| MCP 中间件 | 9000 | MCP 协议服务   |
+| PostgreSQL | 5432 | 主数据库       |
+| Redis      | 6379 | 缓存           |
+| Neo4j      | 7687 | 图数据库       |
 
 ### 故障排查
 
