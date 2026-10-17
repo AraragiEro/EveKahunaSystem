@@ -2,7 +2,7 @@
 
 ![Logo](https://github.com/user-attachments/assets/40c09a45-f898-4167-9315-20df6a1dc59a)
 
-[![开发状态](https://img.shields.io/badge/状态-开发中-yellow)](https://github.com/AraragiEro/astrbot_plugin_kahunabot)
+[![开发状态](https://img.shields.io/badge/状态-开发中-yellow)](https://github.com/AraragiEro/EveKahunaSystem)
 [![EVE Online](https://img.shields.io/badge/游戏-EVE%20Online-blue)](https://www.eveonline.com/)
 [![Quart](https://img.shields.io/badge/框架-Quart-green)](https://github.com/AstrBotDevs/AstrBot.git)
 [![Vue3](https://img.shields.io/badge/框架-Vue3-green)](https://github.com/AstrBotDevs/AstrBot.git)
@@ -65,31 +65,84 @@ cd EveKahunaSystem
 ```bash
 cd docker_database
 cp docker-compose.yml.example docker-compose.yml
-docker-compose up -d
+docker compose up -d
 cd ..
 ```
+
+这套 compose 会启动 4 个服务，宿主端口映射如下（供下一步 `config.toml` 使用）：
+
+| 服务 | 容器 | 宿主端口 | 库 / 说明 |
+|---|---|---|---|
+| PostgreSQL（主库） | kahunaSystemPostgreDatabase | **6201** | 库 `kahunabot`，账号密码均为 `kahunabot` |
+| PostgreSQL（SDE 库） | kahunaSystemSdeDatabase | **6202** | 库 `sde`，由 `update_sde.py` 写入 |
+| Redis | KahunaSystemRedis | **6203** | |
+| Neo4j | KahunaSystemNeo4j | **7687** / 7474 | 由 `init_neo4j.py` 写入图数据 |
+
+> 数据库是**必需**的：服务启动时会初始化 PostgreSQL、Redis、Neo4j，缺任何一项都会启动失败。
 
 #### 3. 配置应用
 
 ```bash
+# 从模板创建配置文件（必须放在项目根目录）
 cp docker/config.toml.docker config.toml
 ```
 
-编辑 `config.toml`，填写 EVE API 配置：
+然后编辑 `config.toml`，至少确认以下几项（其余项含义见「主要配置项」一节）：
 
 ```toml
+[EDITION]
+# 开源（社区）版固定为 community
+Edition = "community"
+
+[APP]
+# 必填：应用签名密钥（≥32 位随机串）
+# 生成：python -c "import secrets;print(secrets.token_urlsafe(32))"
+# ⚠️ 保留模板占位符（change-me-*）时生产模式会直接拒绝启动
+SECRET_KEY = "生成的随机密钥"
+
+[POSTGREDB]
+Host = "172.17.0.1"      # 应用在容器内，连宿主机映射端口
+Port = 6201
+Database = "kahunabot"
+User = "kahunabot"
+Password = "kahunabot"
+
+[SDEDB]
+Host = "172.17.0.1"
+Port = 6202
+Database = "sde"
+User = "kahunabot"
+Password = "kahunabot"
+
+[REDIS]
+Host = "172.17.0.1"
+Port = 6203
+
+[NEO4J]
+Host = "172.17.0.1"
+Port = 7687
+Username = "neo4j"
+Password = "你的Neo4j密码"
+
 [EVE]
 CLIENT_ID = "你的客户端ID"
-SECRET_KEY = "你的密钥"
+SECRET_KEY = "你的ESI密钥"
+CALLBACK_LOCAL_HOST = "localhost:9527/"
 ```
+
+> `Host` 填宿主机地址：Linux 一般用 Docker 网桥 `172.17.0.1`，Windows/macOS 可用 `host.docker.internal`。
+> 数据库容器与应用容器不在同一 Docker 网络时，不能用容器名互访，只能走宿主机映射端口。
+> `[ADMIN]` 默认管理员账号是可选功能，需要时按 [docker/README.md](docker/README.md) 填写账号与 ≥12 位口令。
 
 #### 4. 启动 KahunaSystem
 
 ```bash
 cd docker
 cp docker-compose.yml.example docker-compose.yml
-docker-compose up -d
+docker compose up -d --build
 ```
+
+首次构建需要拉取基础镜像并安装 npm / Python 依赖，通常 5–10 分钟；国内网络可参考 [docker/README.md](docker/README.md) 配置 npm 镜像源再构建。
 
 #### 5. 访问服务
 
@@ -104,9 +157,9 @@ docker-compose up -d
 
 #### 环境要求
 
-- Python 3.13
-- Node.js 18+ (用于前端开发)
-- 数据库：SQLite (默认) 或 PostgreSQL + Neo4j + Redis
+- **Python 3.13**（`pyproject.toml` 锁定 `>=3.13,<3.14`，Python 3.14 暂不兼容）
+- **Node.js 20.19+ 或 22.12+**（Vite 7 的硬性要求；Node 18 无法完成前端构建）
+- **数据库**：PostgreSQL（主库 + SDE 库）、Redis、Neo4j —— 三者均为必需，缺任何一项服务都无法启动
 
 #### 安装步骤
 
@@ -131,15 +184,23 @@ cd src_v2/frontend
 npm install
 ```
 
-4. **准备 SDE 数据库**
+4. **创建配置文件**
 
-请参考**手动创建 SDE 数据库**章节
+```bash
+cp config.toml.example config.toml
+```
 
-5. **配置 EVE API**
+按「主要配置项」一节填写 `[APP] SECRET_KEY`、数据库连接与 `[EVE]`；`[APP] SECRET_KEY` 必须是 ≥32 位随机串，否则生产模式会拒绝启动。
+
+5. **准备 SDE 数据库**
+
+参考 [手动创建 SDE 数据库](#手动创建-sde-数据库) 一节，再用 `python update_sde.py` 导入 SDE 数据。
+
+6. **配置 EVE API**
 
 前往 [EVE Online 开发者中心](https://developers.eveonline.com/) 创建应用，获取 `CLIENT_ID` 和 `SECRET_KEY`。
 
-6. **启动服务**
+7. **启动服务**
 
 开发模式:
 ```bash
@@ -184,100 +245,52 @@ python run_server.py --prod --host 0.0.0.0 --port 9527
 
 推荐使用 Docker Compose 快速部署 PostgreSQL、Redis 和 Neo4j 数据库。
 
-#### 创建 docker-compose.yml
+#### 使用仓库内置的数据库 Compose
 
-在项目根目录创建 `docker-compose.yml` 文件：
+推荐直接用仓库里的 `docker_database/docker-compose.yml.example` —— 它包含主库、SDE 库、Redis、Neo4j 四个服务，无需自己手写：
 
-```yaml
-version: '3.8'
-
-services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: kahuna-postgres
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: secret
-      POSTGRES_DB: kahuna
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    container_name: kahuna-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  neo4j:
-    image: neo4j:2025.10.1
-    container_name: kahuna-neo4j
-    ports:
-      - "7687:7687"  # Bolt协议
-      - "7474:7474"  # HTTP
-    environment:
-      - NEO4J_AUTH=neo4j/password
-      - NEO4J_PLUGINS=["apoc"]
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-      - neo4j_plugins:/var/lib/neo4j/plugins
-      - neo4j_conf:/var/lib/neo4j/conf
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password", "RETURN 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  postgres_data:
-  redis_data:
-  neo4j_data:
-  neo4j_logs:
-  neo4j_conf:
+```bash
+cd docker_database
+cp docker-compose.yml.example docker-compose.yml
+docker compose up -d
 ```
+
+端口映射与默认账号（与 `config.toml` 的数据库段一一对应）：
+
+| 服务 | 容器名 | 宿主端口 | 库 / 账号 |
+|---|---|---|---|
+| PostgreSQL 主库 | kahunaSystemPostgreDatabase | 6201 | `kahunabot` / `kahunabot` |
+| PostgreSQL SDE 库 | kahunaSystemSdeDatabase | 6202 | `sde` / `kahunabot` |
+| Redis | KahunaSystemRedis | 6203 | 无密码（可在 `config.toml` 的 `[REDIS] Password` 设置） |
+| Neo4j | KahunaSystemNeo4j | 7687 / 7474 | `neo4j` / 自定义密码 |
+
+> 需要改端口时，改 compose 的 `ports` 后同步更新 `config.toml`。
+> 想接入已有的 PostgreSQL / Redis / Neo4j 实例也可以，跳过本节直接改 `config.toml`。
 
 #### 启动数据库服务
 
 ```bash
 # 启动服务
-docker-compose up -d
+docker compose up -d
 
 # 查看服务状态
-docker-compose ps
+docker compose ps
 
 # 查看日志
-docker-compose logs -f
+docker compose logs -f
 ```
 
 #### 停止数据库服务
 
 ```bash
 # 停止服务（保留数据）
-docker-compose stop
+docker compose stop
 
 # 停止并删除容器（保留数据卷）
-docker-compose down
+docker compose down
 
 # 停止并删除容器及数据卷（⚠️ 警告：会删除所有数据）
-docker-compose down -v
+docker compose down -v
 ```
 
 #### 数据持久化
@@ -313,7 +326,7 @@ docker volume inspect <volume_name>
 
 2. **重启 Neo4j 容器**使插件生效：
    ```bash
-   docker-compose restart neo4j
+   docker compose restart neo4j
    ```
 
 3. **验证插件是否安装成功**（可选）：
@@ -330,42 +343,43 @@ docker volume inspect <volume_name>
 - APOC 插件版本必须与 Neo4j 版本匹配（2025.10.1）
 - 确保 `neo4j_plugins` 目录已正确映射到容器内的 `/plugins` 目录
 - 首次启动 Neo4j 后，建议修改默认密码（通过 `NEO4J_AUTH` 环境变量或首次登录后修改）
-- 如果插件未生效，检查容器日志：`docker-compose logs neo4j`
+- 如果插件未生效，检查容器日志：`docker compose logs neo4j`
 
 
 #### 配置说明
 
-启动数据库后，需要在 `config.toml` 中配置数据库连接信息：
+启动数据库后，在 `config.toml` 中填入对应连接信息（端口以 `docker_database/docker-compose.yml` 的映射为准）：
 
 ```toml
 [POSTGREDB]
-Host = "localhost"
-Port = 5432 # 具体看你创建容器时的映射端口
-Database = "kahuna"
-User = "admin"
-Password = "secret"
+Host = "localhost"   # 应用在宿主机时填 localhost；应用在容器内要填宿主机地址（如 172.17.0.1）
+Port = 6201
+Database = "kahunabot"
+User = "kahunabot"
+Password = "kahunabot"
 
 [REDIS]
 Host = "localhost"
-Port = 6379 # 具体看你创建容器时的映射端口
+Port = 6203
+Password = ""        # docker_database 默认不设密码；自建实例有密码就填这里
 
 [NEO4J]
 Host = "localhost"
-Port = 7687 # 具体看你创建容器时的映射端口
+Port = 7687
 Username = "neo4j"
-Password = "password"
+Password = "你的Neo4j密码"
 
 [SDEDB]
 Host = "localhost"
-Port = 5432 # 具体看你创建容器时的映射端口
+Port = 6202          # SDE 是独立数据库（对应 postgres-sde 服务）
 Database = "sde"
-User = "admin"
-Password = "secret"
+User = "kahunabot"
+Password = "kahunabot"
 ```
 
-**注意**：如果使用 Docker Compose 部署，Neo4j 的 Host 应设置为 `localhost`（从宿主机访问）或容器名称 `kahuna-neo4j`（从其他容器访问）。首次启动 Neo4j 后，建议修改默认密码。
+**注意**：应用跑在 Docker 容器内时，`Host` 必须填宿主机地址 —— 容器里的 `localhost` 指的是容器自己，连不到宿主机的数据库。
 
-**注意**：SDE数据库使用前需要初始化，请看下面的sde数据库更新工具。
+**注意**：SDE 数据库使用前需要初始化，见下方「数据库初始化脚本」章节。
 
 ## 数据库迁移
 
@@ -460,50 +474,92 @@ python -m src_v2.core.database.migration_cli --dev
 
 ### 主要配置项
 
+#### [EDITION] - 版本类型
+```toml
+[EDITION]
+# community = 社区版（开源仓库默认）；enterprise = 企业版（需要企业版代码，开源版请勿修改）
+Edition = "community"
+```
+
 #### [APP] - 应用基础配置
 ```toml
 [APP]
+# 必填：应用签名密钥（JWT / 会话签名），要求 ≥32 位随机串
+# 生成：python -c "import secrets;print(secrets.token_urlsafe(32))"
+# ⚠️ 留空或保持模板占位符（change-me-*）时启动会被拒绝；
+#    也可用环境变量 KAHUNA_SECRET_KEY 注入（优先级更高）
+SECRET_KEY = "生成的随机密钥"
 # 图片渲染代理 (留空则不使用)
 PIC_RENDER_PROXY = ""
 # 代理服务器地址 用于访问esi，自行配置
-PROXY = "127.0.0.1"
+PROXY = ""
 # 代理端口
 PORT = 7890
+# 计算子进程并发数
+SUBWORKER_COUNT = 3
+# API 文档（Swagger）开关
+ENABLE_API_DOCS = false
 ```
 
-### [ADMIN] 管理员账号初始化配置
+#### [ADMIN] - 管理员账号初始化配置
 ```toml
 [ADMIN]
-# 是否创建默认管理员账号
+# 是否在启动时创建默认管理员账号
+# ⚠️ 口令要求 ≥12 位，且不能是 kahuna/admin/password/123456 之类弱口令，
+#    否则启动只会记录告警并跳过建号
 create_admin = false
-admin_user = "kahuna"
-admin_passwd = "kahuna"
+admin_user = "你的管理员账号"
+admin_passwd = "你的安全口令（至少 12 位）"
 ```
 
-#### [POSTGREDB] - PostgreSQL 数据库配置 (可选)
+#### [POSTGREDB] - PostgreSQL 主库配置（必需）
 ```toml
 [POSTGREDB]
 Host = "localhost"
-Port = 5432
-Database = "kahuna"
-User = "admin"
-Password = "secret"
+Port = 6201
+Database = "kahunabot"
+User = "kahunabot"
+Password = "kahunabot"
 ```
 
-#### [REDIS] - Redis 配置 (可选)
+#### [REDIS] - Redis 配置（必需）
 ```toml
 [REDIS]
 Host = "localhost"
-Port = 6379
+Port = 6203
+# 口令：docker_database 默认不设；自建实例有密码时填写
+# 也可用环境变量 REDIS_PASSWORD 覆盖
+Password = ""
 ```
 
-#### [NEO4J] - Neo4j 图数据库配置 (可选)
+#### [NEO4J] - Neo4j 图数据库配置（必需）
 ```toml
 [NEO4J]
 Host = "localhost"
 Port = 7687
 Username = "neo4j"
-Password = "password"
+Password = "你的Neo4j密码"
+```
+
+#### [SDEDB] - SDE 数据库配置（必需）
+```toml
+[SDEDB]
+Host = "localhost"
+Port = 6202
+Database = "sde"
+User = "kahunabot"
+Password = "kahunabot"
+```
+
+#### [SERVICE] - 服务间认证（接入 MCP 中间件 / QQ 机器人时需要）
+```toml
+[SERVICE]
+# 共享服务密钥：调用方在请求头 X-Internal-API-Key 中携带
+# 生成：python -c "import secrets;print(secrets.token_urlsafe(32))"
+# 留空 = 拒绝所有服务间请求（fail-closed）
+API_KEY = ""
+# enforce = 强制执行（默认）；warn = 仅告警不拦截
+MODE = "enforce"
 ```
 
 #### [EVE] - EVE Online API 配置
@@ -557,6 +613,19 @@ publicData = false
 ## 数据库初始化脚本
 
 项目提供了两个数据库初始化脚本，用于初始化和更新数据库数据。
+
+### 手动创建 SDE 数据库
+
+`update_sde.py` 写入的是**独立的 SDE 数据库**（默认库名 `sde`），不是主库：
+
+- 用 `docker_database/docker-compose.yml.example` 部署时，`postgres-sde` 服务已自动建库（宿主端口 6202），无需额外操作；
+- 使用已有 PostgreSQL 实例时，手动建库：
+
+```sql
+CREATE DATABASE sde OWNER kahunabot;
+```
+
+然后在 `config.toml` 的 `[SDEDB]` 段填入该库的连接信息，再执行 `python update_sde.py` 导入数据。
 
 ### update_sde.py - SDE 数据更新工具
 
@@ -740,7 +809,7 @@ nohup python run_mcp_middleware.py > logs/mcp_server.log 2>&1 &
     "mcpServers": {
         "kahuna-system": {
             "transport": "http",
-            "url": "http://localhost:9427/sse"
+            "url": "http://localhost:9274/sse"
         }
     }
 }
@@ -749,17 +818,20 @@ nohup python run_mcp_middleware.py > logs/mcp_server.log 2>&1 &
 #### 配置参数说明
 
 - **transport**: 传输协议，固定为 `http`
-- **url**: MCP 服务 SSE 端点地址
-  - 本地开发: `http://localhost:9000/sse`
-  - 远程服务器: `http://your-server-ip:9000/sse`
+- **url**: MCP 服务 SSE 端点地址，端口取决于启动方式：
+  - **Docker 部署**（`docker/` 下的 compose）：`http://localhost:9274/sse`
+  - **`run_server.sh start-mcp`**：`http://localhost:9000/sse`
+  - 远程服务器：把 `localhost` 换成服务器地址
+
+> ⚠️ **开源（社区）版功能边界**：MCP 服务本身可用，但依赖企业版服务的工具（`qq_vip_state`、`get_company_medica_vouchers` 等）在社区版会返回 503 —— 对应的企业版 AstrBot/QQ 服务没有随开源版发布。
 
 ### 服务架构
 
 ```
 Astrbot (AI 助手)
     ↓ (MCP 协议)
-MCP 中间件服务 (端口 9000)
-    ↓ (HTTP API)
+MCP 中间件服务 (Docker: 9274 / 脚本: 9000)
+    ↓ (HTTP API，服务间认证 X-Internal-API-Key)
 Quart 后端服务 (端口 9527)
     ↓ (数据库)
 PostgreSQL / Redis / Neo4j
@@ -767,35 +839,37 @@ PostgreSQL / Redis / Neo4j
 
 ### 端口说明
 
-| 服务       | 端口 | 用途           |
-| ---------- | ---- | -------------- |
+| 服务 | 端口 | 用途 |
+| --- | --- | --- |
 | Quart 后端 | 9527 | Web 界面和 API |
-| MCP 中间件 | 9000 | MCP 协议服务   |
-| PostgreSQL | 5432 | 主数据库       |
-| Redis      | 6379 | 缓存           |
-| Neo4j      | 7687 | 图数据库       |
+| MCP 中间件（Docker） | 9274 | MCP 协议服务（`docker/` compose 映射） |
+| MCP 中间件（脚本） | 9000 | `run_server.sh start-mcp` 启动时使用 |
+| PostgreSQL 主库 | 6201 | 主数据库（`docker_database` 映射） |
+| PostgreSQL SDE 库 | 6202 | SDE 静态数据 |
+| Redis | 6203 | 缓存 |
+| Neo4j | 7687 | 图数据库 |
 
 ### 故障排查
 
 #### MCP 服务无法启动
 
-1. **检查端口占用**
+1. **检查端口占用**（Docker 部署为 9274，脚本启动为 9000）
    ```bash
-   # 检查 9000 端口是否被占用
-   netstat -tulpn | grep 9000
+   netstat -tulpn | grep -E '9274|9000'
    # 或
-   lsof -i :9000
+   lsof -i :9274
    ```
 
 2. **检查依赖安装**
    ```bash
-   # 确保安装了 mcp 库
-   pip install mcp
+   # mcp / fastmcp 已在 pyproject 依赖中，重新同步即可
+   uv sync
    ```
 
 3. **查看日志**
    ```bash
    tail -f logs/mcp_server.log
+   # Docker 部署：docker compose logs -f kahunabot
    ```
 
 #### Astrbot 无法连接 MCP
@@ -803,36 +877,38 @@ PostgreSQL / Redis / Neo4j
 1. **检查服务状态**
    ```bash
    ./run_server.sh status
+   # Docker 部署：docker compose ps
    ```
 
-2. **测试 MCP 健康检查**
+2. **确认 SSE 端点可连通**
    ```bash
-   curl http://localhost:9000/health
-   # 应返回: {"status": "healthy", "backend_connected": true}
+   # MCP 服务只暴露 /sse（没有 /health 端点），用 curl 观察握手
+   curl -N --max-time 5 http://localhost:9274/sse
    ```
 
 3. **检查防火墙设置**
-   - 确保端口 9000 对外开放
+   - 确保 MCP 端口对外开放（Docker 9274 / 脚本 9000）
    - 如果是远程服务器，检查安全组规则
 
-4. **验证工具列表**
+4. **验证工具注册**
    ```bash
-   # MCP 服务启动时会打印注册的工具列表
-   # 检查日志中是否有 9 个工具
-   grep "MCP 工具注册完成" logs/mcp_server.log
+   # MCP 服务启动时会在日志中打印已注册的工具
+   grep -i "tool" logs/mcp_server.log | head
    ```
 
 #### 工具调用失败
 
 1. **检查后端服务**
    - 确保 Quart 后端服务已启动
-   - 检查后端日志: `tail -f logs/server.log`
+   - 检查后端日志：`tail -f logs/*.log`（Docker 部署在 `docker/app_logs/`）
 
-2. **检查内部 API**
+2. **检查内部 API**（需要服务间密钥，路径以 `/api/internal/mcp/` 开头）
    ```bash
-   # 测试内部 API 是否可访问
-   curl http://localhost:9527/api/internal/mcp/qq_vip_state
+   # 示例：QQ VIP 状态；密钥取自 config.toml 的 [SERVICE] API_KEY
+   curl -H "X-Internal-API-Key: <你的SERVICE_API_KEY>" \
+        "http://localhost:9527/api/internal/mcp/qq/vip?qq=123456"
    ```
+   > 社区版该接口返回 503（企业版服务未随开源版发布），属预期行为。
 
 3. **检查数据库连接**
     - 确保 PostgreSQL、Redis、Neo4j 服务正常运行
@@ -951,7 +1027,6 @@ tests/
 
 src_v2/frontend/src/
 ├── composables/__tests__/     # 前端 Composable 测试
-│   ├── useMarketStorage.spec.ts
 │   └── useEdition.spec.ts
 ├── stores/__tests__/          # Pinia Store 测试
 │   └── auth.spec.ts

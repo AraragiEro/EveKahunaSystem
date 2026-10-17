@@ -4,9 +4,9 @@
 
 ## 包含的服务
 
-- **EveKahunaSystem Web 服务** (端口: 9527) - Quart 后端 + Vue3 前端
-  （compose 服务名沿用历史名 `kahunabot`，下文 `docker-compose ... kahunabot` 均指本服务）
-- **MCP 中间件** (端口: 9000) - Model Context Protocol 服务
+- **EveKahunaSystem Web 服务**（端口 9527）- Quart 后端 + Vue3 前端
+  （compose 服务名沿用历史名 `kahunabot`，下文 `docker compose ... kahunabot` 均指本服务）
+- **MCP 中间件**（端口 9274）- Model Context Protocol 服务
 
 ## 前置要求
 
@@ -61,7 +61,7 @@ admin_passwd = "你的安全密码（≥12 位）"
 
 ```bash
 cd docker
-docker-compose up -d
+docker compose up -d
 ```
 
 #### 国内网络环境（可选）
@@ -85,45 +85,45 @@ services:
 
 配置后重新构建即可：
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ### 3. 验证服务
 
 - Web 界面: http://localhost:9527
-- MCP 端点: http://localhost:9000/sse
+- MCP 端点: http://localhost:9274/sse
 - 健康检查: http://localhost:9527/api/health
 
 ### 4. 查看日志
 
 ```bash
 # 查看所有服务日志
-docker-compose logs -f
+docker compose logs -f
 
 # 查看特定服务日志
-docker-compose logs -f kahunabot
+docker compose logs -f kahunabot
 ```
 
 ### 5. 停止服务
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 ## 常用命令
 
 ```bash
 # 重新构建镜像
-docker-compose build --no-cache
+docker compose build --no-cache
 
 # 重启服务
-docker-compose restart
+docker compose restart
 
 # 查看运行状态
-docker-compose ps
+docker compose ps
 
 # 进入容器内部
-docker-compose exec kahunabot bash
+docker compose exec kahunabot bash
 ```
 
 ## 数据持久化
@@ -156,7 +156,7 @@ docker-compose exec kahunabot bash
 
 1. 检查配置文件是否存在
 2. 检查 EVE API 配置是否正确
-3. 查看日志: `docker-compose logs`
+3. 查看日志: `docker compose logs`
 
 ### MCP 连接失败
 
@@ -173,7 +173,7 @@ docker-compose exec kahunabot bash
 git pull
 
 # 重新构建并启动
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 ## 注意事项
