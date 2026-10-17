@@ -14,5 +14,8 @@ from .sde_builder import (
     MapSolarSystems,
     MapRegions,
     MarketGroups,
+    PlanetSchematics,
+    PlanetSchematicTypes,
+    NpcCorporations,
 )
 from .utils import SdeUtils

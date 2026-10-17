@@ -23,7 +23,7 @@ class MCPMiddlewareConfig:
         self.quart_api_key: str = os.getenv("QUART_API_KEY", "")
 
         # 超时配置
-        self.request_timeout: float = float(os.getenv("MCP_REQUEST_TIMEOUT", "30.0"))
+        self.request_timeout: float = float(os.getenv("MCP_REQUEST_TIMEOUT", "300.0"))
 
     def __repr__(self) -> str:
         return (

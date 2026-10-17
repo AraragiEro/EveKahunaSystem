@@ -14,7 +14,7 @@ from ..eveutils import OUT_PAGE_ERROR, get_request_async, parse_token
 @esi_request(limit=0.3)
 async def characters_character_contracts(access_token, character_id: int, page: int = 1, max_retries=3, log=True):
     access_token = await parse_token(access_token)
-    data, pages, _ = await get_request_async(
+    data, pages, *_ = await get_request_async(
         f"https://esi.evetech.net/latest/characters/{character_id}/contracts/",
         headers={"Authorization": f"Bearer {access_token}"},
         params={"page": page},
@@ -47,7 +47,7 @@ async def characters_character_contracts(access_token, character_id: int, page: 
 @esi_request(limit=0.3)
 async def corporations_corporation_contracts(access_token, corporation_id: int, page: int = 1, max_retries=3, log=True):
     access_token = await parse_token(access_token)
-    data, pages, _ = await get_request_async(
+    data, pages, *_ = await get_request_async(
         f"https://esi.evetech.net/latest/corporations/{corporation_id}/contracts/",
         headers={"Authorization": f"Bearer {access_token}"},
         params={"page": page},
@@ -80,7 +80,7 @@ async def corporations_corporation_contracts(access_token, corporation_id: int, 
 @esi_request(limit=0.3)
 async def corporations_corporation_contracts_contract_id_items(access_token, corporation_id: int, contract_id: int, max_retries=3, log=True):
     access_token = await parse_token(access_token)
-    data, _, _ = await get_request_async(
+    data, *_ = await get_request_async(
         f"https://esi.evetech.net/latest/corporations/{corporation_id}/contracts/{contract_id}/items/",
         headers={"Authorization": f"Bearer {access_token}"},
         log=log,

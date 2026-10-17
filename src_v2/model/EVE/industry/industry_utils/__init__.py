@@ -36,6 +36,7 @@ from .permission_utils import (
     get_location_flag_list,
     update_container_permission_location_flag
 )
+from .bp_requirement_analyzer import analyze_blueprint_requirements
 from .plan_utils import get_plan_tableview_data, update_plan_status
 from .structure_utils import get_structure_assign_keyword_suggestions, get_structure_list
 
@@ -43,6 +44,7 @@ __all__ = [
     'AsyncCounter',
     'MarketTree',
     'get_market_tree',
+    'analyze_blueprint_requirements',
     'create_config_flow_config',
     'modify_config_flow_config',
     'fetch_recommended_presets',

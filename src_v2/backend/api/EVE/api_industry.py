@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import jwt
+
+from src_v2.core.utils.datetime_utils import parse_naive_utc_datetime
+
 from quart import Blueprint, Quart
 from quart import current_app as app
 from quart import g, jsonify, redirect, request
@@ -15,30 +18,75 @@ from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from src_v2.backend.api.permission_required import role_required
-from src_v2.backend.auth import auth_required, verify_token
-from src_v2.core.database.connect_manager import get_neo4j_manager
+from src_v2.backend.auth import auth_required, is_admin_user, verify_jwt_token
 from src_v2.core.database.connect_manager import get_redis_manager as rdm
+from src_v2.core.database.kahuna_database_utils_v2 import (
+    EveIndustryCalculateHistoryDBUtils,
+    EveIndustryPlanTaskImplementationDBUtils,
+)
 from src_v2.core.database.neo4j_utils import Neo4jIndustryUtils as NIU
 from src_v2.core.log import logger
 from src_v2.core.permission.permission_manager import permission_manager
 from src_v2.core.user.user_manager import UserManager
 from src_v2.core.utils import KahunaException
 from src_v2.model.EVE.industry.blueprint import BPManager as BPM
+from src_v2.model.EVE.industry.industry_utils import (
+    add_config_to_plan as _add_config_to_plan_impl,
+    add_industrypermision as _add_industrypermision_impl,
+    create_config_flow_config as _create_config_flow_config_impl,
+    create_default_config_flow_preset,
+    delete_config_flow_config as _delete_config_flow_config_impl,
+    delete_config_flow_preset as _delete_config_flow_preset_impl,
+    delete_config_from_plan,
+    delete_industrypermision as _delete_industrypermision_impl,
+    fetch_recommended_presets as _fetch_recommended_presets_impl,
+    get_config_flow_config_list as _get_config_flow_config_list_impl,
+    get_config_flow_list as _get_config_flow_list_impl,
+    get_config_flow_preset_detail as _get_config_flow_preset_detail_impl,
+    get_config_flow_presets as _get_config_flow_presets_impl,
+    get_item_info as _get_item_info_impl,
+    get_plan_tableview_data as _get_plan_tableview_data_impl,
+    get_type_list as _get_type_list_impl,
+    load_config_flow_preset as _load_config_flow_preset_impl,
+    load_shared_config_flow_preset as _load_shared_config_flow_preset_impl,
+    modify_config_flow_config as modify_config_flow,
+    save_config_flow_preset as _save_config_flow_preset_impl,
+    save_config_flow_preset_config as _save_config_flow_preset_config_impl,
+    save_config_flow_to_plan as _save_config_flow_to_plan_impl,
+    share_config_flow_preset as _share_config_flow_preset_impl,
+    update_config_flow_preset_name as _update_config_flow_preset_name_impl,
+    update_container_permission_location_flag as _update_container_permission_location_flag_impl,
+    update_container_permission_tag as _update_container_permission_tag_impl,
+    get_location_flag_list as _get_location_flag_list_impl,
+    get_user_all_container_permission as _get_user_all_container_permission_impl,
+    get_structure_assign_keyword_suggestions as _get_structure_assign_keyword_suggestions_impl,
+    get_structure_list as _get_structure_list_impl,
+)
+
 from src_v2.model.EVE.industry.industry_manager import IndustryManager
-from src_v2.model.EVE.industry.industry_utils.compressedAsteroid import CompressedAsteroidUtils
+from src_v2.model.EVE.industry.industry_utils.compressedAsteroid import (
+    CompressedAsteroidUtils,
+)
+from src_v2.model.EVE.industry.industry_utils.market_tree import (
+    get_market_tree as _get_market_tree_impl,
+)
 from src_v2.model.EVE.industry.industry_utils.material_utils import get_material_type
+from src_v2.model.EVE.industry.industry_utils.bp_requirement_analyzer import (
+    analyze_blueprint_requirements,
+)
 from src_v2.model.EVE.industry.plan_configflow_operate import ConfigFlowOperateCenter
 from src_v2.model.EVE.market.market_manager import MarketManager
 from src_v2.model.EVE.sde.utils import SdeUtils
+from src_v2.backend.api import response_helper
 
-api_industry_bp = Blueprint(
-    'api_industry', __name__, url_prefix='/api/EVE/industry')
+api_industry_bp = Blueprint("api_industry", __name__, url_prefix="/api/EVE/industry")
 
 
 # 响应数据模型（通用）
 @dataclass
 class ErrorResponse:
     """错误响应"""
+
     status: int
     message: str
 
@@ -83,16 +131,16 @@ async def get_market_tree():
     user_id = g.current_user["user_id"]
 
     try:
-        market_tree = await IndustryManager.get_market_tree(data["node"])
+        market_tree = await _get_market_tree_impl(data["node"])
         logger.info(f"获取 市场节点 {data['node']} 的子节点 {len(market_tree)} 个")
         return jsonify({"data": market_tree, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取市场树失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取市场树失败"}), 500
+        return response_helper.server_error("获取市场树失败")
 
 
 @api_industry_bp.route("/searchMarketTypes", methods=["POST"])
@@ -143,11 +191,11 @@ async def search_market_types():
     """
     data = await request.json
     user_id = g.current_user["user_id"]
-    keyword = data.get('keyword', '').strip()
+    keyword = data.get("keyword", "").strip()
 
     try:
         if not keyword:
-            return jsonify({"status": 400, "message": "搜索关键字不能为空"}), 400
+            return response_helper.bad_request("搜索关键字不能为空")
 
         # 步骤1: 使用fuzz_type获取type_name候选列表
         max_results = 10  # 限制结果数量
@@ -165,73 +213,63 @@ async def search_market_types():
                     # 步骤3: 检查是否有蓝图可生产
                     bp_id = await BPM.get_bp_id_by_prod_typeid(type_id)
                     if bp_id:  # 只保留有蓝图的type_id
-                        primary_results.append({
-                            'type_id': type_id,
-                            'type_name_zh': type_name_zh
-                        })
+                        primary_results.append(
+                            {"type_id": type_id, "type_name_zh": type_name_zh}
+                        )
 
         if not primary_results:
-            return jsonify({
-                "status": 200,
-                "data": [],
-                "count": 0
-            })
+            return response_helper.ok(data=[], count=0)
 
-        # 步骤4: 从neo4j查询Type节点
-        type_ids = [item['type_id'] for item in primary_results]
-        neo4j_manager_instance = get_neo4j_manager()
-        async with neo4j_manager_instance.get_session() as session:
-            query = """
-            MATCH (t:Type)
-            WHERE t.type_id IN $type_ids
-            RETURN t
-            """
-            result = await session.run(query, {"type_ids": type_ids})
+        # 步骤4: 从neo4j查询Type节点（封装模块内实现）
+        type_ids = [item["type_id"] for item in primary_results]
+        type_nodes = await NIU.get_type_nodes_by_type_ids(type_ids)
 
-            # 创建type_id到type_name_zh的映射
-            type_id_to_name_zh = {
-                item['type_id']: item['type_name_zh'] for item in primary_results}
+        # 创建type_id到type_name_zh的映射
+        type_id_to_name_zh = {
+            item["type_id"]: item["type_name_zh"] for item in primary_results
+        }
 
-            # 步骤5: 处理查询结果，先存储到字典中
-            type_id_to_node = {}
-            async for record in result:
-                node_obj = record.get("t")
-                if node_obj:
-                    node_dict = dict(node_obj)
-                    type_id = node_dict.get("type_id")
-                    if type_id:
-                        # 按照market_tree.py:57-65的处理方式
-                        node_dict["hasChildren"] = False
-                        node_dict["row_id"] = type_id
-                        node_dict["name"] = node_dict.get(
-                            "type_name_zh") or node_dict.get("type_name", "")
-                        # 如果neo4j中没有type_name_zh，使用我们之前获取的
-                        if not node_dict.get("type_name_zh") and type_id in type_id_to_name_zh:
-                            node_dict["type_name_zh"] = type_id_to_name_zh[type_id]
-                            node_dict["name"] = type_id_to_name_zh[type_id]
-                        node_dict["can_add_plan"] = True  # 因为已经过滤过，都有蓝图
-                        type_id_to_node[type_id] = node_dict
+        # 步骤5: 处理查询结果，先存储到字典中
+        type_id_to_node = {}
+        for node_obj in type_nodes:
+            node_dict = dict(node_obj)
+            type_id = node_dict.get("type_id")
+            if type_id:
+                # 按照market_tree.py:57-65的处理方式
+                node_dict["hasChildren"] = False
+                node_dict["row_id"] = type_id
+                node_dict["name"] = node_dict.get(
+                    "type_name_zh"
+                ) or node_dict.get("type_name", "")
+                # 如果neo4j中没有type_name_zh，使用我们之前获取的
+                if (
+                    not node_dict.get("type_name_zh")
+                    and type_id in type_id_to_name_zh
+                ):
+                    node_dict["type_name_zh"] = type_id_to_name_zh[type_id]
+                    node_dict["name"] = type_id_to_name_zh[type_id]
+                node_dict["can_add_plan"] = True  # 因为已经过滤过，都有蓝图
+                type_id_to_node[type_id] = node_dict
 
-            # 按照原始type_ids的顺序构建结果列表，保留相关度排序
-            market_nodes = []
-            for type_id in type_ids:
-                if type_id in type_id_to_node:
-                    market_nodes.append(type_id_to_node[type_id])
+        # 按照原始type_ids的顺序构建结果列表，保留相关度排序
+        market_nodes = []
+        for type_id in type_ids:
+            if type_id in type_id_to_node:
+                market_nodes.append(type_id_to_node[type_id])
 
         logger.info(
-            f"用户 {user_id} 搜索关键词 '{keyword}'，找到 {len(market_nodes)} 个可生产的市场类型")
-        return jsonify({
-            "status": 200,
-            "data": market_nodes,
-            "count": len(market_nodes)
-        })
+            f"用户 {user_id} 搜索关键词 '{keyword}'，找到 {len(market_nodes)} 个可生产的市场类型"
+        )
+        return jsonify(
+            {"status": 200, "data": market_nodes, "count": len(market_nodes)}
+        )
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"搜索市场类型失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "搜索市场类型失败"}), 500
+        return response_helper.server_error("搜索市场类型失败")
 
 
 @api_industry_bp.route("/createPlan", methods=["POST"])
@@ -276,17 +314,19 @@ async def create_plan():
     user_id = g.current_user["user_id"]
 
     try:
-        plan_name = data["name"]
+        plan_name = data.get("name", "")
+        if not plan_name or not plan_name.strip():
+            return response_helper.bad_request("计划名称不能为空")
         data.pop("name")
         await IndustryManager().create_plan(user_id, plan_name, data)
         return jsonify({"message": "计划创建成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"创建计划失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "创建计划失败"}), 500
+        return response_helper.server_error("创建计划失败")
 
 
 @api_industry_bp.route("/getPlanTableData", methods=["POST"])
@@ -348,11 +388,11 @@ async def get_plan_table_data():
         return jsonify({"data": plan_table_data, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取计划表格数据失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取计划表格数据失败"}), 500
+        return response_helper.server_error("获取计划表格数据失败")
 
 
 @api_industry_bp.route("/addPlanProduct", methods=["POST"])
@@ -407,7 +447,9 @@ async def add_plan_product():
         if user_roles:
             for role in user_roles:
                 try:
-                    descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                    descendant_roles = (
+                        await permission_manager.get_all_descendant_roles(role)
+                    )
                     if descendant_roles:
                         all_roles.update(descendant_roles)
                 except Exception as e:
@@ -418,18 +460,21 @@ async def add_plan_product():
         if is_admin and "user_name" in data:
             user_id = data["user_name"]
             logger.info(
-                f"管理员 {current_user_id} 添加用户 {user_id} 的计划产品: {data['plan_name']}")
+                f"管理员 {current_user_id} 添加用户 {user_id} 的计划产品: {data['plan_name']}"
+            )
         else:
             user_id = current_user_id
 
-        await IndustryManager.add_plan_product(user_id, data["plan_name"], data["type_id"], data["quantity"])
+        await IndustryManager.add_plan_product(
+            user_id, data["plan_name"], data["type_id"], data["quantity"]
+        )
         return jsonify({"message": "产品添加成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         logger.error(f"添加产品失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "添加产品失败"}), 500
+        return response_helper.server_error("添加产品失败")
 
 
 @api_industry_bp.route("/savePlanProducts", methods=["POST"])
@@ -487,7 +532,9 @@ async def save_plan_products():
         if user_roles:
             for role in user_roles:
                 try:
-                    descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                    descendant_roles = (
+                        await permission_manager.get_all_descendant_roles(role)
+                    )
                     if descendant_roles:
                         all_roles.update(descendant_roles)
                 except Exception as e:
@@ -498,19 +545,22 @@ async def save_plan_products():
         if is_admin and "user_name" in data:
             user_id = data["user_name"]
             logger.info(
-                f"管理员 {current_user_id} 保存用户 {user_id} 的计划产品: {data['plan_name']}")
+                f"管理员 {current_user_id} 保存用户 {user_id} 的计划产品: {data['plan_name']}"
+            )
         else:
             user_id = current_user_id
 
-        await IndustryManager.save_plan_products(user_id, data["plan_name"], data["products"])
+        await IndustryManager.save_plan_products(
+            user_id, data["plan_name"], data["products"]
+        )
         return jsonify({"message": "产品保存成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"保存产品失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "保存产品失败"}), 500
+        return response_helper.server_error("保存产品失败")
 
 
 @api_industry_bp.route("/getPlanCalculateResultTableView", methods=["POST"])
@@ -522,29 +572,61 @@ async def get_plan_calculate_result_table_view():
     # 默认为 "calculate" 以保持向后兼容
     operate_type = data.get("operate_type", "calculate")
 
-    # 如果提供了 user_name，使用它作为 user_id（管理员功能）
-    # 否则使用当前用户的 user_id
-    user_name = data.get("user_name")
-    if user_name:
-        user_id = user_name
-    else:
-        user_id = current_user_id
+    # 身份一律取当前登录用户；请求体里的 user_name 只有管理员可用于代查他人计划
+    # （安全审计 #3：不能让请求参数直接替换身份，否则任何登录用户都能读他人计划）
+    target_user_name = data.get("user_name")
+    user_id = current_user_id
+    if target_user_name and target_user_name != current_user_id:
+        if not await is_admin_user(current_user_id):
+            logger.warning(
+                f"用户 {current_user_id} 尝试访问用户 {target_user_name} 的工业计划 {plan_name}，已拒绝"
+            )
+            return response_helper.forbidden("无权查看他人的工业计划")
+        user_id = target_user_name
+        logger.info(
+            f"管理员 {current_user_id} 代查用户 {user_id} 的计划: {plan_name}"
+        )
 
     try:
         if operate_type == "start":
             # 启动计算任务
             await IndustryManager.start_plan_calculation(user_id, plan_name)
-            return jsonify({"status": 200, "message": "计算任务已启动"})
+            return response_helper.ok(message="计算任务已启动")
 
         elif operate_type == "status":
             # 查询计算状态
-            status_data = await IndustryManager.get_calculation_status(user_id, plan_name)
-            return jsonify({"status": 200, "data": status_data})
+            status_data = await IndustryManager.get_calculation_status(
+                user_id, plan_name
+            )
+            return response_helper.ok(status_data)
 
         elif operate_type == "result":
             # 获取计算结果
-            result_data = await IndustryManager.get_calculation_result(user_id, plan_name)
-            return jsonify({"status": 200, "data": result_data})
+            result_data = await IndustryManager.get_calculation_result(
+                user_id, plan_name
+            )
+
+            # 获取最新的计算历史记录ID作为 calculation_id
+            try:
+                # 查询最近一次计算历史（封装模块内实现）
+                latest_history = await EveIndustryCalculateHistoryDBUtils.get_latest_by_user_and_plan(
+                    user_id, plan_name
+                )
+                if latest_history:
+                    result_data["calculation_id"] = latest_history.id
+                else:
+                    # 如果没有历史记录，使用当前时间戳作为 fallback
+                    result_data["calculation_id"] = int(
+                        datetime.datetime.utcnow().timestamp() * 1000
+                    )
+            except Exception as e:
+                logger.warning(f"获取计算历史记录ID失败: {e}")
+                # fallback: 使用当前时间戳
+                result_data["calculation_id"] = int(
+                    datetime.datetime.utcnow().timestamp() * 1000
+                )
+
+            return response_helper.ok(result_data)
 
         else:
             # 向后兼容：直接计算并返回结果（原有行为）
@@ -552,19 +634,22 @@ async def get_plan_calculate_result_table_view():
             op = await ConfigFlowOperateCenter.create(user_id, plan_name, plan_settings)
             await IndustryManager.calculate_plan(op)
             node_dict = {
-                node['type_id']: node for node in await NIU.get_user_plan_node_with_distance(op.user_name, op.plan_name)
+                node["type_id"]: node
+                for node in await NIU.get_user_plan_node_with_distance(
+                    op.user_name, op.plan_name
+                )
             }
             await MarketManager().update_jita_price()
-            data = await IndustryManager.get_plan_tableview_data(op, node_dict)
-            return jsonify({"status": 200, "data": data})
+            data = await _get_plan_tableview_data_impl(op, node_dict)
+            return response_helper.ok(data)
 
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取计划计算结果表格视图失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取计划计算结果表格视图失败"}), 500
+        return response_helper.server_error("获取计划计算结果表格视图失败")
 
 
 @api_industry_bp.route("/addIndustrypermision", methods=["POST"])
@@ -616,7 +701,9 @@ async def add_industrypermision():
     if user_roles:
         for role in user_roles:
             try:
-                descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                descendant_roles = await permission_manager.get_all_descendant_roles(
+                    role
+                )
                 if descendant_roles:
                     all_roles.update(descendant_roles)
             except Exception as e:
@@ -631,15 +718,15 @@ async def add_industrypermision():
         user_id = current_user_id
 
     try:
-        await IndustryManager.add_industrypermision(user_id, data)
+        await _add_industrypermision_impl(user_id, data)
         return jsonify({"message": "新增许可成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"新增许可失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "新增许可失败"}), 500
+        return response_helper.server_error("新增许可失败")
 
 
 @api_industry_bp.route("/getUserAllContainerPermission", methods=["POST"])
@@ -690,7 +777,9 @@ async def get_user_all_container_permission():
     if user_roles:
         for role in user_roles:
             try:
-                descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                descendant_roles = await permission_manager.get_all_descendant_roles(
+                    role
+                )
                 if descendant_roles:
                     all_roles.update(descendant_roles)
             except Exception as e:
@@ -705,18 +794,20 @@ async def get_user_all_container_permission():
         user_id = current_user_id
 
     if force_refresh:
-        await rdm().r.delete(f'container_permission:{user_id}:all_container_permission')
+        await rdm().r.delete(f"container_permission:{user_id}:all_container_permission")
 
     try:
-        all_container_permission = await IndustryManager.get_user_all_container_permission(user_id)
+        all_container_permission = (
+            await _get_user_all_container_permission_impl(user_id)
+        )
         return jsonify({"data": all_container_permission, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取用户所有容器许可失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取用户所有容器许可失败"}), 500
+        return response_helper.server_error("获取用户所有容器许可失败")
 
 
 @api_industry_bp.route("/getLocationFlagList", methods=["POST"])
@@ -768,20 +859,24 @@ async def get_location_flag_list():
     asset_container_id = data["asset_container_id"]
 
     try:
-        location_flag_list = await IndustryManager.get_location_flag_list(asset_owner_id, asset_container_id)
+        location_flag_list = await _get_location_flag_list_impl(
+            asset_owner_id, asset_container_id
+        )
         if location_flag_list:
-            res_data = [{"value": item, "label": item.replace(
-                'CorpSAG', '公司机库')} for item in location_flag_list]
+            res_data = [
+                {"value": item, "label": item.replace("CorpSAG", "公司机库")}
+                for item in location_flag_list
+            ]
             return jsonify({"data": res_data, "status": 200})
         else:
             return jsonify({"data": [], "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取位置标志列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取位置标志列表失败"}), 500
+        return response_helper.server_error("获取位置标志列表失败")
 
     return jsonify({"data": location_flag_list, "status": 200})
 
@@ -835,19 +930,22 @@ async def update_container_permission_location_flag():
         data = {
             "asset_owner_id": asset_owner_id,
             "asset_container_id": asset_container_id,
-            "location_flag": location_flag
+            "location_flag": location_flag,
         }
-        await IndustryManager.update_container_permission_location_flag(current_user_id, data)
+        await _update_container_permission_location_flag_impl(
+            current_user_id, data
+        )
         logger.info(
-            f"{current_user_id} 修改用户 {current_user_id} 的容器许可位置标志: {asset_owner_id}, {asset_container_id}, {location_flag}")
+            f"{current_user_id} 修改用户 {current_user_id} 的容器许可位置标志: {asset_owner_id}, {asset_container_id}, {location_flag}"
+        )
         return jsonify({"message": "修改位置标志成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"修改位置标志失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "修改位置标志失败"}), 500
+        return response_helper.server_error("修改位置标志失败")
 
 
 @api_industry_bp.route("/deleteIndustrypermision", methods=["POST"])
@@ -898,7 +996,9 @@ async def delete_industrypermision():
     if user_roles:
         for role in user_roles:
             try:
-                descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                descendant_roles = await permission_manager.get_all_descendant_roles(
+                    role
+                )
                 if descendant_roles:
                     all_roles.update(descendant_roles)
             except Exception as e:
@@ -913,15 +1013,15 @@ async def delete_industrypermision():
         user_id = current_user_id
 
     try:
-        await IndustryManager.delete_industrypermision(user_id, data)
+        await _delete_industrypermision_impl(user_id, data)
         return jsonify({"message": "删除许可成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"删除许可失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "删除许可失败"}), 500
+        return response_helper.server_error("删除许可失败")
 
 
 @api_industry_bp.route("/updateContainerPermissionTag", methods=["POST"])
@@ -975,7 +1075,9 @@ async def update_container_permission_tag():
     if user_roles:
         for role in user_roles:
             try:
-                descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                descendant_roles = await permission_manager.get_all_descendant_roles(
+                    role
+                )
                 if descendant_roles:
                     all_roles.update(descendant_roles)
             except Exception as e:
@@ -990,20 +1092,22 @@ async def update_container_permission_tag():
         user_id = current_user_id
 
     try:
-        await IndustryManager.update_container_permission_tag(user_id, data)
+        await _update_container_permission_tag_impl(user_id, data)
         return jsonify({"message": "修改标签成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"修改标签失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "修改标签失败"}), 500
+        return response_helper.server_error("修改标签失败")
 
 
 @api_industry_bp.route("/getStructureList", methods=["GET"])
 @auth_required
-@role_required(["vip_alpha"], 402, "仅ALPHA订阅者可拉取真实资产建筑。虚拟建筑可正常使用。")
+@role_required(
+    ["vip_alpha"], 402, "仅ALPHA订阅者可拉取真实资产建筑。虚拟建筑可正常使用。"
+)
 async def get_structure_list():
     """
     获取建筑列表
@@ -1035,15 +1139,15 @@ async def get_structure_list():
     """
     user_id = g.current_user["user_id"]
     try:
-        structure_list = await IndustryManager.get_structure_list(user_id)
+        structure_list = await _get_structure_list_impl(user_id)
         return jsonify({"data": structure_list, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取建筑列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取建筑列表失败"}), 500
+        return response_helper.server_error("获取建筑列表失败")
 
 
 @api_industry_bp.route("/getGroupSuggestions", methods=["POST"])
@@ -1088,15 +1192,19 @@ async def get_structure_assign_keyword_suggestions():
     user_id = g.current_user["user_id"]
 
     try:
-        assign_keyword_suggestions = await IndustryManager.get_structure_assign_keyword_suggestions(data["assign_type"], data["query"])
+        assign_keyword_suggestions = (
+            await _get_structure_assign_keyword_suggestions_impl(
+                data["assign_type"], data["query"]
+            )
+        )
         return jsonify({"data": assign_keyword_suggestions, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取建筑分配关键字建议失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取建筑分配关键字建议失败"}), 500
+        return response_helper.server_error("获取建筑分配关键字建议失败")
 
 
 @api_industry_bp.route("/getTypeList", methods=["GET"])
@@ -1130,15 +1238,15 @@ async def get_type_list():
     user_id = g.current_user["user_id"]
 
     try:
-        type_list = await IndustryManager.get_type_list()
+        type_list = await _get_type_list_impl()
         return jsonify({"data": type_list, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取类型列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取类型列表失败"}), 500
+        return response_helper.server_error("获取类型列表失败")
 
 
 @api_industry_bp.route("/getTypeSuggestionsList", methods=["POST"])
@@ -1181,16 +1289,17 @@ async def get_type_suggestions_list():
 
     try:
         type_suggestions_list = await SdeUtils.fuzz_type(data["type_name"], list_len=10)
-        type_suggestions_list = [{"value": item, "label": item}
-                                 for item in type_suggestions_list]
+        type_suggestions_list = [
+            {"value": item, "label": item} for item in type_suggestions_list
+        ]
         return jsonify({"data": type_suggestions_list, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取类型建议列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取类型建议列表失败"}), 500
+        return response_helper.server_error("获取类型建议列表失败")
 
 
 @api_industry_bp.route("/searchMineralOrIceProduct", methods=["POST"])
@@ -1242,39 +1351,45 @@ async def search_mineral_or_ice_product():
     name = data.get("name", "").strip()
 
     if not name:
-        return jsonify({"status": 400, "message": "名称不能为空"}), 400
+        return response_helper.bad_request("名称不能为空")
 
     try:
         # 根据名称获取 type_id
         type_id = await SdeUtils.get_id_by_name(name)
         if not type_id:
-            return jsonify({"data": None, "status": 200, "message": "未找到该物品"}), 200
+            return jsonify(
+                {"data": None, "status": 200, "message": "未找到该物品"}
+            ), 200
 
         # 判断是否为矿物或冰矿产物
         material_type = await get_material_type(type_id)
-        if material_type not in ["矿石", "冰矿产物"]:
-            return jsonify({"data": None, "status": 200, "message": "该物品不是矿物或冰矿产物"}), 200
+        if material_type not in ["矿物", "冰矿产物"]:
+            return jsonify(
+                {"data": None, "status": 200, "message": "该物品不是矿物或冰矿产物"}
+            ), 200
 
         # 获取名称信息
         type_name = await SdeUtils.get_name_by_id(type_id, zh=False)
         type_name_zh = await SdeUtils.get_name_by_id(type_id, zh=True)
 
-        return jsonify({
-            "data": {
-                "type_id": type_id,
-                "type_name": type_name or "",
-                "type_name_zh": type_name_zh or "",
-                "material_type": material_type
-            },
-            "status": 200
-        }), 200
+        return jsonify(
+            {
+                "data": {
+                    "type_id": type_id,
+                    "type_name": type_name or "",
+                    "type_name_zh": type_name_zh or "",
+                    "material_type": material_type,
+                },
+                "status": 200,
+            }
+        ), 200
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"查询矿物/冰矿产物失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "查询矿物/冰矿产物失败"}), 500
+        return response_helper.server_error("查询矿物/冰矿产物失败")
 
 
 @api_industry_bp.route("/createConfigFlowConfig", methods=["POST"])
@@ -1327,7 +1442,9 @@ async def create_config_flow_config():
         if user_roles:
             for role in user_roles:
                 try:
-                    descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                    descendant_roles = (
+                        await permission_manager.get_all_descendant_roles(role)
+                    )
                     if descendant_roles:
                         all_roles.update(descendant_roles)
                 except Exception as e:
@@ -1336,28 +1453,42 @@ async def create_config_flow_config():
         user_id = current_user_id
         if is_admin and "user_name" in data:
             user_id = data["user_name"]
-            logger.info(f"管理员 {current_user_id} 创建用户 {user_id} 的配置流配置: {data}")
+            logger.info(
+                f"管理员 {current_user_id} 创建用户 {user_id} 的配置流配置: {data}"
+            )
         else:
             logger.info(f"创建配置流配置: {data}")
 
-        if "config_type" not in data or "config_value" not in data or not data['config_value']:
+        if (
+            "config_type" not in data
+            or "config_value" not in data
+            or not data["config_value"]
+        ):
             raise KahunaException(
-                "config_type 和 config_value 不能为空，且 config_value 不能为空")
-        await IndustryManager.create_config_flow_config(user_id, data)
+                "config_type 和 config_value 不能为空，且 config_value 不能为空"
+            )
+        await _create_config_flow_config_impl(user_id, data)
         return jsonify({"message": "创建配置流配置成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except IntegrityError as e:
         logger.error(f"创建配置流配置失败 - 数据库完整性错误: {traceback.format_exc()}")
-        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-        if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
-            return jsonify({"status": 500, "message": "创建配置流配置失败：ID冲突，请稍后重试"}), 500
-        return jsonify({"status": 500, "message": f"创建配置流配置失败：{error_msg}"}), 500
+        error_msg = str(e.orig) if hasattr(e, "orig") else str(e)
+        if (
+            "duplicate key" in error_msg.lower()
+            or "unique constraint" in error_msg.lower()
+        ):
+            return jsonify(
+                {"status": 500, "message": "创建配置流配置失败：ID冲突，请稍后重试"}
+            ), 500
+        return jsonify(
+            {"status": 500, "message": f"创建配置流配置失败：{error_msg}"}
+        ), 500
     except Exception as e:
         traceback.print_exc()
         logger.error(f"创建配置流配置失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "创建配置流配置失败"}), 500
+        return response_helper.server_error("创建配置流配置失败")
 
 
 @api_industry_bp.route("/modifyConfigFlowConfig", methods=["POST"])
@@ -1412,7 +1543,9 @@ async def modify_config_flow_config():
         if user_roles:
             for role in user_roles:
                 try:
-                    descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                    descendant_roles = (
+                        await permission_manager.get_all_descendant_roles(role)
+                    )
                     if descendant_roles:
                         all_roles.update(descendant_roles)
                 except Exception as e:
@@ -1422,20 +1555,24 @@ async def modify_config_flow_config():
         is_admin = "admin" in all_roles
         if is_admin and "user_name" in data:
             user_id = data["user_name"]
-            logger.info(f"管理员 {current_user_id} 修改用户 {user_id} 的配置流配置: {data}")
+            logger.info(
+                f"管理员 {current_user_id} 修改用户 {user_id} 的配置流配置: {data}"
+            )
         else:
             user_id = current_user_id
             logger.info(f"修改配置流配置: {data}")
 
-        await IndustryManager.modify_config_flow_config(user_id, data, is_admin=is_admin)
+        await modify_config_flow(
+            user_id, data, is_admin=is_admin
+        )
         return jsonify({"message": "修改配置流配置成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"修改配置流配置失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "修改配置流配置失败"}), 500
+        return response_helper.server_error("修改配置流配置失败")
 
 
 @api_industry_bp.route("/fetchRecommendedPresets", methods=["GET"])
@@ -1475,8 +1612,8 @@ async def fetch_recommended_presets():
     preset_name = "default_bp_and_material"
 
     try:
-        stats = await IndustryManager.fetch_recommended_presets(user_id, preset_name)
-        await IndustryManager.create_default_config_flow_preset(user_id)
+        stats = await _fetch_recommended_presets_impl(user_id, preset_name)
+        await create_default_config_flow_preset(user_id)
         created_count = stats.get("created", 0)
         existing_count = stats.get("existing", 0)
 
@@ -1486,11 +1623,11 @@ async def fetch_recommended_presets():
         return jsonify({"data": stats, "status": 200, "message": message})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"拉取推荐预设失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "拉取推荐预设失败"}), 500
+        return response_helper.server_error("拉取推荐预设失败")
 
 
 @api_industry_bp.route("/deleteConfigFlowConfig", methods=["POST"])
@@ -1540,7 +1677,9 @@ async def delete_config_flow_config():
         if user_roles:
             for role in user_roles:
                 try:
-                    descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                    descendant_roles = (
+                        await permission_manager.get_all_descendant_roles(role)
+                    )
                     if descendant_roles:
                         all_roles.update(descendant_roles)
                 except Exception as e:
@@ -1549,17 +1688,19 @@ async def delete_config_flow_config():
         user_id = current_user_id
         if is_admin and "user_name" in data:
             user_id = data["user_name"]
-            logger.info(f"管理员 {current_user_id} 删除用户 {user_id} 的配置流配置: {data}")
+            logger.info(
+                f"管理员 {current_user_id} 删除用户 {user_id} 的配置流配置: {data}"
+            )
 
-        await IndustryManager.delete_config_flow_config(user_id, data)
+        await _delete_config_flow_config_impl(user_id, data)
         return jsonify({"message": "删除配置流配置成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"删除配置流配置失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "删除配置流配置失败"}), 500
+        return response_helper.server_error("删除配置流配置失败")
 
 
 @api_industry_bp.route("/getConfigFlowConfigList", methods=["GET"])
@@ -1603,7 +1744,9 @@ async def get_config_flow_config_list():
         if user_roles:
             for role in user_roles:
                 try:
-                    descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                    descendant_roles = (
+                        await permission_manager.get_all_descendant_roles(role)
+                    )
                     if descendant_roles:
                         all_roles.update(descendant_roles)
                 except Exception as e:
@@ -1620,16 +1763,19 @@ async def get_config_flow_config_list():
             user_id = requested_user_name
             logger.info(f"管理员 {current_user_id} 获取用户 {user_id} 的配置流配置列表")
 
-        config_flow_config_list = await IndustryManager.get_config_flow_config_list(user_id)
+        config_flow_config_list = await _get_config_flow_config_list_impl(
+            user_id
+        )
         config_flow_config_list.sort(key=lambda x: x["config_type"])
         return jsonify({"data": config_flow_config_list, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取配置流配置列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取配置流配置列表失败"}), 500
+        return response_helper.server_error("获取配置流配置列表失败")
+
 
 # 添加配置到计划
 
@@ -1683,7 +1829,9 @@ async def add_config_to_plan():
         if user_roles:
             for role in user_roles:
                 try:
-                    descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                    descendant_roles = (
+                        await permission_manager.get_all_descendant_roles(role)
+                    )
                     if descendant_roles:
                         all_roles.update(descendant_roles)
                 except Exception as e:
@@ -1694,17 +1842,19 @@ async def add_config_to_plan():
         if is_admin and "user_name" in data:
             user_id = data["user_name"]
             logger.info(
-                f"管理员 {current_user_id} 添加配置到用户 {user_id} 的计划 {data.get('plan_name')}")
+                f"管理员 {current_user_id} 添加配置到用户 {user_id} 的计划 {data.get('plan_name')}"
+            )
 
-        await IndustryManager.add_config_to_plan(user_id, data)
+        await _add_config_to_plan_impl(user_id, data)
         return jsonify({"message": "添加配置到计划成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"添加配置到计划失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "添加配置到计划失败"}), 500
+        return response_helper.server_error("添加配置到计划失败")
+
 
 # 获取计划配置流列表
 
@@ -1756,7 +1906,9 @@ async def get_config_flow_list():
         if user_roles:
             for role in user_roles:
                 try:
-                    descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                    descendant_roles = (
+                        await permission_manager.get_all_descendant_roles(role)
+                    )
                     if descendant_roles:
                         all_roles.update(descendant_roles)
                 except Exception as e:
@@ -1767,9 +1919,12 @@ async def get_config_flow_list():
         if is_admin and "user_name" in data:
             user_id = data["user_name"]
             logger.info(
-                f"管理员 {current_user_id} 获取用户 {user_id} 的计划配置流: {data['plan_name']}")
+                f"管理员 {current_user_id} 获取用户 {user_id} 的计划配置流: {data['plan_name']}"
+            )
 
-        config_flow_list = await IndustryManager.get_config_flow_list(user_id, data["plan_name"])
+        config_flow_list = await _get_config_flow_list_impl(
+            user_id, data["plan_name"]
+        )
         logger.info(
             f"获取计划配置流完成: operator={current_user_id}, target={user_id}, "
             f"plan_name={data['plan_name']}, 配置条目数={len(config_flow_list)}"
@@ -1778,11 +1933,12 @@ async def get_config_flow_list():
         return jsonify({"data": config_flow_list, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取配置流列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取配置流列表失败"}), 500
+        return response_helper.server_error("获取配置流列表失败")
+
 
 # 保存计划配置流
 
@@ -1838,16 +1994,20 @@ async def save_config_flow_to_plan():
 
         if not isinstance(data, dict):
             logger.warning("[saveConfigFlowToPlan] 请求体不是JSON对象")
-            return jsonify({"status": 400, "message": "请求体必须是JSON对象"}), 400
+            return response_helper.bad_request("请求体必须是JSON对象")
         if not current_user_id:
-            logger.warning("[saveConfigFlowToPlan] 当前用户信息缺失，token可能无user_id")
-            return jsonify({"status": 401, "message": "用户认证信息无效"}), 401
+            logger.warning(
+                "[saveConfigFlowToPlan] 当前用户信息缺失，token可能无user_id"
+            )
+            return response_helper.unauthorized("用户认证信息无效")
         if "plan_name" not in data:
             logger.warning("[saveConfigFlowToPlan] 缺少必填参数 plan_name")
-            return jsonify({"status": 400, "message": "缺少参数 plan_name"}), 400
+            return response_helper.bad_request("缺少参数 plan_name")
         if "config_list" not in data or not isinstance(data["config_list"], list):
             logger.warning("[saveConfigFlowToPlan] 缺少或非法参数 config_list")
-            return jsonify({"status": 400, "message": "缺少参数 config_list 或类型错误"}), 400
+            return jsonify(
+                {"status": 400, "message": "缺少参数 config_list 或类型错误"}
+            ), 400
 
         # 检查用户是否有admin角色
         user_roles = await permission_manager.get_user_roles(current_user_id)
@@ -1856,7 +2016,9 @@ async def save_config_flow_to_plan():
         if user_roles:
             for role in user_roles:
                 try:
-                    descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                    descendant_roles = (
+                        await permission_manager.get_all_descendant_roles(role)
+                    )
                     if descendant_roles:
                         all_roles.update(descendant_roles)
                 except Exception as e:
@@ -1867,11 +2029,12 @@ async def save_config_flow_to_plan():
         if is_admin and "user_name" in data:
             user_id = data["user_name"]
             logger.info(
-                f"管理员 {current_user_id} 保存用户 {user_id} 的计划配置流: {data['plan_name']}")
+                f"管理员 {current_user_id} 保存用户 {user_id} 的计划配置流: {data['plan_name']}"
+            )
         else:
             user_id = current_user_id
 
-        await IndustryManager.save_config_flow_to_plan(user_id, data["plan_name"], data)
+        await _save_config_flow_to_plan_impl(user_id, data["plan_name"], data)
         logger.info(
             f"[saveConfigFlowToPlan] 保存成功 operator={current_user_id}, target={user_id}, "
             f"plan_name={data['plan_name']}, config_count={len(data['config_list'])}"
@@ -1880,11 +2043,12 @@ async def save_config_flow_to_plan():
     except KahunaException as e:
         traceback.print_exc()
         logger.error(f"[saveConfigFlowToPlan] 业务异常: {str(e)}", exc_info=True)
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"[saveConfigFlowToPlan] 未知异常: {str(e)}", exc_info=True)
-        return jsonify({"status": 500, "message": "保存配置流失败"}), 500
+        return response_helper.server_error("保存配置流失败")
+
 
 # 保存配置流预设
 
@@ -1933,15 +2097,16 @@ async def save_config_flow_preset():
     try:
         preset_name = data["preset_name"]
         config_list = data["config_list"]
-        await IndustryManager.save_config_flow_preset(user_id, preset_name, config_list)
+        await _save_config_flow_preset_impl(user_id, preset_name, config_list)
         return jsonify({"message": "保存预设成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"保存预设失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "保存预设失败"}), 500
+        return response_helper.server_error("保存预设失败")
+
 
 # 获取用户所有预设
 
@@ -1977,15 +2142,16 @@ async def get_config_flow_presets():
     user_id = g.current_user["user_id"]
 
     try:
-        presets = await IndustryManager.get_config_flow_presets(user_id)
+        presets = await _get_config_flow_presets_impl(user_id)
         return jsonify({"data": presets, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取预设列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取预设列表失败"}), 500
+        return response_helper.server_error("获取预设列表失败")
+
 
 # 加载预设到计划
 
@@ -2034,15 +2200,16 @@ async def load_config_flow_preset():
     try:
         preset_id = data["preset_id"]
         plan_name = data["plan_name"]
-        await IndustryManager.load_config_flow_preset(user_id, preset_id, plan_name)
+        await _load_config_flow_preset_impl(user_id, preset_id, plan_name)
         return jsonify({"message": "加载预设成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"加载预设失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "加载预设失败"}), 500
+        return response_helper.server_error("加载预设失败")
+
 
 # 删除预设
 
@@ -2088,15 +2255,16 @@ async def delete_config_flow_preset():
 
     try:
         preset_id = data["preset_id"]
-        await IndustryManager.delete_config_flow_preset(user_id, preset_id)
+        await _delete_config_flow_preset_impl(user_id, preset_id)
         return jsonify({"message": "删除预设成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"删除预设失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "删除预设失败"}), 500
+        return response_helper.server_error("删除预设失败")
+
 
 # 更新预设名称
 
@@ -2145,15 +2313,18 @@ async def update_config_flow_preset_name():
     try:
         preset_id = data["preset_id"]
         preset_name = data["preset_name"]
-        await IndustryManager.update_config_flow_preset_name(user_id, preset_id, preset_name)
+        await _update_config_flow_preset_name_impl(
+            user_id, preset_id, preset_name
+        )
         return jsonify({"message": "更新预设名称成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"更新预设名称失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "更新预设名称失败"}), 500
+        return response_helper.server_error("更新预设名称失败")
+
 
 # 分享预设（生成分享代码）
 
@@ -2199,15 +2370,16 @@ async def share_config_flow_preset():
 
     try:
         preset_id = data["preset_id"]
-        share_code = await IndustryManager.share_config_flow_preset(user_id, preset_id)
+        share_code = await _share_config_flow_preset_impl(user_id, preset_id)
         return jsonify({"share_code": share_code, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"分享预设失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "分享预设失败"}), 500
+        return response_helper.server_error("分享预设失败")
+
 
 # 载入分享预设
 
@@ -2255,15 +2427,24 @@ async def load_shared_config_flow_preset():
 
     try:
         share_code = data["share_code"]
-        created_configs = await IndustryManager.load_shared_config_flow_preset(user_id, share_code)
-        return jsonify({"message": f"成功载入分享预设，创建了 {len(created_configs)} 个配置", "data": created_configs, "status": 200})
+        created_configs = await _load_shared_config_flow_preset_impl(
+            user_id, share_code
+        )
+        return jsonify(
+            {
+                "message": f"成功载入分享预设，创建了 {len(created_configs)} 个配置",
+                "data": created_configs,
+                "status": 200,
+            }
+        )
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"载入分享预设失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "载入分享预设失败"}), 500
+        return response_helper.server_error("载入分享预设失败")
+
 
 # 获取预设详情（用于编辑）
 
@@ -2307,16 +2488,17 @@ async def get_config_flow_preset_detail():
 
     try:
         if not preset_id:
-            return jsonify({"status": 400, "message": "preset_id 参数不能为空"}), 400
-        detail = await IndustryManager.get_config_flow_preset_detail(user_id, preset_id)
+            return response_helper.bad_request("preset_id 参数不能为空")
+        detail = await _get_config_flow_preset_detail_impl(user_id, preset_id)
         return jsonify({"data": detail, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取预设详情失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取预设详情失败"}), 500
+        return response_helper.server_error("获取预设详情失败")
+
 
 # 保存预设配置（用于编辑）
 
@@ -2365,15 +2547,18 @@ async def save_config_flow_preset_config():
     try:
         preset_id = data["preset_id"]
         config_list = data["config_list"]
-        await IndustryManager.save_config_flow_preset_config(user_id, preset_id, config_list)
+        await _save_config_flow_preset_config_impl(
+            user_id, preset_id, config_list
+        )
         return jsonify({"message": "保存预设配置成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"保存预设配置失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "保存预设配置失败"}), 500
+        return response_helper.server_error("保存预设配置失败")
+
 
 # # 获取计划设置
 
@@ -2428,7 +2613,9 @@ async def modify_plan_settings():
         if user_roles:
             for role in user_roles:
                 try:
-                    descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                    descendant_roles = (
+                        await permission_manager.get_all_descendant_roles(role)
+                    )
                     if descendant_roles:
                         all_roles.update(descendant_roles)
                 except Exception as e:
@@ -2439,19 +2626,22 @@ async def modify_plan_settings():
         if is_admin and "user_name" in data:
             user_id = data["user_name"]
             logger.info(
-                f"管理员 {current_user_id} 修改用户 {user_id} 的计划设置: {data['plan_name']}")
+                f"管理员 {current_user_id} 修改用户 {user_id} 的计划设置: {data['plan_name']}"
+            )
         else:
             user_id = current_user_id
 
-        await IndustryManager.modify_plan_settings(user_id, data["plan_name"], data["plan_settings"])
+        await IndustryManager.modify_plan_settings(
+            user_id, data["plan_name"], data["plan_settings"]
+        )
         return jsonify({"message": "修改计划设置成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"修改计划设置失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "修改计划设置失败"}), 500
+        return response_helper.server_error("修改计划设置失败")
 
 
 @api_industry_bp.route("/deletePlan", methods=["POST"])
@@ -2462,18 +2652,18 @@ async def delete_plan():
 
     try:
         plan_name = data.get("plan_name")
-        if not plan_name:
-            return jsonify({"status": 400, "message": "计划名称不能为空"}), 400
+        if plan_name is None:
+            return response_helper.bad_request("计划名称不能为空")
 
         await IndustryManager.delete_plan(plan_name, user_id)
         return jsonify({"message": "计划删除成功", "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"删除计划失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "删除计划失败"}), 500
+        return response_helper.server_error("删除计划失败")
 
 
 @api_industry_bp.route("/getItemInfo", methods=["POST"])
@@ -2515,15 +2705,15 @@ async def get_item_info():
     data = await request.json
 
     try:
-        item_info = await IndustryManager.get_item_info(data["type_id"])
+        item_info = await _get_item_info_impl(data["type_id"])
         return jsonify({"data": item_info, "status": 200})
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取物品信息失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取物品信息失败"}), 500
+        return response_helper.server_error("获取物品信息失败")
 
 
 @api_industry_bp.route("/getLaborForceData", methods=["POST"])
@@ -2568,11 +2758,11 @@ async def get_labor_force_data():
         return jsonify({"data": "获取劳动力数据成功", "status": 200}), 200
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取劳动力数据失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取劳动力数据失败"}), 500
+        return response_helper.server_error("获取劳动力数据失败")
 
 
 @api_industry_bp.route("/getCompressedAsteroidData", methods=["POST"])
@@ -2599,6 +2789,7 @@ async def get_compressed_asteroid_data():
         - quantity_mode (string, optional): 数量模式，默认"缺失"
         - liquidity_impact (number, optional): 收单流动性溢价系数，默认0.0
         - purchase_time_limit (integer, optional): 采购时间上限（天），默认7
+        - market_supply_ratio (number, optional): 市场供给比例（仅扫单模式），默认1.0。将市场挂单量乘以此系数作为购买上限，取值范围0.0～1.0
         - shipping_cost_per_volume (number, optional): 运费设置（isk/立方），默认0.0
 
     Responses:
@@ -2641,24 +2832,41 @@ async def get_compressed_asteroid_data():
         }
     """
     data = await request.json
-    mineral_data = data.get('mineral_data', [])
-    waste_penalty = data.get('waste_penalty', 0.1)  # 浪费惩罚系数，默认0.1
-    shortage_penalty = data.get('shortage_penalty', 0.5)  # 不足惩罚系数，默认0.5
-    refinement_rate = data.get('refinement_rate', 0.906)  # 化矿率，默认0.906
-    purchase_mode = data.get('purchase_mode', '扫单')  # 采购模式，默认扫单
-    quantity_mode = data.get('quantity_mode', '缺失')  # 数量模式，默认缺失
-    liquidity_impact = data.get('liquidity_impact', 0.0)  # 收单流动性溢价系数，默认0（不启用）
-    purchase_time_limit = data.get('purchase_time_limit', 7)  # 采购时间上限（天），默认7天
+    mineral_data = data.get("mineral_data", [])
+    waste_penalty = data.get("waste_penalty", 0.1)  # 浪费惩罚系数，默认0.1
+    shortage_penalty = data.get("shortage_penalty", 0.5)  # 不足惩罚系数，默认0.5
+    refinement_rate = data.get("refinement_rate", 0.906)  # 化矿率，默认0.906
+    purchase_mode = data.get("purchase_mode", "扫单")  # 采购模式，默认扫单
+    quantity_mode = data.get("quantity_mode", "缺失")  # 数量模式，默认缺失
+    liquidity_impact = data.get(
+        "liquidity_impact", 0.0
+    )  # 收单流动性溢价系数，默认0（不启用）
+    purchase_time_limit = data.get(
+        "purchase_time_limit", 7
+    )  # 采购时间上限（天），默认7天
+    market_supply_ratio = data.get(
+        "market_supply_ratio", 1.0
+    )  # 市场供给比例，默认1.0（100%），仅扫单模式生效
     shipping_cost_per_volume = data.get(
-        'shipping_cost_per_volume', 0.0)  # 运费设置，单位为isk/立方，默认0
+        "shipping_cost_per_volume", 0.0
+    )  # 运费设置，单位为isk/立方，默认0
+    allow_direct_mineral_purchase = data.get(
+        "allow_direct_mineral_purchase", True
+    )  # 是否允许直接购买矿物，默认允许
+    output_value_reward_rate = data.get(
+        "output_value_reward_rate", 0.0
+    )  # 产出价值奖励系数，默认0.0
+    blacklist = data.get("blacklist", [])  # 矿石黑名单 type_id 列表
     user_id = g.current_user["user_id"]
 
-    logger.info(f"获取压缩矿数据: {mineral_data}, waste_penalty: {waste_penalty}, shortage_penalty: {shortage_penalty}, refinement_rate: {refinement_rate}, purchase_mode: {purchase_mode}, quantity_mode: {quantity_mode}")
+    logger.info(
+        f"获取压缩矿数据: {mineral_data}, waste_penalty: {waste_penalty}, shortage_penalty: {shortage_penalty}, refinement_rate: {refinement_rate}, purchase_mode: {purchase_mode}, quantity_mode: {quantity_mode}"
+    )
     try:
         # 验证输入数据
         if not isinstance(mineral_data, list):
             logger.error(f"mineral_data 必须是数组: {mineral_data}")
-            return jsonify({"status": 400, "message": "mineral_data 必须是数组"}), 400
+            return response_helper.bad_request("mineral_data 必须是数组")
 
         # 如果 mineral_data 为空数组，返回空数据标识
         if len(mineral_data) == 0:
@@ -2671,7 +2879,7 @@ async def get_compressed_asteroid_data():
                 "total_excess_price": 0,
                 "mineral_purchases_res": {},
                 "total_mineral_cost": 0,
-                "is_empty": True  # 标识为空数据
+                "is_empty": True,  # 标识为空数据
             }
             return jsonify({"data": empty_data, "status": 200}), 200
 
@@ -2680,12 +2888,12 @@ async def get_compressed_asteroid_data():
         # mineral_requirements 格式: {mineral_id: required_quantity}
         mineral_requirements = {}
         for mineral in mineral_data:
-            mineral_id = mineral.get('type_id')
+            mineral_id = mineral.get("type_id")
             # 根据数量模式选择使用 quantity 或 real_quantity
-            if quantity_mode == '缺失':
-                quantity = mineral.get('real_quantity', 0)
+            if quantity_mode == "缺失":
+                quantity = mineral.get("real_quantity", 0)
             else:
-                quantity = mineral.get('quantity', 0)
+                quantity = mineral.get("quantity", 0)
 
             if not mineral_id:
                 logger.warning(f"跳过无效的矿物数据: {mineral}")
@@ -2708,7 +2916,7 @@ async def get_compressed_asteroid_data():
                 "total_excess_price": 0,
                 "mineral_purchases_res": {},
                 "total_mineral_cost": 0,
-                "is_empty": True  # 标识为空数据
+                "is_empty": True,  # 标识为空数据
             }
             return jsonify({"data": empty_data, "status": 200}), 200
 
@@ -2722,22 +2930,27 @@ async def get_compressed_asteroid_data():
         result = await compressed_asteroid_utils.optimize(
             mineral_requirements=mineral_requirements,
             waste_penalty=waste_penalty,
-            shortage_penalty=shortage_penalty,
             refinement_rate=refinement_rate,
             purchase_mode=purchase_mode,
             liquidity_impact=liquidity_impact,
             purchase_time_limit=purchase_time_limit,
+            market_supply_ratio=market_supply_ratio,
             shipping_cost_per_volume=shipping_cost_per_volume,
+            allow_direct_mineral_purchase=allow_direct_mineral_purchase,
+            output_value_reward_rate=output_value_reward_rate,
+            blacklist=blacklist,
         )
-        if result.get('status') != 'Optimal':
+        if result.get("status") != "Optimal":
             logger.error(f"优化失败: {result.get('status')}")
-            return jsonify({"status": 500, "message": "优化失败，请放宽限制条件。"}), 500
+            return jsonify(
+                {"status": 500, "message": "优化失败，请放宽限制条件。"}
+            ), 500
 
-        solution = result.get('solution') or {}
-        asteroid_purchases = solution.get('ore_purchases') or {}
-        excess_minerals = solution.get('excess_minerals') or {}
-        shortage_minerals = solution.get('shortage_minerals') or {}
-        ore_price_details = solution.get('ore_price_details') or {}
+        solution = result.get("solution") or {}
+        asteroid_purchases = solution.get("ore_purchases") or {}
+        excess_minerals = solution.get("excess_minerals") or {}
+        shortage_minerals = solution.get("shortage_minerals") or {}
+        ore_price_details = solution.get("ore_price_details") or {}
 
         purcheses_res = {}
         total_cost = 0.0  # 基准总成本（用于前端展示）
@@ -2745,21 +2958,28 @@ async def get_compressed_asteroid_data():
 
         for ore_id, quantity in asteroid_purchases.items():
             volume = await SdeUtils.get_volume_by_type_id(ore_id)
-            price_detail = ore_price_details.get(
-                ore_id, {}) if isinstance(ore_price_details, dict) else {}
+            price_detail = (
+                ore_price_details.get(ore_id, {})
+                if isinstance(ore_price_details, dict)
+                else {}
+            )
 
             # 溢价前单价（基准价），若不存在则退化为当前单价
-            unit_price_final = float(price_detail.get('unit_price', 0) or 0)
-            base_unit_price = float(price_detail.get(
-                'base_unit_price', unit_price_final) or 0)
-            liquidity_premium_rate = float(price_detail.get(
-                'liquidity_premium_rate', 0.0) or 0.0)
+            unit_price_final = float(price_detail.get("unit_price", 0) or 0)
+            base_unit_price = float(
+                price_detail.get("base_unit_price", unit_price_final) or 0
+            )
+            liquidity_premium_rate = float(
+                price_detail.get("liquidity_premium_rate", 0.0) or 0.0
+            )
 
             # 基准总价用于展示
             total_price_base = base_unit_price * float(quantity or 0)
             # 含溢价总价用于内部参考或后续展示
-            total_price_with_liquidity = float(price_detail.get(
-                'total_price', unit_price_final * float(quantity or 0)) or 0)
+            total_price_with_liquidity = float(
+                price_detail.get("total_price", unit_price_final * float(quantity or 0))
+                or 0
+            )
 
             purcheses_res[ore_id] = {
                 "quantity": quantity,
@@ -2781,23 +3001,25 @@ async def get_compressed_asteroid_data():
         # 处理直接购买的矿物
         mineral_purchases_res = {}
         total_mineral_cost = 0
-        direct_mineral_purchases = solution.get(
-            'direct_mineral_purchases') or {}
-        mineral_price_details = solution.get('mineral_price_details') or {}
+        direct_mineral_purchases = solution.get("direct_mineral_purchases") or {}
+        mineral_price_details = solution.get("mineral_price_details") or {}
 
         for mineral_id, quantity in direct_mineral_purchases.items():
-            if isinstance(mineral_price_details, dict) and mineral_id in mineral_price_details:
+            if (
+                isinstance(mineral_price_details, dict)
+                and mineral_id in mineral_price_details
+            ):
                 price_detail = mineral_price_details.get(mineral_id, {}) or {}
                 volume = await SdeUtils.get_volume_by_type_id(mineral_id)
                 mineral_purchases_res[mineral_id] = {
                     "quantity": quantity,
-                    "total_price": price_detail.get('total_price', 0),
+                    "total_price": price_detail.get("total_price", 0),
                     "name": await SdeUtils.get_name_by_id(mineral_id),
                     "name_zh": await SdeUtils.get_cn_name_by_id(mineral_id),
-                    "avrprice": price_detail.get('unit_price', 0),
+                    "avrprice": price_detail.get("unit_price", 0),
                     "volume": volume if volume is not None else 0.0,
                 }
-                total_mineral_cost += price_detail.get('total_price', 0)
+                total_mineral_cost += price_detail.get("total_price", 0)
 
         excess_minerals_res = {}
         total_excess_price = 0
@@ -2808,7 +3030,9 @@ async def get_compressed_asteroid_data():
                 "name_zh": await SdeUtils.get_cn_name_by_id(mineral_id),
                 "price": await MarketManager().get_jita_buy_price(mineral_id),
             }
-            total_excess_price += quantity * await MarketManager().get_jita_buy_price(mineral_id)
+            total_excess_price += quantity * await MarketManager().get_jita_buy_price(
+                mineral_id
+            )
 
         # 处理不足矿物数据
         shortage_minerals_res = {}
@@ -2824,7 +3048,8 @@ async def get_compressed_asteroid_data():
         # 计算每种矿石的矿物产出
         mineral_yields = {}
         refinement_rate = getattr(
-            compressed_asteroid_utils, "_refinement_rate", refinement_rate)
+            compressed_asteroid_utils, "_refinement_rate", refinement_rate
+        )
 
         # 遍历购买的矿石
         for ore_id, quantity in asteroid_purchases.items():
@@ -2832,8 +3057,10 @@ async def get_compressed_asteroid_data():
                 continue
 
             # 获取该矿石产出的所有矿物
-            type_material_dict = getattr(
-                compressed_asteroid_utils, "_type_material_data_dict", None) or {}
+            type_material_dict = (
+                getattr(compressed_asteroid_utils, "_type_material_data_dict", None)
+                or {}
+            )
             ore_mineral_yields = type_material_dict.get(ore_id, {})
             if not ore_mineral_yields:
                 continue
@@ -2848,12 +3075,10 @@ async def get_compressed_asteroid_data():
                     contribution = quantity * mineral_yield * refinement_rate
                 else:
                     # 标准/卫星矿石：mineral_yield 是基于100份的产出
-                    contribution = quantity * \
-                        (mineral_yield / 100) * refinement_rate
+                    contribution = quantity * (mineral_yield / 100) * refinement_rate
                 yield_quantity = math.floor(contribution)
                 quantity_needed = mineral_requirements.get(mineral_id, 0)
-                mineral_yields[ore_id][mineral_id] = [
-                    yield_quantity, quantity_needed]
+                mineral_yields[ore_id][mineral_id] = [yield_quantity, quantity_needed]
 
         logger.info(f"优化结果状态: {result.get('status')}")
 
@@ -2880,11 +3105,11 @@ async def get_compressed_asteroid_data():
     except KahunaException as e:
         traceback.print_exc()
         logger.error(f"获取压缩矿数据失败 (KahunaException): {str(e)}")
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取压缩矿数据失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取压缩矿数据失败"}), 500
+        return response_helper.server_error("获取压缩矿数据失败")
 
 
 @api_industry_bp.route("/syncPermissionToPlanConfig", methods=["POST"])
@@ -2938,7 +3163,9 @@ async def sync_permission_to_plan_config():
     if user_roles:
         for role in user_roles:
             try:
-                descendant_roles = await permission_manager.get_all_descendant_roles(role)
+                descendant_roles = await permission_manager.get_all_descendant_roles(
+                    role
+                )
                 if descendant_roles:
                     all_roles.update(descendant_roles)
             except Exception as e:
@@ -2954,12 +3181,15 @@ async def sync_permission_to_plan_config():
 
     try:
         # 1. 获取当前用户的容器许可列表
-        container_permissions = await IndustryManager.get_user_all_container_permission(user_id)
+        container_permissions = await _get_user_all_container_permission_impl(
+            user_id
+        )
 
         # 2. 获取当前用户的配置流配置列表，筛选出 LoadAssetConf 类型
-        all_configs = await IndustryManager.get_config_flow_config_list(user_id)
+        all_configs = await _get_config_flow_config_list_impl(user_id)
         load_asset_configs = [
-            config for config in all_configs if config["config_type"] == "LoadAssetConf"]
+            config for config in all_configs if config["config_type"] == "LoadAssetConf"
+        ]
 
         # 3. 建立映射关系
         # 访问许可的 (user_id, asset_container_id, asset_owner_id, location_flag) -> 访问许可对象
@@ -2990,12 +3220,13 @@ async def sync_permission_to_plan_config():
                 # 创建新的 LoadAssetConf 配置
                 config_data = {
                     "config_type": "LoadAssetConf",
-                    "config_value": permission  # 使用访问许可的完整数据结构
+                    "config_value": permission,  # 使用访问许可的完整数据结构
                 }
-                await IndustryManager.create_config_flow_config(user_id, config_data)
+                await _create_config_flow_config_impl(user_id, config_data)
                 created_count += 1
                 logger.info(
-                    f"创建 LoadAssetConf 配置: container_id={permission.get('asset_container_id')}, owner_id={permission.get('asset_owner_id')}")
+                    f"创建 LoadAssetConf 配置: container_id={permission.get('asset_container_id')}, owner_id={permission.get('asset_owner_id')}"
+                )
 
         # 5. 找出需要更新 tag 的配置（匹配但 tag 不一致）
         updated_count = 0
@@ -3004,8 +3235,9 @@ async def sync_permission_to_plan_config():
                 config = config_key_map[key]
                 config_value = config.get("config_value", {})
                 permission_tag = permission.get("tag")
-                config_tag = config_value.get(
-                    "tag") or config_value.get("container_tag")
+                config_tag = config_value.get("tag") or config_value.get(
+                    "container_tag"
+                )
 
                 # 如果 tag 不一致，更新配置
                 if permission_tag != config_tag:
@@ -3018,41 +3250,315 @@ async def sync_permission_to_plan_config():
                     # 使用 modifyConfigFlowConfig 更新配置
                     modify_data = {
                         "config_id": config["config_id"],
-                        "config_value": updated_config_value
+                        "config_value": updated_config_value,
                     }
-                    await IndustryManager.modify_config_flow_config(user_id, modify_data, is_admin=is_admin)
+                    await modify_config_flow(
+                        user_id, modify_data, is_admin=is_admin
+                    )
                     updated_count += 1
                     logger.info(
-                        f"更新 LoadAssetConf 配置 tag: container_id={permission.get('asset_container_id')}, owner_id={permission.get('asset_owner_id')}, old_tag={config_tag}, new_tag={permission_tag}")
+                        f"更新 LoadAssetConf 配置 tag: container_id={permission.get('asset_container_id')}, owner_id={permission.get('asset_owner_id')}, old_tag={config_tag}, new_tag={permission_tag}"
+                    )
 
         # 6. 找出需要删除的配置（配置有但访问许可没有）
         deleted_count = 0
         for key, config in config_key_map.items():
             if key not in permission_key_map:
                 # 删除该配置
-                delete_data = {
-                    "config_id": config["config_id"]
-                }
-                await IndustryManager.delete_config_flow_config(user_id, delete_data)
+                delete_data = {"config_id": config["config_id"]}
+                await _delete_config_flow_config_impl(user_id, delete_data)
                 deleted_count += 1
                 config_value = config.get("config_value", {})
                 logger.info(
-                    f"删除 LoadAssetConf 配置: container_id={config_value.get('asset_container_id')}, owner_id={config_value.get('asset_owner_id')}, config_id={config['config_id']}")
+                    f"删除 LoadAssetConf 配置: container_id={config_value.get('asset_container_id')}, owner_id={config_value.get('asset_owner_id')}, config_id={config['config_id']}"
+                )
 
         message = f"同步完成：创建 {created_count} 个配置，更新 {updated_count} 个配置，删除 {deleted_count} 个配置"
-        return jsonify({
-            "message": message,
-            "data": {
-                "created": created_count,
-                "updated": updated_count,
-                "deleted": deleted_count
-            },
-            "status": 200
-        })
+        return jsonify(
+            {
+                "message": message,
+                "data": {
+                    "created": created_count,
+                    "updated": updated_count,
+                    "deleted": deleted_count,
+                },
+                "status": 200,
+            }
+        )
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"同步许可到计划配置失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "同步许可到计划配置失败"}), 500
+        return response_helper.server_error("同步许可到计划配置失败")
+
+
+# ============ 工作流实施标记功能 ============
+
+
+@api_industry_bp.route("/plan/<plan_name>/workflow/implementations", methods=["GET"])
+@auth_required
+async def get_workflow_implementations(plan_name: str):
+    """
+    获取工作流实施标记状态
+
+    获取指定计划和计算周期的实施标记状态。
+
+    Tags:
+        - EVE工业管理 - 工作流实施标记
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - plan_name (path): 计划名称
+        - calculation_id (query): 计算周期ID
+
+    Responses:
+        200: 成功返回实施状态列表
+            - status: 状态码 (200)
+            - data: 实施状态数据
+                - calculation_id: 计算周期ID
+                - items: 实施标记项列表
+                - last_modified: 最后修改时间
+        404: 计划不存在
+        500: 服务器错误
+    """
+    current_user_id = g.current_user["user_id"]
+    calculation_id = request.args.get("calculation_id", type=int)
+
+    if not calculation_id:
+        return response_helper.bad_request("缺少 calculation_id 参数")
+
+    try:
+        # 查询该计划的所有实施标记（封装模块内实现）
+        implementations = await EveIndustryPlanTaskImplementationDBUtils.select_by_user_plan_calculation(
+            current_user_id, plan_name, calculation_id
+        )
+
+        items = []
+        last_modified = None
+
+        for impl in implementations:
+            items.append(
+                {
+                    "workflow_item_key": impl.workflow_item_key,
+                    "implemented": impl.implemented,
+                    "runs_implemented": impl.runs_implemented,
+                    "modified_at": impl.modified_at.isoformat() + "Z"
+                    if impl.modified_at
+                    else None,
+                }
+            )
+            if impl.modified_at:
+                if last_modified is None or impl.modified_at > last_modified:
+                    last_modified = impl.modified_at
+
+        return jsonify(
+            {
+                "status": 200,
+                "data": {
+                    "calculation_id": calculation_id,
+                    "items": items,
+                    "last_modified": last_modified.isoformat()
+                    if last_modified
+                    else None,
+                },
+            }
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        logger.error(f"获取工作流实施标记失败: {traceback.format_exc()}")
+        return response_helper.server_error("获取工作流实施标记失败")
+
+
+@api_industry_bp.route(
+    "/plan/<plan_name>/workflow/implementations/sync", methods=["POST"]
+)
+@auth_required
+async def sync_workflow_implementations(plan_name: str):
+    """
+    同步工作流实施标记
+
+    批量同步客户端的实施标记到服务器，处理冲突。
+
+    Tags:
+        - EVE工业管理 - 工作流实施标记
+
+    Security:
+        - Bearer: []
+
+    Parameters:
+        - plan_name (path): 计划名称
+
+    Request Body:
+        - calculation_id (integer, required): 计算周期ID
+        - items (array, required): 实施标记项列表
+            - workflow_item_key (string): 工作流项唯一标识
+            - implemented (boolean): 是否已实施
+            - runs_implemented (integer): 已实施的运行次数（可选）
+            - modified_at (string): 修改时间（ISO格式）
+        - deleted_keys (array, optional): 待删除的项key列表
+
+    Responses:
+        200: 同步成功
+            - status: 状态码 (200)
+            - server_time: 服务器时间
+            - conflicts: 冲突列表（如果有）
+            - server_only_items: 服务器独有的项（需要合并到本地）
+        500: 服务器错误
+    """
+    current_user_id = g.current_user["user_id"]
+    data = await request.json
+
+    calculation_id = data.get("calculation_id")
+    client_items = data.get("items", [])
+    deleted_keys = data.get("deleted_keys", [])
+
+    if not calculation_id:
+        return response_helper.bad_request("缺少 calculation_id 参数")
+
+    try:
+        # 事务性同步实施标记（封装模块内完成查询/新增/更新/删除/冲突检测，单会话原子提交）
+        conflicts, server_only_items = await EveIndustryPlanTaskImplementationDBUtils.sync_implementations(
+            current_user_id,
+            plan_name,
+            calculation_id,
+            client_items,
+            deleted_keys,
+            parse_naive_utc_datetime,
+        )
+
+        return jsonify(
+            {
+                "status": 200,
+                "server_time": datetime.datetime.utcnow().isoformat(),
+                "conflicts": conflicts,
+                "server_only_items": server_only_items,
+            }
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        logger.error(f"同步工作流实施标记失败: {traceback.format_exc()}")
+        return response_helper.server_error("同步工作流实施标记失败")
+
+
+@api_industry_bp.post("/getBpRequirementViewData")
+@auth_required
+async def get_bp_requirement_view_data():
+    """获取蓝图需求视图数据。
+
+    从 Redis 缓存的 work_flow 中筛选 bp_object.fake 条目，
+    聚合展示缺失蓝图汇总、BPC 拷贝需求和 T2→T1 发明源。
+
+    Request Body:
+        - plan_name (string, required): 计划名称
+        - user_name (string, optional): 管理员查看他人计划时指定
+
+    Responses:
+        200: 成功
+            - status: 200
+            - data.cache_hit: bool
+            - data.missing_blueprint_sheet_count: int
+            - data.missing_workflow_runs_count: int
+            - data.missing_blueprint_workflow: array
+        400: plan_name 为空
+        403: 普通用户尝试查看他人计划
+        500: 服务器错误
+    """
+    try:
+        data = await request.get_json()
+        plan_name = data.get("plan_name", "").strip()
+        if not plan_name:
+            return jsonify({"status": 400, "message": "plan_name 不能为空"}), 400
+
+        # 身份一律取当前登录用户；请求体里的 user_name 只有管理员可用于代查他人计划
+        # （安全审计 #18：Quart 的 request 没有 user_name 属性会直接抛 AttributeError，
+        #   且不能让请求参数直接替换身份，否则任何登录用户都能读他人的缓存结果）
+        current_user_name = g.current_user["user_id"]
+
+        target_user_name = data.get("user_name")
+        user_name = current_user_name
+        if target_user_name and target_user_name != current_user_name:
+            if not await is_admin_user(current_user_name):
+                logger.warning(
+                    f"用户 {current_user_name} 尝试查看用户 {target_user_name} 的蓝图需求视图 {plan_name}，已拒绝"
+                )
+                return response_helper.forbidden("无权查看他人的工业计划")
+            user_name = target_user_name
+            logger.info(
+                f"管理员 {current_user_name} 代查用户 {user_name} 的蓝图需求视图: {plan_name}"
+            )
+
+        status_key = f"plan_calculate_status:{user_name}:{plan_name}"
+        result_key = f"plan_calculate_result:{user_name}:{plan_name}"
+
+        status_value = await rdm().r.get(status_key)
+        if isinstance(status_value, bytes):
+            status_value = status_value.decode("utf-8", errors="ignore")
+
+        if status_value != "completed":
+            return jsonify(
+                {
+                    "status": 200,
+                    "data": [],
+                    "cache_hit": False,
+                    "message": "计划计算缓存不存在或未完成",
+                }
+            )
+
+        result_data_str = await rdm().r.get(result_key)
+        if not result_data_str:
+            return jsonify(
+                {
+                    "status": 200,
+                    "data": [],
+                    "cache_hit": False,
+                    "message": "计划计算缓存不存在或未完成",
+                }
+            )
+
+        import json
+
+        result_data = (
+            json.loads(result_data_str)
+            if isinstance(result_data_str, str)
+            else result_data_str
+        )
+
+        work_flow = (
+            result_data.get("work_flow", [])
+            if isinstance(result_data, dict)
+            else []
+        )
+        if not isinstance(work_flow, list):
+            work_flow = []
+
+        missing_blueprint_workflow = await analyze_blueprint_requirements(work_flow)
+
+        missing_sheet_count = len(missing_blueprint_workflow)
+        missing_runs_count = sum(
+            node.get("runs_total", 0) for node in missing_blueprint_workflow
+        )
+
+        return jsonify(
+            {
+                "status": 200,
+                "data": {
+                    "user_name": user_name,
+                    "plan_name": plan_name,
+                    "cache_hit": True,
+                    "missing_blueprint_sheet_count": missing_sheet_count,
+                    "missing_workflow_runs_count": missing_runs_count,
+                    "missing_blueprint_workflow": missing_blueprint_workflow,
+                },
+            }
+        )
+    except Exception:
+        import traceback
+
+        logger.error(f"获取蓝图需求视图数据失败: {traceback.format_exc()}")
+        return jsonify({"status": 500, "message": "获取蓝图需求视图数据失败"})

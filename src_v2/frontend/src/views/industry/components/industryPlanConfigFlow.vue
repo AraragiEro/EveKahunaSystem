@@ -27,7 +27,19 @@ const configTypeMap = ref<{ [key: string]: string }>({
     "MaterialTagConf": "原材料标记",
     "DefaultBlueprintConf": "缺省蓝图参数",
     "LoadAssetConf": "载入库存",
-    "MaxJobSplitCountConf": "最大作业拆分控制"
+    "MaxJobSplitCountConf": "最大作业拆分控制",
+    "TaxConfig": "税收"
+})
+
+const configTypeFilters = computed(() =>
+    Object.entries(configTypeMap.value).map(([value, text]) => ({ text, value }))
+)
+
+// 配置类型多选筛选
+const selectedConfigTypes = ref<string[]>([])
+const filteredConfigList = computed(() => {
+    if (selectedConfigTypes.value.length === 0) return configFlowConfigList.value
+    return configFlowConfigList.value.filter(item => selectedConfigTypes.value.includes(item.config_type))
 })
 
 const props = defineProps<Props>()
@@ -569,14 +581,15 @@ const resetPresetEdit = async () => {
 }
 
 const sortPresetConfigList = () => {
-    // 定义6种配置类型的顺序
+    // 定义配置类型的顺序
     const configTypeOrder = [
         "StructureRigConfig",
         "StructureAssignConf",
         "MaterialTagConf",
         "DefaultBlueprintConf",
         "LoadAssetConf",
-        "MaxJobSplitCountConf"
+        "MaxJobSplitCountConf",
+        "TaxConfig"
     ]
 
     const configMap = new Map<string, PlanConfigObject[]>()
@@ -676,6 +689,10 @@ const modifyConfigForm = ref({
         max_count: 0,
         max_time_day: 0,
         max_time_date: ''
+    },
+    TaxConfig: {
+        target_category: '',
+        tax_rate: 0
     }
 })
 
@@ -772,6 +789,11 @@ const handleModifyConfigFlow = (item: PlanConfigObject) => {
                 keyword: '',
                 keyword_type: ''
             }]
+        }
+    } else if (item.config_type === 'TaxConfig') {
+        modifyConfigForm.value.TaxConfig = {
+            target_category: configValue.target_category || '',
+            tax_rate: configValue.tax_rate ?? 0
         }
     }
 
@@ -882,6 +904,8 @@ const modifyConfig = async () => {
         }
     } else if (configType === 'MaxJobSplitCountConf') {
         config_value = modifyConfigForm.value.MaxJobSplitCountConf
+    } else if (configType === 'TaxConfig') {
+        config_value = modifyConfigForm.value.TaxConfig
     }
     else {
         ElMessage.error("未找到对应的配置类型")
@@ -1015,6 +1039,10 @@ const configForm = ref({
         max_count: 0,
         max_time_day: 0,
         max_time_date: ''
+    },
+    TaxConfig: {
+        target_category: '',
+        tax_rate: 0
     }
 })
 
@@ -1085,6 +1113,8 @@ const createConfig = async () => {
         }
     } else if (createConfigType.value === 'MaxJobSplitCountConf') {
         config_value = configForm.value.MaxJobSplitCountConf
+    } else if (createConfigType.value === 'TaxConfig') {
+        config_value = configForm.value.TaxConfig
     }
     else {
         ElMessage.error("未找到对应的配置类型")
@@ -1355,6 +1385,8 @@ const formatConfigValue = (row_data: any): string => {
     } else if (row_data.config_type === 'MaxJobSplitCountConf') {
         const keywords = row_data.config_value.keyword_groups.map((group: any) => `${group.keyword}(${group.keyword_type})`).join(', ') || 'N/A'
         return `作业类型: ${keywords}, 判断类型: ${row_data.config_value.judge_type}, 最大数量: ${row_data.config_value.max_count}, 最大时间: ${row_data.config_value.max_time_day}天${row_data.config_value.max_time_date}`
+    } else if (row_data.config_type === 'TaxConfig') {
+        return `目标类别: ${row_data.config_value.target_category || 'N/A'}, 税率: ${row_data.config_value.tax_rate ?? 0}%`
     }
     else {
         return String(row_data.config_value)
@@ -1380,14 +1412,15 @@ watch(
 
 // 一键整理配置：将6种分类的配置各自聚集，但不改变每种配置各自的相对顺序
 const sortConfigFlowList = () => {
-    // 定义6种配置类型的顺序（按照 configTypeMap 中的顺序）
+    // 定义配置类型的顺序（按照 configTypeMap 中的顺序）
     const configTypeOrder = [
         "StructureRigConfig",
         "StructureAssignConf",
         "MaterialTagConf",
         "DefaultBlueprintConf",
         "LoadAssetConf",
-        "MaxJobSplitCountConf"
+        "MaxJobSplitCountConf",
+        "TaxConfig"
     ]
 
     // 使用 Map 来存储每个类型的配置数组，保持相对顺序
@@ -1448,7 +1481,8 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
     "MaterialTagConf": "#f7d095",
     "DefaultBlueprintConf": "#ffbaba",
     "LoadAssetConf": "#ffe3e3",
-    "MaxJobSplitCountConf": "#cacdd3"
+    "MaxJobSplitCountConf": "#cacdd3",
+    "TaxConfig": "#f0a58f"
 })
 </script>
 
@@ -1506,8 +1540,8 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
             </el-tooltip>
             <el-radio-group v-model="cardStyleMode" size="small" @change="handleCardStyleModeChange"
                 style="margin-left: 8px;">
-                <el-radio-button label="normal">普通</el-radio-button>
-                <el-radio-button label="compact">紧凑</el-radio-button>
+                <el-radio-button value="normal">普通</el-radio-button>
+                <el-radio-button value="compact">紧凑</el-radio-button>
             </el-radio-group>
         </div>
         <div style="flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column;">
@@ -1528,8 +1562,15 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                     拉取推荐预设
                 </el-button>
             </div>
-            <div>
-                <el-table :data="configFlowConfigList">
+            <div style="margin-bottom: 8px;">
+                <el-checkbox-group v-model="selectedConfigTypes" size="small">
+                    <el-checkbox-button v-for="item in configTypeFilters" :key="item.value" :value="item.value">
+                        {{ item.text }}
+                    </el-checkbox-button>
+                </el-checkbox-group>
+            </div>
+            <div style="flex: 1; min-height: 0; overflow: auto;">
+                <el-table :data="filteredConfigList" style="width: 100%">
                     <el-table-column label="配置类型" prop="config_type" width="150px">
                         <template #default="{ row }">
                             <el-tag
@@ -1553,18 +1594,20 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                             </el-tooltip>
                         </template>
                     </el-table-column>
-                    <el-table-column label="操作" prop="action" width="220px">
+                    <el-table-column label="操作" prop="action" width="220px" align="center">
                         <template #default="{ row }">
-                            <el-button type="default" plain @click="addConfigToPlan(row)" disabled
-                                v-if="isConfigInPlan(row.config_id)">
-                                已经存在于{{ props.selectedPlan }}
-                            </el-button>
-                            <el-button type="primary" plain @click="addConfigToPlan(row)" v-else>
-                                添加到计划{{ props.selectedPlan }}
-                            </el-button>
-                            <el-button type="danger" plain @click="deleteConfigFlowConfig(row.config_id)">
-                                删除
-                            </el-button>
+                            <div class="action-buttons">
+                                <el-button type="default" plain @click="addConfigToPlan(row)" disabled
+                                    v-if="isConfigInPlan(row.config_id)" size="small">
+                                    已存在
+                                </el-button>
+                                <el-button type="primary" plain @click="addConfigToPlan(row)" v-else size="small">
+                                    添加到计划
+                                </el-button>
+                                <el-button type="danger" plain @click="deleteConfigFlowConfig(row.config_id)" size="small">
+                                    删除
+                                </el-button>
+                            </div>
                         </template>
                     </el-table-column>
                 </el-table>
@@ -1608,6 +1651,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                 <el-radio-button label="缺省蓝图参数" value="DefaultBlueprintConf" />
                 <el-radio-button label="载入库存" value="LoadAssetConf" :disabled="!haveAlphaRole" />
                 <el-radio-button label="最大作业拆分控制" value="MaxJobSplitCountConf" />
+                <el-radio-button label="税收" value="TaxConfig" />
             </el-radio-group>
 
 
@@ -1767,6 +1811,28 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                     <el-time-picker v-model="configForm.MaxJobSplitCountConf.max_time_date" placeholder="时间"
                         value-format="HH:mm:ss" />
                     <!-- 预估组件制造流程数 -->
+                </el-form-item>
+            </el-form>
+
+            <!-- 税收配置 -->
+            <el-form :model="configForm.TaxConfig" label-width="120px"
+                v-else-if="createConfigType === 'TaxConfig'">
+                <el-form-item label="目标类别">
+                    <el-select v-model="configForm.TaxConfig.target_category" placeholder="请选择目标类别"
+                        style="width: 240px">
+                        <el-option label="矿物" value="矿物" />
+                        <el-option label="冰矿产物" value="冰矿产物" />
+                        <el-option label="燃料块" value="燃料块" />
+                        <el-option label="元素" value="元素" />
+                        <el-option label="气云" value="气云" />
+                        <el-option label="行星工业" value="行星工业" />
+                        <el-option label="杂货" value="杂货" />
+                        <el-option label="EIV成本" value="EIV成本" />
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="税率 (%)">
+                    <el-input-number v-model="configForm.TaxConfig.tax_rate" :min="0" :max="100" :step="0.1"
+                        placeholder="请输入税率" />
                 </el-form-item>
             </el-form>
 
@@ -1945,6 +2011,28 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
             </el-form-item>
         </el-form>
 
+        <!-- 税收配置 -->
+        <el-form :model="modifyConfigForm.TaxConfig" label-width="120px"
+            v-else-if="modifyConfigType === 'TaxConfig'">
+            <el-form-item label="目标类别">
+                <el-select v-model="modifyConfigForm.TaxConfig.target_category" placeholder="请选择目标类别"
+                    style="width: 240px">
+                    <el-option label="矿物" value="矿物" />
+                    <el-option label="冰矿产物" value="冰矿产物" />
+                    <el-option label="燃料块" value="燃料块" />
+                    <el-option label="元素" value="元素" />
+                    <el-option label="气云" value="气云" />
+                    <el-option label="行星工业" value="行星工业" />
+                    <el-option label="杂货" value="杂货" />
+                    <el-option label="EIV成本" value="EIV成本" />
+                </el-select>
+            </el-form-item>
+            <el-form-item label="税率 (%)">
+                <el-input-number v-model="modifyConfigForm.TaxConfig.tax_rate" :min="0" :max="100" :step="0.1"
+                    placeholder="请输入税率" />
+            </el-form-item>
+        </el-form>
+
         <template #footer>
             <el-button @click="modifyConfig" type="primary" plain size="large">保存修改</el-button>
         </template>
@@ -2077,6 +2165,12 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--k-color-text);
+}
+
+.action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 .json-tooltip-content {
@@ -2391,6 +2485,12 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
     background: color-mix(in srgb, #8b5cf6 18%, var(--k-color-surface-soft)) !important;
     border-color: color-mix(in srgb, #8b5cf6 42%, var(--k-color-border)) !important;
     color: color-mix(in srgb, #8b5cf6 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-TaxConfig) {
+    background: color-mix(in srgb, #f97316 18%, var(--k-color-surface-soft)) !important;
+    border-color: color-mix(in srgb, #f97316 42%, var(--k-color-border)) !important;
+    color: color-mix(in srgb, #f97316 78%, var(--k-color-text)) !important;
 }
 
 :deep(.el-drawer .el-table),

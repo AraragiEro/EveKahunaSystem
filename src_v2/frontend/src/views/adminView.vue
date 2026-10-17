@@ -8,7 +8,9 @@ const menuItems = ref([
   { index: 2, label: '权限管理', route: '/admin/permissionManagement'},
   { index: 3, label: '邀请码管理', route: '/admin/inviteCodeManagement'},
   { index: 4, label: '会员管理', route: '/admin/vipManagement'},
-  { index: 5, label: '网站数据统计', route: '/admin/websiteDataStatistics'}
+  { index: 5, label: '网站数据统计', route: '/admin/websiteDataStatistics'},
+  { index: 6, label: '网站管理', route: '/admin/websiteManagement'},
+  { index: 7, label: 'ESI 状态', route: '/admin/esiModuleStatus'}
 ])
 
 </script>

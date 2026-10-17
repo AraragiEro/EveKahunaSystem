@@ -1,6 +1,6 @@
 """市场相关 MCP Tools - 通过 HTTP 调用 Quart 后端"""
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Optional
 from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 from src_v2.core.log import logger
@@ -15,9 +15,12 @@ def register_market_tools(mcp: FastMCP):
         type_name: Annotated[
             str, Field(description="物品名称，支持中英文（如 'PLEX', '伊甸币'）")
         ],
+        market_zone: Annotated[
+            Literal["jita", "frt"], Field(description="市场区域")
+        ] = "jita",
     ) -> dict:
         """
-        获取单个物品的市场价格详情（Jita 市场）
+        获取单个物品的市场价格详情
 
         Returns:
             {
@@ -30,15 +33,16 @@ def register_market_tools(mcp: FastMCP):
                     "buy": 4500000.0,
                     "sell": 4600000.0,
                     "mid": 4550000.0,
+                    "market_zone": "jita",
                     "history_data": [...]
                 }
             }
         """
-        logger.info(f"MCP Tool: market_price_detail(type_name={type_name})")
+        logger.info(f"MCP Tool: market_price_detail(type_name={type_name}, market_zone={market_zone})")
 
         try:
             async with QuartBackendClient() as client:
-                result = await client.get_market_price(type_name)
+                result = await client.get_market_price(type_name, market_zone)
 
             logger.info(
                 f"MCP Tool: market_price_detail 完成，status={result.get('status', 'unknown')}"
@@ -51,8 +55,15 @@ def register_market_tools(mcp: FastMCP):
     @mcp.tool()
     async def market_type_cost(
         type_name: Annotated[str, Field(description="物品名称")],
-        user_name: Annotated[str, Field(description="用户名")] = "system",
+        qq: Annotated[
+            Optional[int],
+            Field(description="QQ 号；后端据此解析成本缓存作用域，不传则使用 system 公共作用域"),
+        ] = None,
+        user_name: Annotated[
+            str, Field(description="已废弃：后端会忽略该参数，请改用 qq")
+        ] = "system",
         plan_name: Annotated[str, Field(description="计划名称")] = "default",
+        force_recalculate: Annotated[bool, Field(description="是否强制重新计算，跳过缓存")] = False,
     ) -> dict:
         """
         获取单个物品的生产成本详情
@@ -71,12 +82,15 @@ def register_market_tools(mcp: FastMCP):
             }
         """
         logger.info(
-            f"MCP Tool: market_type_cost(type_name={type_name}, user={user_name}, plan={plan_name})"
+            f"MCP Tool: market_type_cost(type_name={type_name}, qq={qq}, plan={plan_name}, force={force_recalculate})"
         )
 
         try:
             async with QuartBackendClient() as client:
-                result = await client.get_market_cost(type_name, user_name, plan_name)
+                result = await client.get_market_cost(
+                    type_name, qq=qq, plan_name=plan_name,
+                    force_recalculate=force_recalculate,
+                )
 
             logger.info(
                 f"MCP Tool: market_type_cost 完成，status={result.get('status', 'unknown')}"

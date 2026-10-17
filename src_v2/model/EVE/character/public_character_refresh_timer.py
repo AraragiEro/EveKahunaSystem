@@ -1,4 +1,5 @@
 import asyncio
+import random
 from datetime import datetime, timedelta, timezone
 
 from src_v2.core.database.connect_manager import get_redis_manager as rdm
@@ -7,7 +8,7 @@ from src_v2.core.database.model import EvePublicCharacterInfo as M_EvePublicChar
 from src_v2.core.log import logger
 from src_v2.core.utils import SingletonMeta
 from src_v2.model.EVE.eveesi import eveesi
-from src_v2.model.EVE.eveesi.eveutils import parse_iso_datetime
+from src_v2.core.utils.datetime_utils import parse_aware_utc_datetime
 
 
 class PublicCharacterRefreshTimer(metaclass=SingletonMeta):
@@ -127,7 +128,7 @@ class PublicCharacterRefreshTimer(metaclass=SingletonMeta):
                 # 更新现有记录
                 character_db_obj.alliance_id = character_info.get(
                     'alliance_id')
-                character_db_obj.birthday = parse_iso_datetime(
+                character_db_obj.birthday = parse_aware_utc_datetime(
                     character_info['birthday']).replace(tzinfo=None)
                 character_db_obj.bloodline_id = character_info['bloodline_id']
                 character_db_obj.corporation_id = character_info['corporation_id']
@@ -146,7 +147,7 @@ class PublicCharacterRefreshTimer(metaclass=SingletonMeta):
                 character_db_obj = M_EvePublicCharacterInfo(
                     character_id=character_id,
                     alliance_id=character_info.get('alliance_id'),
-                    birthday=parse_iso_datetime(
+                    birthday=parse_aware_utc_datetime(
                         character_info['birthday']).replace(tzinfo=None),
                     bloodline_id=character_info['bloodline_id'],
                     corporation_id=character_info['corporation_id'],
@@ -236,6 +237,9 @@ class PublicCharacterRefreshTimer(metaclass=SingletonMeta):
         如果标志存在或不在目标时间范围内，则等待到下一个4:00-4:59时间段。
         """
         logger.info("Public Character 信息刷新定时器已启动")
+
+        jitter = random.uniform(0, self.CHECK_INTERVAL_SECONDS * 0.3)
+        await asyncio.sleep(jitter)
 
         while self._running:
             try:

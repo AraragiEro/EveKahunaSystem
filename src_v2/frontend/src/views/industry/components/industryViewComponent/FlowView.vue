@@ -80,7 +80,7 @@ const visibleColumnIds = computed<string[]>(() => {
         saved = loadFlowColumnSettings(planName)
     }
     // 如果当前计划还没有专门的列配置，就用默认列（所有可隐藏的列）
-    const userSelectedColumns = (saved && saved.length > 0) 
+    const userSelectedColumns = (saved && saved.length> 0) 
         ? saved.filter(id => columnOptions.some(col => col.id === id))
         : defaultVisibleColumnIds
     // 始终包含不可隐藏的列
@@ -106,7 +106,7 @@ const openColumnSettingsDialog = () => {
         saved = loadFlowColumnSettings(planName)
     }
     // 弹窗里只编辑可隐藏列（去掉不可隐藏的列），并保持用户上一次的选择
-    const base = (saved && saved.length > 0) ? saved : defaultVisibleColumnIds
+    const base = (saved && saved.length> 0) ? saved : defaultVisibleColumnIds
     tempVisibleColumnIds.value = base.filter(id => !fixedColumnIds.includes(id))
     columnSettingsDialogVisible.value = true
 }
@@ -204,22 +204,21 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
             default-expand-all
             fit
             border
-            max-height="75vh"
-            show-overflow-tooltip
-            :row-class-name="CompleteRowClassName"
+            max-height="75vh" :row-class-name="CompleteRowClassName"
             style="font-size: 16px;"
-        >
+       >
         <el-table-column v-if="visibleColumnIds.includes('layer_id')" label="层" prop="layer_id" width="60"/>
         <el-table-column label="图标" prop="type_id" width="70">
             <template #default="{ row }">
-                <img 
-                    v-if="row?.type_id"
-                    :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" 
-                    alt="类型" 
-                    width="30" 
-                    height="30"
-                    style="border-radius: 4px;" 
-                />
+            <img 
+                v-if="row?.type_id"
+                :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" 
+                alt="类型" 
+                width="30" 
+                height="30"
+                style="border-radius: 4px;" 
+                loading="lazy"
+            />
             </template>
         </el-table-column>
         <el-table-column v-if="visibleColumnIds.includes('type_id')" label="物品id" prop="type_id" width="90"/>
@@ -229,7 +228,7 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                     class="copyable-cell" 
                     @click="copyCellContent(row.type_name, '物品名en')"
                     :title="`点击复制: ${row.type_name || ''}`"
-                >
+               >
                     {{ row.type_name }}
                 </div>
             </template>
@@ -240,7 +239,7 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                     class="copyable-cell" 
                     @click="copyCellContent(row.tpye_name_zh, '物品名zh')"
                     :title="`点击复制: ${row.tpye_name_zh || ''}`"
-                >
+               >
                     {{ row.tpye_name_zh }}
                 </div>
             </template>
@@ -256,11 +255,11 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
         <el-table-column v-if="visibleColumnIds.includes('bp_jobs')" label="蓝图库存流程" prop="bp_jobs">
             <template #default="{ row }">
                 <template v-if="row?.bp_jobs">
-                    <span v-if="Number(row?.bp_jobs?.bpc) > 0">
+                    <span v-if="Number(row?.bp_jobs?.bpc)> 0">
                         {{ Number(row?.bp_jobs?.bpc) }} 流程拷贝
                     </span>
-                    <span v-if="Number(row?.bp_jobs?.bpc) > 0 && Number(row?.bp_jobs?.bpo) > 0">，</span>
-                    <span v-if="Number(row?.bp_jobs?.bpo) > 0">
+                    <span v-if="Number(row?.bp_jobs?.bpc)> 0 && Number(row?.bp_jobs?.bpo)> 0">，</span>
+                    <span v-if="Number(row?.bp_jobs?.bpo)> 0">
                         {{ Number(row?.bp_jobs?.bpo) }} 份原图
                     </span>
                 </template>
@@ -275,14 +274,14 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
         title="列显示设置"
         width="400px"
         :close-on-click-modal="false"
-    >
+   >
         <p style="margin-bottom: 10px;">勾选需要显示的列（"层"列始终显示，不可关闭）</p>
         <el-checkbox-group v-model="tempVisibleColumnIds">
             <el-checkbox
                 v-for="col in columnOptions"
                 :key="col.id"
                 :label="col.id"
-            >
+           >
                 {{ col.label }}
             </el-checkbox>
         </el-checkbox-group>
@@ -309,16 +308,16 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
 }
 
 :deep(.el-table__body tr.complete-row),
-:deep(.el-table__body tr.complete-row > td.el-table__cell),
-:deep(.el-table__body tr.complete-row:hover > td.el-table__cell) {
+:deep(.el-table__body tr.complete-row> td.el-table__cell),
+:deep(.el-table__body tr.complete-row:hover> td.el-table__cell) {
     background-color: #e7ffc8 !important;
     font-weight: bold !important;
     color: #000000 !important;
 }
 
 :global([data-theme='dark']) .flow-view-container :deep(.el-table__body tr.complete-row),
-:global([data-theme='dark']) .flow-view-container :deep(.el-table__body tr.complete-row > td.el-table__cell),
-:global([data-theme='dark']) .flow-view-container :deep(.el-table__body tr.complete-row:hover > td.el-table__cell) {
+:global([data-theme='dark']) .flow-view-container :deep(.el-table__body tr.complete-row> td.el-table__cell),
+:global([data-theme='dark']) .flow-view-container :deep(.el-table__body tr.complete-row:hover> td.el-table__cell) {
     background-color: color-mix(in srgb, var(--k-color-success) 22%, var(--k-color-surface)) !important;
     color: var(--k-color-text) !important;
 }

@@ -1,5 +1,6 @@
 from ..sde import SdeUtils
 from ..market_server.market_manager import MarketManager
+from ..eve_constants import PLEX_ID
 
 from ...utils import KahunaException
 
@@ -33,7 +34,7 @@ class PriceService:
             if type_id is None:
                 return None, None, None, None, fuzz_list
         if type_id:
-            if type_id == 44992:
+            if type_id == PLEX_ID:
                 market = MarketManager.market_dict['plex']
             max_buy, min_sell = await market.get_type_order_rouge(type_id)
 

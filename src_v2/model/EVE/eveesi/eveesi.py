@@ -17,11 +17,12 @@ from .esi_api.universe import *
 from .esi_api.search import *
 from .esi_api.assets import *
 from .esi_api.wallet import *
+from .esi_api.loyalty import *
 
 permission_set = set()
 
 
-async def verify_token(access_token: str, log: bool = True):
+async def verify_eve_oauth_token(access_token: str, log: bool = True):
     """
     本地解码JWT token获取角色信息
 

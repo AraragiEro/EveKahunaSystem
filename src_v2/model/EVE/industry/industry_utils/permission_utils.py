@@ -123,6 +123,8 @@ async def get_user_all_container_permission(user_id: str):
         else:
             raise KahunaException(f"资产所有者类型错误: {owner_type}")
         system_info = await SdeUtils.get_system_info_by_id(container.system_id)
+        structure_info_cache = None
+        station_info_cache = None
         if container.structure_id > 100000000:
             structure_info_cache = await rdm().r.hgetall(f'eveesi:universe_structures_structure:{container.structure_id}')
             if not structure_info_cache:

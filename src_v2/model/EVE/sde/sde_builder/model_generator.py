@@ -21,6 +21,8 @@ from .map_regions_model import MapRegions
 from .inv_categories_model import InvCategories
 from .inv_groups_model import InvGroups
 from .type_materials_model import TypeMaterials
+from .planet_schematics_model import PlanetSchematics, PlanetSchematicTypes
+from .npc_corporations_model import NpcCorporations
 
 
 class SDEModelGenerator:
@@ -86,7 +88,15 @@ class SDEModelGenerator:
         # 特殊处理：typeMaterials 表（使用 SQLAlchemy 模型）
         if table_name == "typeMaterials":
             return await self.create_type_materials_table(conn)
-        
+
+        # 特殊处理：planetSchematics 表（使用 SQLAlchemy 模型）
+        if table_name == "planetSchematics":
+            return await self.create_planet_schematics_tables(conn)
+
+        # 特殊处理：npcCorporations 表（使用 SQLAlchemy 模型）
+        if table_name == "npcCorporations":
+            return await self.create_npc_corporations_table(conn)
+
         # 通用处理：其他表
         # 分析文件结构
         structure = self.parser.analyze_file_structure(file_path)
@@ -235,7 +245,29 @@ class SDEModelGenerator:
             import traceback
             logger.error(traceback.format_exc())
             return False
-    
+
+    async def create_npc_corporations_table(self, conn) -> bool:
+        """
+        创建 NpcCorporations 表（使用 SQLAlchemy 模型）
+
+        Args:
+            conn: 数据库连接
+
+        Returns:
+            是否成功
+        """
+        try:
+            from src_v2.core.database.connect_manager import PostgreDatabaseManager
+            db_manager = PostgreDatabaseManager()
+            await db_manager.create_default_table(conn, SDEModel)
+            logger.info("已创建/检查 NpcCorporations 表")
+            return True
+        except Exception as e:
+            logger.error(f"创建 NpcCorporations 表失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+
     async def create_market_groups_table(self, conn) -> bool:
         """
         创建 MarketGroups 表（使用 SQLAlchemy 模型）
@@ -412,6 +444,32 @@ class SDEModelGenerator:
             return True
         except Exception as e:
             logger.error(f"创建 TypeMaterials 表失败: {e}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+            return False
+
+    async def create_planet_schematics_tables(self, conn) -> bool:
+        """
+        创建行星工业蓝图表（2个表，使用 SQLAlchemy 模型）
+        
+        Args:
+            conn: 数据库连接
+        
+        Returns:
+            是否成功
+        """
+        try:
+            from src_v2.core.database.connect_manager import PostgreDatabaseManager
+
+            db_manager = PostgreDatabaseManager()
+            # PlanetSchematics、PlanetSchematicTypes 继承自 SDEModel，会被 registry 识别
+            await db_manager.create_default_table(conn, SDEModel)
+
+            logger.info("已创建/检查行星工业蓝图表（planetSchematics, planetSchematicTypes）")
+            return True
+        except Exception as e:
+            logger.error(f"创建行星工业蓝图表失败: {e}")
             import traceback
 
             logger.error(traceback.format_exc())

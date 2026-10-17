@@ -14,6 +14,7 @@ from src_v2.core.utils import SingletonMeta, tqdm_manager
 from src_v2.core.utils import KahunaException, get_beijing_utctime, get_random_token
 
 from src_v2.model.EVE.character.character_manager import CharacterManager
+from src_v2.model.EVE.character.character import EveTokenPermanentlyInvalidError
 from src_v2.core.user.user_manager import UserManager
 
 from src_v2.core.database.kahuna_database_utils_v2 import (
@@ -106,11 +107,40 @@ class AssetManager(metaclass=SingletonMeta):
             "step_name",
             "清理旧数据",
         )
-        await self.clean_asset_pull_mission_assets(mission_obj)
-        await self.processing_asset_pull_mission(mission_obj)
+        try:
+            await self.clean_asset_pull_mission_assets(mission_obj)
+            await self.processing_asset_pull_mission(mission_obj)
+        except EveTokenPermanentlyInvalidError as e:
+            # token 已永久失效，自动禁用该资产拉取任务
+            mission_obj.active = False
+            await EveAssetPullMissionDBUtils.merge(mission_obj)
+            logger.warning(
+                f"资产拉取任务 {asset_owner_type}:{asset_owner_id} 因token永久失效已自动禁用: {str(e)}"
+            )
+            raise
 
         mission_obj.last_pull_time = get_beijing_utctime(datetime.now())
         await EveAssetPullMissionDBUtils.merge(mission_obj)
+
+    async def _check_access_character_token(self, mission) -> tuple[bool, str | None]:
+        """检查资产拉取任务的 access_character 的 token 是否已永久失效。
+
+        Returns:
+            (is_abnormal, abnormal_reason): 是否异常及原因，正常时返回 (False, None)
+        """
+        try:
+            access_character = await CharacterManager().get_character_by_character_id(
+                mission.access_character_id
+            )
+            if access_character.token_permanently_failed:
+                return True, (
+                    f"授权角色 {access_character.character_name} 的token已永久失效"
+                    f"（连续{access_character.refresh_failure_count}次刷新失败），请重新授权"
+                )
+        except Exception:
+            # 角色不存在等，不属于 token 问题，交给外层处理
+            pass
+        return False, None
 
     async def get_user_asset_pull_mission_list(self, user_name: str) -> list[dict]:
         missions = []
@@ -132,6 +162,27 @@ class AssetManager(metaclass=SingletonMeta):
                         mission.asset_owner_id
                     )
                     subject_name = character.character_name
+                    # 检查 token 是否已永久失效
+                    if character.token_permanently_failed:
+                        _append_mission(
+                            {
+                                "subject_type": mission.asset_owner_type,
+                                "subject_name": subject_name,
+                                "subject_id": mission.asset_owner_id,
+                                "is_active": mission.active,
+                                "last_pull_time": mission.last_pull_time.replace(
+                                    tzinfo=timezone(timedelta(hours=+8), "Shanghai")
+                                )
+                                if mission.last_pull_time
+                                else None,
+                                "is_abnormal": True,
+                                "abnormal_reason": (
+                                    f"token已永久失效（连续{character.refresh_failure_count}次刷新失败），"
+                                    f"请重新授权"
+                                ),
+                            }
+                        )
+                        continue
                 elif mission.asset_owner_type == "corp":
                     corporation = (
                         await CharacterManager().get_corporation_data_by_corporation_id(
@@ -139,6 +190,27 @@ class AssetManager(metaclass=SingletonMeta):
                         )
                     )
                     subject_name = corporation.name
+                    # 对公司任务检查 access_character 的 token 是否已永久失效
+                    is_token_abnormal, token_abnormal_reason = (
+                        await self._check_access_character_token(mission)
+                    )
+                    if is_token_abnormal:
+                        _append_mission(
+                            {
+                                "subject_type": mission.asset_owner_type,
+                                "subject_name": subject_name,
+                                "subject_id": mission.asset_owner_id,
+                                "is_active": mission.active,
+                                "last_pull_time": mission.last_pull_time.replace(
+                                    tzinfo=timezone(timedelta(hours=+8), "Shanghai")
+                                )
+                                if mission.last_pull_time
+                                else None,
+                                "is_abnormal": True,
+                                "abnormal_reason": token_abnormal_reason,
+                            }
+                        )
+                        continue
                 else:
                     subject_name = f"Unknown ({mission.asset_owner_id})"
                 _append_mission(
@@ -241,6 +313,29 @@ class AssetManager(metaclass=SingletonMeta):
                         logger.info(
                             f"公司{mission.asset_owner_id}公开信息: {corporation_info}"
                         )
+                        # 检查公司资产拉取任务的授权角色 token 是否已永久失效
+                        is_token_abnormal, token_abnormal_reason = (
+                            await self._check_access_character_token(mission)
+                        )
+                        if is_token_abnormal:
+                            _append_mission(
+                                {
+                                    "subject_type": mission.asset_owner_type,
+                                    "subject_name": corporation_info["name"],
+                                    "subject_id": mission.asset_owner_id,
+                                    "is_active": mission.active,
+                                    "last_pull_time": mission.last_pull_time.replace(
+                                        tzinfo=timezone(
+                                            timedelta(hours=+8), "Shanghai"
+                                        )
+                                    )
+                                    if mission.last_pull_time
+                                    else None,
+                                    "is_abnormal": True,
+                                    "abnormal_reason": token_abnormal_reason,
+                                }
+                            )
+                            continue
                         _append_mission(
                             {
                                 "subject_type": mission.asset_owner_type,
@@ -290,6 +385,28 @@ class AssetManager(metaclass=SingletonMeta):
                         mission.asset_owner_id
                     )
                     subject_name = character.character_name
+                    # 检查 token 是否已永久失效
+                    if character.token_permanently_failed:
+                        missions.append(
+                            {
+                                "subject_type": mission.asset_owner_type,
+                                "subject_name": subject_name,
+                                "subject_id": mission.asset_owner_id,
+                                "is_active": mission.active,
+                                "last_pull_time": mission.last_pull_time.replace(
+                                    tzinfo=timezone(timedelta(hours=+8), "Shanghai")
+                                )
+                                if mission.last_pull_time
+                                else None,
+                                "is_abnormal": True,
+                                "abnormal_reason": (
+                                    f"token已永久失效（连续{character.refresh_failure_count}次刷新失败），"
+                                    f"请重新授权"
+                                ),
+                                "user_name": mission.user_name,
+                            }
+                        )
+                        continue
                 elif mission.asset_owner_type == "corp":
                     corporation_info = await rdm().redis.get(
                         f"eveesi:corporations_corporation:{mission.asset_owner_id}"
@@ -332,6 +449,30 @@ class AssetManager(metaclass=SingletonMeta):
                 else:
                     subject_name = f"Unknown ({mission.asset_owner_id})"
 
+                # 对公司任务检查 access_character 的 token 是否已永久失效
+                if mission.asset_owner_type == "corp":
+                    is_token_abnormal, token_abnormal_reason = (
+                        await self._check_access_character_token(mission)
+                    )
+                    if is_token_abnormal:
+                        missions.append(
+                            {
+                                "subject_type": mission.asset_owner_type,
+                                "subject_name": subject_name,
+                                "subject_id": mission.asset_owner_id,
+                                "is_active": mission.active,
+                                "last_pull_time": mission.last_pull_time.replace(
+                                    tzinfo=timezone(timedelta(hours=+8), "Shanghai")
+                                )
+                                if mission.last_pull_time
+                                else None,
+                                "is_abnormal": True,
+                                "abnormal_reason": token_abnormal_reason,
+                                "user_name": mission.user_name,
+                            }
+                        )
+                        continue
+
                 missions.append(
                     {
                         "subject_type": mission.asset_owner_type,
@@ -373,8 +514,23 @@ class AssetManager(metaclass=SingletonMeta):
         if asset_owner_type == "character":
             access_character_id = asset_owner_id
         elif asset_owner_type == "corp":
+            # 公司资产拉取需要总监角色的 ESI token
             main_character_id = await UserManager().get_main_character_id(user_name)
             access_character_id = main_character_id
+            main_character = await CharacterManager().get_character_by_character_id(main_character_id)
+            if main_character and main_character.corporation_id:
+                director_ids = await CharacterManager().get_director_character_id_of_corporation(
+                    main_character.corporation_id
+                )
+                for did in director_ids:
+                    director = await CharacterManager().get_character_by_character_id(did)
+                    try:
+                        await director.ac_token
+                        access_character_id = did
+                        break
+                    except Exception as e:
+                        logger.warning(f"获取总监角色 {did} 的token失败: {str(e)}")
+                        continue
         mission_obj = (
             await EveAssetPullMissionDBUtils.select_mission_by_owner_id_and_owner_type(
                 asset_owner_id, asset_owner_type
@@ -1094,6 +1250,72 @@ class AssetManager(metaclass=SingletonMeta):
             )
         await tqdm_manager.complete_mission("_update_forbidden_structure_node")
 
+    async def _get_or_fallback_access_character(self, mission_obj: M_EveAssetPullMission):
+        """获取访问角色。对公司任务，如果当前 access_character token 已永久失效，尝试切换其他总监。
+
+        公司资产拉取任务的 access_character_id 在创建时锁定了一个总监角色，
+        当该总监的 ESI token 永久失效后，需要动态切换到同公司其他可用总监。
+        """
+        access_character = await CharacterManager().get_character_by_character_id(
+            mission_obj.access_character_id
+        )
+
+        # 仅公司任务且 token 已永久失效时才尝试 fallback
+        if mission_obj.asset_owner_type != "corp":
+            return access_character
+        if not access_character.token_permanently_failed:
+            return access_character
+
+        corp_id = access_character.corporation_id
+        if not corp_id:
+            logger.warning(
+                f"公司资产拉取 {mission_obj.asset_owner_type}:{mission_obj.asset_owner_id} "
+                f"当前 access_character {access_character.character_id} 无 corporation_id，无法 fallback"
+            )
+            return access_character
+
+        director_ids = await CharacterManager().get_director_character_id_of_corporation(corp_id)
+        logger.info(
+            f"公司资产拉取 {mission_obj.asset_owner_type}:{mission_obj.asset_owner_id} "
+            f"当前总监 {access_character.character_id} token 已永久失效，"
+            f"尝试从 {len(director_ids)} 个总监中 fallback"
+        )
+
+        for did in director_ids:
+            if did == mission_obj.access_character_id:
+                continue
+            try:
+                director = await CharacterManager().get_character_by_character_id(did)
+                if director.token_permanently_failed:
+                    continue
+                # 验证 token 可用（可能触发刷新）
+                await director.ac_token
+                # 找到可用总监，更新 mission 记录
+                mission_obj.access_character_id = did
+                await EveAssetPullMissionDBUtils.merge(mission_obj)
+                logger.info(
+                    f"公司资产拉取 {mission_obj.asset_owner_type}:{mission_obj.asset_owner_id} "
+                    f"fallback 成功: {access_character.character_id} -> {did} ({director.character_name})"
+                )
+                return director
+            except EveTokenPermanentlyInvalidError:
+                logger.warning(
+                    f"fallback 总监 {did} token 已永久失效，跳过"
+                )
+                continue
+            except Exception as e:
+                logger.warning(
+                    f"fallback 尝试总监 {did} 失败: {str(e)}"
+                )
+                continue
+
+        # 所有总监都不可用
+        logger.error(
+            f"公司资产拉取 {mission_obj.asset_owner_type}:{mission_obj.asset_owner_id} "
+            f"所有 {len(director_ids)} 个总监 token 均不可用，无法拉取资产"
+        )
+        return access_character
+
     async def processing_asset_pull_mission(self, mission_obj: M_EveAssetPullMission):
         status_key = f"asset_pull_mission_status:{mission_obj.asset_owner_type}:{mission_obj.asset_owner_id}"
 
@@ -1103,9 +1325,8 @@ class AssetManager(metaclass=SingletonMeta):
         elif mission_obj.asset_owner_type == "corp":
             pull_function = eveesi.corporations_corporation_assets
 
-        access_character = await CharacterManager().get_character_by_character_id(
-            mission_obj.access_character_id
-        )
+        # 获取访问角色（公司任务自动 fallback 总监）
+        access_character = await self._get_or_fallback_access_character(mission_obj)
 
         await rdm().r.hset(status_key, "step_name", "通过api拉取资产")
         assets = await pull_function(

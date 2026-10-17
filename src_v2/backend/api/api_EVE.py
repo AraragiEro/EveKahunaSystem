@@ -13,6 +13,7 @@ from src_v2.core.log import logger
 from src_v2.core.utils import KahunaException
 from src_v2.model.EVE.character.character_manager import CharacterManager
 from src_v2.model.EVE.eveesi.oauth import CALLBACK_LOCAL_HOST, get_auth_url, get_token
+from src_v2.backend.api import response_helper
 
 # app = Quart(__name__)
 # app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -85,11 +86,11 @@ async def get_oauth_url():
         return {"status": 200, "url": url}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取授权链接失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取授权链接失败"}), 500
+        return response_helper.server_error("获取授权链接失败")
 
 
 @api_EVE_bp.route("/oauth/callback", methods=["GET"])
@@ -145,12 +146,12 @@ async def eve_oauth_callback(
         # 检查是否有错误
         if error:
             logger.error(f"EVE OAuth 回调包含错误: {error}")
-            return jsonify({"status": 400, "message": f"OAuth错误: {error}"}), 400
+            return response_helper.bad_request(f"OAuth错误: {error}")
 
         # 检查是否有授权码
         if not code:
             logger.error("EVE OAuth 回调缺少授权码")
-            return jsonify({"status": 400, "message": "缺少授权码"}), 400
+            return response_helper.bad_request("缺少授权码")
 
         # 从state中解析用户ID和原始oauth_state
         user_id = None
@@ -191,9 +192,10 @@ async def eve_oauth_callback(
         # 获取原始协议，优先从 X-Forwarded-Proto 获取，否则使用当前请求的协议
         scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
 
-        # 获取原始主机名，优先从 X-Forwarded-Host 获取，否则使用当前请求的主机
-        # request.headers.get('X-Forwarded-Host', request.host)
-        host = "bottest.setcr-alero.icu"
+        # 从配置文件获取回调主机名，这是 OAuth 流程必须配置的项
+        host = CALLBACK_LOCAL_HOST
+        if not host:
+            raise KahunaException("缺少配置: EVE.CALLBACK_LOCAL_HOST 未在 config.toml 中设置")
 
         # 获取完整的路径和查询参数
         full_path = request.full_path
@@ -212,13 +214,13 @@ async def eve_oauth_callback(
         # 使用 auth_response_url 交换授权码以获取 token
         # 现在auth_response_url包含原始的oauth_state，fetch_token可以正确验证
         try:
-            access_token, refresh_token, expires_at = get_token(auth_response_url)
+            access_token, refresh_token, expires_at = await get_token(auth_response_url)
         except KahunaException as e:
             logger.error(f"获取token失败: {str(e)}")
-            return jsonify({"status": 500, "message": str(e)}), 500
+            return response_helper.fail(str(e), 500)
         except Exception as e:
             logger.error(f"获取token失败: {traceback.format_exc()}")
-            return jsonify({"status": 500, "message": "获取token失败"}), 500
+            return response_helper.server_error("获取token失败")
 
         try:
             # 使用从state解析出的user_id，而不是g.current_user
@@ -232,10 +234,10 @@ async def eve_oauth_callback(
             )
         except KahunaException as e:
             logger.error(f"角色信息入库失败: {str(e)}")
-            return jsonify({"status": 500, "message": str(e)}), 500
+            return response_helper.fail(str(e), 500)
         except Exception as e:
             logger.error(f"角色信息入库失败: {traceback.format_exc()}")
-            return jsonify({"status": 500, "message": "角色信息入库失败"}), 500
+            return response_helper.server_error("角色信息入库失败")
 
         logger.info(
             f"成功获取 EVE token。用户ID: {user_id}, Access token 过期时间: {expires_at}, 角色名称: {character.character_name}"
@@ -260,10 +262,10 @@ async def eve_oauth_callback(
 
     except KahunaException as e:
         logger.error(f"EVE OAuth 回调处理失败: {str(e)}")
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         logger.error(f"EVE OAuth 回调处理失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "认证失败"}), 500
+        return response_helper.server_error("认证失败")
 
         # 如果出错，将用户重定向到前端的错误页面
         # frontend_error_url = "http://localhost:8080/auth-error"  # 请替换为您的前端错误页面 URL
@@ -322,8 +324,8 @@ async def get_auth_status():
         }
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取认证状态失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取认证状态失败"}), 500
+        return response_helper.server_error("获取认证状态失败")

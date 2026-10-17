@@ -215,7 +215,7 @@ const laborSummary = computed<LaborSummary[]>(() => {
 
     // 计算占比
     result.forEach(item => {
-        item.salary_percentage = totalSalary > 0 ? (item.total_salary / totalSalary) * 100 : 0
+        item.salary_percentage = totalSalary> 0 ? (item.total_salary / totalSalary) * 100 : 0
     })
 
     // 按总工资降序排序
@@ -490,13 +490,13 @@ const updateCharts = async () => {
         const costContainer = costSalaryChartRef.value
         
         // 检查容器是否有尺寸
-        if (salaryContainer.offsetWidth > 0 && costContainer.offsetWidth > 0) {
+        if (salaryContainer.offsetWidth> 0 && costContainer.offsetWidth> 0) {
             initSalaryChart()
             initCostSalaryChart()
         } else {
             // 如果容器还没有尺寸，等待一下再试
             setTimeout(() => {
-                if (salaryContainer.offsetWidth > 0 && costContainer.offsetWidth > 0) {
+                if (salaryContainer.offsetWidth> 0 && costContainer.offsetWidth> 0) {
                     initSalaryChart()
                     initCostSalaryChart()
                 } else {
@@ -518,7 +518,7 @@ watch(() => props.runningJobs, () => {
 
 watch(laborSummary, () => {
     // 当数据准备好时更新图表
-    if (laborSummary.value && laborSummary.value.length > 0) {
+    if (laborSummary.value && laborSummary.value.length> 0) {
         updateCharts()
     }
 }, { deep: true, immediate: false })
@@ -548,10 +548,15 @@ const observeContainer = () => {
     return null
 }
 
-// 窗口大小调整处理函数
+// 窗口大小调整处理函数 (RAF throttle)
+let resizeRAF: number | null = null
 const handleResize = () => {
+  if (resizeRAF !== null) return
+  resizeRAF = requestAnimationFrame(() => {
     salaryChartInstance?.resize()
     costSalaryChartInstance?.resize()
+    resizeRAF = null
+  })
 }
 
 // ResizeObserver 实例
@@ -600,6 +605,7 @@ onUnmounted(() => {
         costSalaryChartInstance = null
     }
     // 移除事件监听
+    if (resizeRAF !== null) cancelAnimationFrame(resizeRAF)
     window.removeEventListener('resize', handleResize)
 
     cleanupThemeWatcher?.()
@@ -656,16 +662,14 @@ onUnmounted(() => {
             <el-table
                 :data="laborSummary"
                 border
-                max-height="400px"
-                show-overflow-tooltip
-            >
+                max-height="400px">
                 <el-table-column label="个体名称" prop="character_title" width="200">
                     <template #default="{ row }">
                         <div 
                             class="copyable-cell" 
                             @click="copyCellContent(row.character_title, '个体名称')"
                             :title="`点击复制: ${row.character_title || ''}`"
-                        >
+                       >
                             {{ row.character_title }}
                         </div>
                     </template>
@@ -676,7 +680,7 @@ onUnmounted(() => {
                             class="copyable-cell" 
                             @click="copyCellContent(row.character_name, '角色名')"
                             :title="`点击复制: ${row.character_name || ''}`"
-                        >
+                       >
                             {{ row.character_name }}
                         </div>
                     </template>
@@ -687,7 +691,7 @@ onUnmounted(() => {
                             class="copyable-cell" 
                             @click="copyCellContent(row.total_salary, '总工资')"
                             :title="`点击复制: ${formatAccounting(row.total_salary)}`"
-                        >
+                       >
                             {{ formatAccounting(row.total_salary) }}
                         </div>
                     </template>
@@ -698,7 +702,7 @@ onUnmounted(() => {
                             class="copyable-cell" 
                             @click="copyCellContent(row.salary_only, '工资')"
                             :title="`点击复制: ${formatAccounting(row.salary_only)}`"
-                        >
+                       >
                             {{ formatAccounting(row.salary_only) }}
                         </div>
                     </template>
@@ -709,7 +713,7 @@ onUnmounted(() => {
                             class="copyable-cell" 
                             @click="copyCellContent(row.total_cost, '总成本')"
                             :title="`点击复制: ${formatAccounting(row.total_cost)}`"
-                        >
+                       >
                             {{ formatAccounting(row.total_cost) }}
                         </div>
                     </template>
@@ -720,7 +724,7 @@ onUnmounted(() => {
                             class="copyable-cell" 
                             @click="copyCellContent(row.total_duration, '总时长')"
                             :title="`点击复制: ${formatAccounting(row.total_duration)}`"
-                        >
+                       >
                             {{ formatAccounting(row.total_duration) }}
                         </div>
                     </template>
@@ -731,7 +735,7 @@ onUnmounted(() => {
                             class="copyable-cell" 
                             @click="copyCellContent(row.salary_percentage.toFixed(2), '工资占比')"
                             :title="`点击复制: ${row.salary_percentage.toFixed(2)}%`"
-                        >
+                       >
                             {{ row.salary_percentage.toFixed(2) }}%
                         </div>
                     </template>

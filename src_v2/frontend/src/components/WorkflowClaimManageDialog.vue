@@ -9,6 +9,7 @@ interface Claim {
     claimed_by: string
     claimed_at: string
     status: string
+    claimed_quantity: number
 }
 
 interface Props {
@@ -51,7 +52,22 @@ const fetchClaims = async () => {
         const data = await res.json()
         
         if (data.status === 200) {
-            claims.value = data.data || []
+            // 新格式：按工作流项分组的对象
+            const claimsList: Claim[] = []
+            Object.entries(data.data || {}).forEach(([key, value]: [string, any]) => {
+                if (value.claims && Array.isArray(value.claims)) {
+                    value.claims.forEach((claim: any) => {
+                        claimsList.push({
+                            workflow_item_key: key,
+                            claimed_by: claim.claimed_by,
+                            claimed_at: claim.claimed_at,
+                            status: claim.status,
+                            claimed_quantity: claim.claimed_quantity
+                        })
+                    })
+                }
+            })
+            claims.value = claimsList
         } else {
             ElMessage.error(data.message || '获取接取记录失败')
         }
@@ -81,7 +97,7 @@ const parseWorkflowItemKey = (key: string) => {
 const handleDeleteClaim = async (claim: Claim) => {
     try {
         await ElMessageBox.confirm(
-            `确定要删除该接取记录吗？\n接取人: ${claim.claimed_by}`,
+            `确定要删除该接取记录吗？\n接取人: ${claim.claimed_by}\n数量: ${claim.claimed_quantity} 线`,
             '确认删除',
             {
                 confirmButtonText: '确定',
@@ -180,7 +196,11 @@ const formatTime = (timeStr: string) => {
         <div v-else v-loading="loading" class="claim-manage-content">
             <!-- 统计信息 -->
             <div class="claim-stats">
-                <el-statistic title="总接取数" :value="claims.length" />
+                <el-statistic title="接取记录数" :value="claims.length" />
+                <el-statistic 
+                    title="总接取线数" 
+                    :value="claims.reduce((sum, c) => sum + (c.claimed_quantity || 0), 0)" 
+                />
             </div>
             
             <!-- 接取列表 -->
@@ -209,9 +229,15 @@ const formatTime = (timeStr: string) => {
                     </template>
                 </el-table-column>
                 
-                <el-table-column label="接取人" prop="claimed_by" width="120" />
+                <el-table-column label="接取人" prop="claimed_by" width="100" />
                 
-                <el-table-column label="接取时间" width="160">
+                <el-table-column label="接取数量" width="90">
+                    <template #default="{ row }">
+                        <el-tag type="primary" size="small">{{ row.claimed_quantity }} 线</el-tag>
+                    </template>
+                </el-table-column>
+                
+                <el-table-column label="接取时间" width="150">
                     <template #default="{ row }">
                         {{ formatTime(row.claimed_at) }}
                     </template>
@@ -271,6 +297,7 @@ const formatTime = (timeStr: string) => {
         <div v-if="currentTransferClaim" class="transfer-content">
             <p>任务: {{ currentTransferClaim.workflow_item_key }}</p>
             <p>当前接取人: {{ currentTransferClaim.claimed_by }}</p>
+            <p>接取数量: <strong>{{ currentTransferClaim.claimed_quantity }} 线</strong></p>
             <el-input
                 v-model="transferUsername"
                 placeholder="请输入新用户名"

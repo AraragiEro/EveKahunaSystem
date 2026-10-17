@@ -9,7 +9,7 @@ from ..eveutils import OUT_PAGE_ERROR, get_request_async, parse_token
 @esi_request
 async def character_character_id_portrait(access_token, character_id, log=True):
     ac_token = await access_token
-    data, _, _ = await get_request_async(f"https://esi.evetech.net/latest/characters/{character_id}/portrait/",
+    data, *_ = await get_request_async(f"https://esi.evetech.net/latest/characters/{character_id}/portrait/",
                                          headers={"Authorization": f"Bearer {ac_token}"}, log=log)
     return data
 
@@ -20,7 +20,7 @@ async def character_character_id_portrait(access_token, character_id, log=True):
 @esi_request
 async def characters_character_id_blueprints(access_token, character_id: int, page: int = 1, max_retries=3, log=True):
     access_token = await parse_token(access_token)
-    data, pages, _ = await get_request_async(
+    data, pages, *_ = await get_request_async(
         f"https://esi.evetech.net/latest/characters/{character_id}/blueprints/",
         headers={"Authorization": f"Bearer {access_token}"}, params={"page": page}, log=log, max_retries=max_retries,
         no_retry_code=[OUT_PAGE_ERROR]
@@ -61,7 +61,7 @@ async def characters_character(character_id, log=True):
 # security_status - Float (min: -10, max: 10)
 # title - String
     """
-    data, _, _ = await get_request_async(f"https://esi.evetech.net/latest/characters/{character_id}/", log=log)
+    data, *_ = await get_request_async(f"https://esi.evetech.net/latest/characters/{character_id}/", log=log)
     data["character_id"] = character_id
     return data
 
@@ -70,7 +70,7 @@ async def characters_character(character_id, log=True):
 # https://esi.evetech.net/characters/{character_id}/portrait
 @esi_request
 async def characters_character_portrait(character_id: int, log=True):
-    datg, _, _ = await get_request_async(
+    datg, *_ = await get_request_async(
         f"https://esi.evetech.net/latest/characters/{character_id}/portrait/",
         log=log
     )
@@ -84,7 +84,7 @@ async def characters_character_portrait(character_id: int, log=True):
 @esi_request
 async def characters_character_roles(access_token, character_id: int, log=True):
     ac_token = await parse_token(access_token)
-    data, _, _ = await get_request_async(
+    data, *_ = await get_request_async(
         f"https://esi.evetech.net/latest/characters/{character_id}/roles/",
         headers={"Authorization": f"Bearer {ac_token}"},
         log=log

@@ -2,9 +2,10 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { User, UserFilled, Pointer, Close, CircleCheckFilled } from '@element-plus/icons-vue'
+import { User, UserFilled, Pointer, Close, CircleCheckFilled, Plus } from '@element-plus/icons-vue'
 import { http } from '@/http'
 import { useAuthStore } from '@/stores/auth'
+import WorkflowClaimDialog from '@/components/WorkflowClaimDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +26,10 @@ const errorMessage = ref('')
 
 // 接取记录
 const claims = ref<Map<string, any>>(new Map())
+
+// 接取对话框
+const claimDialogVisible = ref(false)
+const claimDialogItem = ref<any>(null)
 
 // 过滤器
 const showOnlyClaimed = ref(false)
@@ -86,10 +91,10 @@ const fetchClaims = async () => {
         const data = await res.json()
         
         if (data.status === 200) {
-            // 转换为Map便于查询
+            // 转换为Map便于查询，新格式是对象不是数组
             const claimsMap = new Map()
-            data.data.forEach((claim: any) => {
-                claimsMap.set(claim.workflow_item_key, claim)
+            Object.entries(data.data).forEach(([key, value]: [string, any]) => {
+                claimsMap.set(key, value)
             })
             claims.value = claimsMap
         }
@@ -98,51 +103,95 @@ const fetchClaims = async () => {
     }
 }
 
-// 判断是否已接取
+// 判断是否已接取（有人接了任意数量）
 const isClaimed = (item: any): boolean => {
     const key = getWorkflowItemKey(item)
-    return claims.value.has(key)
+    const claimData = claims.value.get(key)
+    return claimData && claimData.claimed_lines > 0
 }
 
-// 获取接取人
-const getClaimedBy = (item: any): string | null => {
+// 判断任务是否已接满
+const isFullyClaimed = (item: any): boolean => {
     const key = getWorkflowItemKey(item)
-    const claim = claims.value.get(key)
-    return claim ? claim.claimed_by : null
+    const claimData = claims.value.get(key)
+    if (!claimData) return false
+    return claimData.claimed_lines >= claimData.total_lines
+}
+
+// 获取接取人列表
+const getClaimedByList = (item: any): string[] => {
+    const key = getWorkflowItemKey(item)
+    const claimData = claims.value.get(key)
+    if (!claimData || !claimData.claims) return []
+    return claimData.claims.map((c: any) => c.claimed_by)
 }
 
 // 是否当前用户接取
 const isClaimedByMe = (item: any): boolean => {
     const key = getWorkflowItemKey(item)
-    const claim = claims.value.get(key)
-    return claim && claim.claimed_by === currentUser.value
+    const claimData = claims.value.get(key)
+    if (!claimData || !claimData.claims) return false
+    return claimData.claims.some((c: any) => c.claimed_by === currentUser.value)
 }
 
-// 接取任务
-const claimTask = async (item: any) => {
+// 获取当前用户接取的数量
+const getMyClaimedQuantity = (item: any): number => {
+    const key = getWorkflowItemKey(item)
+    const claimData = claims.value.get(key)
+    if (!claimData || !claimData.claims) return 0
+    const myClaim = claimData.claims.find((c: any) => c.claimed_by === currentUser.value)
+    return myClaim?.claimed_quantity || 0
+}
+
+// 获取已接取数量和总数量
+const getClaimedInfo = (item: any) => {
+    const key = getWorkflowItemKey(item)
+    const claimData = claims.value.get(key)
+    const totalLines = item.line_count || 1  // 使用线数而非流程数
+    const claimedLines = claimData?.claimed_lines || 0
+    const remainingLines = totalLines - claimedLines
+    return { totalLines, claimedLines, remainingLines }
+}
+
+// 打开接取对话框
+const openClaimDialog = (item: any) => {
     if (!isLoggedIn.value) {
         goToLogin()
         return
     }
     
-    const key = getWorkflowItemKey(item)
+    const { remainingLines } = getClaimedInfo(item)
+    if (remainingLines <= 0) {
+        ElMessage.warning('该任务已全部被接取')
+        return
+    }
+    
+    claimDialogItem.value = item
+    claimDialogVisible.value = true
+}
+
+// 接取任务（带数量）
+const claimTask = async (quantity: number) => {
+    if (!claimDialogItem.value) return
+    
+    const key = getWorkflowItemKey(claimDialogItem.value)
     try {
         const res = await http.post(`/public/workflow/${token}/claim`, {
-            workflow_item_key: key
+            workflow_item_key: key,
+            quantity: quantity
         })
         const data = await res.json()
         
         if (data.status === 200) {
-            ElMessage.success('任务接取成功')
-            // 更新本地状态
-            claims.value.set(key, {
-                workflow_item_key: key,
-                claimed_by: currentUser.value,
-                claimed_at: new Date().toISOString()
-            })
-        } else if (data.status === 409) {
-            ElMessage.warning(`该任务已被 ${data.data.claimed_by} 接取`)
+            ElMessage.success(data.message || '任务接取成功')
             // 刷新接取记录
+            await fetchClaims()
+        } else if (data.status === 400) {
+            ElMessage.warning(data.message)
+            // 刷新接取记录以获取最新状态
+            await fetchClaims()
+        } else if (data.status === 409) {
+            ElMessage.warning(data.message)
             await fetchClaims()
         } else {
             ElMessage.error(data.message || '接取失败')
@@ -163,7 +212,8 @@ const cancelClaim = async (item: any) => {
         
         if (data.status === 200) {
             ElMessage.success('已取消接取')
-            claims.value.delete(key)
+            // 刷新接取记录以获取最新状态（包括其他用户的接取）
+            await fetchClaims()
         } else {
             ElMessage.error(data.message || '取消失败')
         }
@@ -201,15 +251,25 @@ const formatDuration = (seconds: number): string => {
     const days = Math.floor(seconds / 86400)
     const hours = Math.floor((seconds % 86400) / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
-    const secs = seconds % 60
-    
+    const secs = Math.round(seconds % 60)
+
     const parts: string[] = []
     if (days > 0) parts.push(`${days}天`)
     if (hours > 0) parts.push(`${hours}小时`)
     if (minutes > 0) parts.push(`${minutes}分钟`)
     if (secs > 0 && days === 0 && hours === 0) parts.push(`${secs}秒`)
-    
+
     return parts.join('') || '0秒'
+}
+
+// 复制文本到剪贴板
+const copyToClipboard = async (text: string) => {
+    try {
+        await navigator.clipboard.writeText(text)
+        ElMessage.success('已复制到剪贴板')
+    } catch (err) {
+        ElMessage.error('复制失败')
+    }
 }
 
 // 处理工作流数据：合并相同流程的项目（参考 WorkFlowView.vue 的逻辑）
@@ -259,11 +319,11 @@ const processedWorkflowData = computed(() => {
                 Object.keys(grouped[typeId][fakeKey][avaliableKey]).forEach(runsStr => {
                     const runs = parseInt(runsStr)
                     const groupData = grouped[typeId][fakeKey][avaliableKey][runsStr]
-                    // 使用第一个项目作为基础，添加 runs_count
+                    // 使用第一个项目作为基础，添加线数（分组计数）
                     const baseItem = groupData.items[0]
                     result.push({
                         ...baseItem,
-                        runs_count: groupData.count
+                        line_count: groupData.count  // 线数 = 该分组的项目数量
                     })
                 })
             })
@@ -354,56 +414,112 @@ onMounted(() => {
                     border
                     max-height="70vh"
                 >
-                    <el-table-column label="icon" width="80">
+                    <el-table-column label="icon" width="60" align="center">
                         <template #default="{ row }">
-                            <img :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" alt="类型" width="32" height="32" />
+                            <img :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" alt="类型" width="32" height="32" loading="lazy" />
                         </template>
                     </el-table-column>
-                    <el-table-column label="物品id" prop="type_id" width="90" />
-                    <el-table-column label="物品名" width="180">
+                    <el-table-column label="物品id" prop="type_id" width="75" align="center" />
+                    <el-table-column label="物品名" min-width="160" show-overflow-tooltip>
                         <template #default="{ row }">
-                            <div>{{ row.type_name_zh || row.type_name }}</div>
+                            <div
+                                class="copyable-text"
+                                @click="copyToClipboard(row.type_name_zh || row.type_name)"
+                                title="点击复制"
+                            >
+                                {{ row.type_name_zh || row.type_name }}
+                            </div>
                         </template>
                     </el-table-column>
-                    <el-table-column label="线" prop="runs_count" width="100">
+                    <el-table-column label="流程" width="65" align="center">
                         <template #default="{ row }">
-                            {{ formatAccounting(row.runs_count) }}
+                            <div
+                                class="copyable-text"
+                                @click="copyToClipboard(String(row.runs))"
+                                title="点击复制"
+                            >
+                                {{ row.runs }}
+                            </div>
                         </template>
                     </el-table-column>
-                    <el-table-column label="流程" prop="runs" width="80" />
-                    <el-table-column label="材料满足" width="90">
+                    <el-table-column label="线" width="75" align="center">
+                        <template #default="{ row }">
+                            <div
+                                class="copyable-text"
+                                @click="copyToClipboard(String(row.line_count))"
+                                title="点击复制"
+                            >
+                                {{ formatAccounting(row.line_count) }}
+                            </div>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="材料" width="65" align="center">
                         <template #default="{ row }">
                             <el-icon v-if="row.avaliable" size="18" style="color: #67c23a;"><CircleCheckFilled /></el-icon>
                             <el-icon v-else size="18" style="color: #f56c6c;"><Close /></el-icon>
                         </template>
                     </el-table-column>
-                    <el-table-column label="分配蓝图" width="90">
+                    <el-table-column label="蓝图" width="65" align="center">
                         <template #default="{ row }">
                             <el-icon v-if="row.fake" size="18" style="color: #f56c6c;"><Close /></el-icon>
                             <el-icon v-else size="18" style="color: #67c23a;"><CircleCheckFilled /></el-icon>
                         </template>
                     </el-table-column>
-                    <el-table-column label="工作类型" width="100">
+                    <el-table-column label="分类" width="85" show-overflow-tooltip>
+                        <template #default="{ row }">
+                            {{ row.category_name }}
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="市场组" width="100">
+                        <template #default="{ row }">
+                            <el-popover trigger="hover" placement="top" :width="300" :disabled="!((row.market_group_list || []).slice(0, -1)).length">
+                                <template #reference>
+                                    <div class="market-group-line">
+                                        {{ ((row.market_group_list || []).slice(0, -1)).join(' / ') }}
+                                    </div>
+                                </template>
+                                <div class="mg-tooltip-content">
+                                    <el-tag v-for="mg in ((row.market_group_list || []).slice(0, -1))" :key="mg" size="small" type="info" class="mg-tag">
+                                        {{ mg }}
+                                    </el-tag>
+                                </div>
+                            </el-popover>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="工作类型" width="75" align="center">
                         <template #default="{ row }">
                             <span v-if="row.active_id === 1">制造</span>
                             <span v-else-if="row.active_id === 11">反应</span>
                             <span v-else>未知</span>
                         </template>
                     </el-table-column>
-                    <el-table-column label="产物类型" prop="class_type" width="120" />
-                    <el-table-column label="EIV" width="120">
+                    <el-table-column label="产物" prop="class_type" width="100" show-overflow-tooltip />
+                    
+                    <!-- 接取进度列 -->
+                    <el-table-column label="进度" width="80" align="center">
                         <template #default="{ row }">
-                            {{ formatAccounting(row.eiv) }}
-                        </template>
-                    </el-table-column>
-                    <el-table-column label="估计时间" width="120">
-                        <template #default="{ row }">
-                            {{ formatDuration(row.active_time) }}
+                            <div v-if="isClaimed(row)" class="claim-progress">
+                                <div class="claim-progress-bar">
+                                    <el-progress 
+                                        :percentage="Math.round((getClaimedInfo(row).claimedLines / getClaimedInfo(row).totalLines) * 100)"
+                                        :status="isFullyClaimed(row) ? 'success' : ''"
+                                        :stroke-width="4"
+                                        :show-text="false"
+                                        style="width: 50px;"
+                                    />
+                                </div>
+                                <div class="claim-progress-text">
+                                    {{ getClaimedInfo(row).claimedLines }}/{{ getClaimedInfo(row).totalLines }}
+                                </div>
+                            </div>
+                            <div v-else class="claim-progress-empty">
+                                <span class="unclaimed-text">-</span>
+                            </div>
                         </template>
                     </el-table-column>
                     
                     <!-- 接取状态列 -->
-                    <el-table-column label="接取状态" width="140" fixed="right">
+                    <el-table-column label="操作" width="160" fixed="right" align="center">
                         <template #default="{ row }">
                             <div class="claim-cell">
                                 <!-- 状态A: 未登录 -->
@@ -413,35 +529,51 @@ onMounted(() => {
                                     </el-button>
                                 </template>
                                 
-                                <!-- 状态D: 已被他人接取 -->
-                                <template v-else-if="isClaimed(row) && !isClaimedByMe(row)">
+                                <!-- 状态B: 已接满（被他人或全部接满） -->
+                                <template v-else-if="isFullyClaimed(row) && !isClaimedByMe(row)">
                                     <el-tag type="info" size="small">
-                                        <el-icon><UserFilled /></el-icon>
-                                        {{ getClaimedBy(row) }}
+                                        已满
                                     </el-tag>
                                 </template>
                                 
-                                <!-- 状态C: 当前用户已接取（显示取消按钮） -->
+                                <!-- 状态C: 当前用户已接取（显示追加/取消按钮） -->
                                 <template v-else-if="isClaimedByMe(row)">
-                                    <el-button 
-                                        type="danger" 
-                                        size="small"
-                                        @click="cancelClaim(row)"
-                                    >
-                                        <el-icon><Close /></el-icon>
-                                        取消接取
-                                    </el-button>
+                                    <div class="my-claim-actions">
+                                        <el-tag type="success" size="small" class="my-claim-tag">
+                                            我已接 {{ getMyClaimedQuantity(row) }} 线
+                                        </el-tag>
+                                        <div class="action-buttons">
+                                            <el-button 
+                                                v-if="!isFullyClaimed(row)"
+                                                type="primary" 
+                                                size="small"
+                                                @click="openClaimDialog(row)"
+                                                :icon="Plus"
+                                            >
+                                                追加
+                                            </el-button>
+                                            <el-button 
+                                                type="danger" 
+                                                size="small"
+                                                @click="cancelClaim(row)"
+                                                :icon="Close"
+                                            >
+                                                取消
+                                            </el-button>
+                                        </div>
+                                    </div>
                                 </template>
                                 
-                                <!-- 状态B: 未接取（显示接取按钮） -->
+                                <!-- 状态D: 未接取或部分接取（显示接取按钮） -->
                                 <template v-else>
                                     <el-button 
                                         type="primary" 
                                         size="small"
-                                        @click="claimTask(row)"
+                                        @click="openClaimDialog(row)"
+                                        :disabled="isFullyClaimed(row)"
                                     >
                                         <el-icon><Pointer /></el-icon>
-                                        接取
+                                        {{ isClaimed(row) ? '接取剩余' : '接取' }}
                                     </el-button>
                                 </template>
                             </div>
@@ -450,6 +582,15 @@ onMounted(() => {
                 </el-table>
             </template>
         </div>
+        
+        <!-- 接取对话框 -->
+        <WorkflowClaimDialog
+            v-model="claimDialogVisible"
+            :workflow-item="claimDialogItem"
+            :existing-claims="claims"
+            :current-user="currentUser"
+            @confirm="claimTask"
+        />
     </div>
 </template>
 
@@ -556,6 +697,61 @@ onMounted(() => {
     justify-content: center;
     gap: 4px;
 }
+
+.copyable-text {
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    user-select: none;
+}
+
+.copyable-text:hover {
+    background-color: rgba(64, 158, 255, 0.1);
+    color: #409eff;
+}
+
+/* 接取进度样式 */
+.claim-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.claim-progress-text {
+    font-size: 12px;
+    color: #606266;
+    text-align: center;
+}
+
+.claim-progress-empty {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+}
+
+.unclaimed-text {
+    font-size: 12px;
+    color: #909399;
+}
+
+/* 接取操作样式 */
+.my-claim-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.my-claim-tag {
+    font-size: 11px;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 4px;
+}
 </style>
 
 <style>
@@ -588,6 +784,12 @@ onMounted(() => {
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 }
 
+/* 可复制文本深色模式样式 */
+[data-theme="dark"] .copyable-text:hover {
+    background-color: rgba(64, 158, 255, 0.2);
+    color: #66b1ff;
+}
+
 /* 表格深色模式样式 - 提高对比度 */
 [data-theme="dark"] .el-table {
     background-color: #1e1e2d;
@@ -610,5 +812,23 @@ onMounted(() => {
 
 [data-theme="dark"] .el-table--enable-row-hover .el-table__body tr:hover > td.el-table__cell {
     background-color: #2d2d3a;
+}
+
+/* 市场组单行截断 */
+.market-group-line {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mg-tooltip-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 300px;
+}
+
+.mg-tag {
+    margin: 1px 0;
 }
 </style>

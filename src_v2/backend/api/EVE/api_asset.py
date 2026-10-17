@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from quart import Blueprint, g, jsonify, request
 
 from src_v2.backend.api.permission_required import permission_required, role_required
-from src_v2.backend.auth import auth_required
+from src_v2.backend.auth import auth_required, is_admin_user
 from src_v2.core.database.connect_manager import get_redis_manager as rdm
 from src_v2.core.database.kahuna_database_utils_v2 import EveAssetPullMissionDBUtils
 from src_v2.core.log import logger
@@ -17,6 +17,7 @@ from src_v2.core.utils import KahunaException, get_beijing_utctime
 from src_v2.model.EVE.asset.asset_manager import AssetManager
 from src_v2.model.EVE.character.character_manager import CharacterManager
 from src_v2.model.EVE.market.market_manager import MarketManager
+from src_v2.backend.api import response_helper
 
 api_EVE_asset_bp = Blueprint(
     'api_EVE_asset', __name__, url_prefix='/api/EVE/asset')
@@ -196,6 +197,36 @@ class ErrorResponse:
     message: str
 
 
+async def _get_owned_asset_pull_mission(
+    asset_owner_type: str, asset_owner_id: int, user_id: str
+):
+    """按主体取出资产拉取任务并校验归属
+
+    资产拉取任务只允许任务所有者（或管理员）启停、删除、立即拉取。
+    缺少归属校验时，任何登录用户都可以按 (owner_type, owner_id) 操作他人的任务
+    （安全审计 #6）。
+
+    Returns:
+        (mission_obj, error_response)：校验通过时 error_response 为 None
+    """
+    mission_obj = (
+        await EveAssetPullMissionDBUtils.select_mission_by_owner_id_and_owner_type(
+            asset_owner_id, asset_owner_type
+        )
+    )
+    if not mission_obj:
+        return None, response_helper.bad_request("任务不存在")
+
+    if mission_obj.user_name != user_id and not await is_admin_user(user_id):
+        logger.warning(
+            f"用户 {user_id} 尝试操作他人（{mission_obj.user_name}）的资产拉取任务 "
+            f"{asset_owner_type}:{asset_owner_id}，已拒绝"
+        )
+        return None, response_helper.forbidden("无权操作他人的资产拉取任务")
+
+    return mission_obj, None
+
+
 @api_EVE_asset_bp.route('/container/list', methods=['GET'])
 @auth_required
 # @validate_response(ContainerListResponse)
@@ -236,11 +267,11 @@ async def get_container_list():
         return {"status": 200, "data": res}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取容器列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取容器列表失败"}), 500
+        return response_helper.server_error("获取容器列表失败")
 
 
 @api_EVE_asset_bp.route('/container/delete', methods=['POST'])
@@ -288,11 +319,11 @@ async def delete_container():
         return {"status": 200, "message": "删除成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"删除容器失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "删除容器失败"}), 500
+        return response_helper.server_error("删除容器失败")
 
 
 @api_EVE_asset_bp.route('/isEditCorpSettingAllowed', methods=['GET'])
@@ -333,11 +364,11 @@ async def is_edit_corp_setting_allowed():
             return {"status": 200, "message": False}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"检查公司设置编辑权限失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "检查公司设置编辑权限失败"}), 500
+        return response_helper.server_error("检查公司设置编辑权限失败")
 
 
 @api_EVE_asset_bp.route('/editCorpSetting', methods=['POST'])
@@ -379,11 +410,11 @@ async def edit_corp_setting():
         return {"status": 200, "message": "编辑成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"编辑公司设置失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "编辑公司设置失败"}), 500
+        return response_helper.server_error("编辑公司设置失败")
 
 
 @api_EVE_asset_bp.route('/editPersonalAssetSetting', methods=['POST'])
@@ -436,11 +467,11 @@ async def edit_personal_asset_setting():
         return {"status": 200, "message": "编辑成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"编辑个人资产设置失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "编辑个人资产设置失败"}), 500
+        return response_helper.server_error("编辑个人资产设置失败")
 
 
 @api_EVE_asset_bp.route('/pullAssetOwners', methods=['GET'])
@@ -514,11 +545,11 @@ async def get_pull_asset_owners():
         return {"status": 200, "data": res}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取资产拉取主体列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取资产拉取主体列表失败"}), 500
+        return response_helper.server_error("获取资产拉取主体列表失败")
 
 
 @api_EVE_asset_bp.route('/createAssetPullMission', methods=['POST'])
@@ -580,11 +611,11 @@ async def create_asset_pull_mission():
         return {"status": 200, "message": "创建成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"创建资产拉取任务失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "创建资产拉取任务失败"}), 500
+        return response_helper.server_error("创建资产拉取任务失败")
 
 
 @api_EVE_asset_bp.route('/getAssetPullMissions', methods=['GET'])
@@ -654,11 +685,11 @@ async def get_asset_pull_missions():
         return {"status": 200, "data": missions}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取资产拉取任务列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取资产拉取任务列表失败"}), 500
+        return response_helper.server_error("获取资产拉取任务列表失败")
 
 
 @api_EVE_asset_bp.route('/closeAssetPullMission', methods=['POST'])
@@ -707,19 +738,26 @@ async def close_asset_pull_mission():
         }
     """
     try:
+        user_id = g.current_user["user_id"]
         data = await request.json
         asset_owner_type = data.get('asset_owner_type')
         asset_owner_id = data.get('asset_owner_id')
         active = data.get('active')
+
+        _, error_response = await _get_owned_asset_pull_mission(
+            asset_owner_type, asset_owner_id, user_id)
+        if error_response is not None:
+            return error_response
+
         await AssetManager().change_asset_pull_mission_status(asset_owner_type, asset_owner_id, active)
         return {"status": 200, "message": "关闭成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"关闭资产拉取任务失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "关闭资产拉取任务失败"}), 500
+        return response_helper.server_error("关闭资产拉取任务失败")
 
 
 @api_EVE_asset_bp.route('/startAssetPullMission', methods=['POST'])
@@ -768,20 +806,26 @@ async def start_asset_pull_mission():
         }
     """
     try:
+        user_id = g.current_user["user_id"]
         data = await request.json
         asset_owner_type = data.get('asset_owner_type')
         asset_owner_id = data.get('asset_owner_id')
         active = data.get('active')
 
+        _, error_response = await _get_owned_asset_pull_mission(
+            asset_owner_type, asset_owner_id, user_id)
+        if error_response is not None:
+            return error_response
+
         await AssetManager().change_asset_pull_mission_status(asset_owner_type, asset_owner_id, active)
         return {"status": 200, "message": "启动成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"启动资产拉取任务失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "启动资产拉取任务失败"}), 500
+        return response_helper.server_error("启动资产拉取任务失败")
 
 
 @api_EVE_asset_bp.route('/deleteAssetPullMission', methods=['DELETE'])
@@ -814,7 +858,7 @@ async def delete_asset_pull_mission():
         402: 需要ALPHA订阅
             - status: 状态码 (402)
             - message: 错误信息 (string)
-        403: 非总监无法删除公司资产拉取任务
+        403: 无权操作他人的资产拉取任务
             - status: 状态码 (403)
             - message: 错误信息 (string)
         500: 服务器错误
@@ -834,30 +878,27 @@ async def delete_asset_pull_mission():
         }
     """
     try:
+        user_id = g.current_user["user_id"]
         data = await request.json
         asset_owner_type = data.get('asset_owner_type')
         asset_owner_id = data.get('asset_owner_id')
 
-        # 如果是公司资产拉取任务，检查主角色是否有总监权限
-        if asset_owner_type == 'corp':
-            user_id = g.current_user["user_id"]
-            main_character_id = await UserManager().get_main_character_id(user_id)
-            main_character = await CharacterManager().get_character_by_character_id(main_character_id)
-            if not main_character.director:
-                return jsonify({"status": 403, "message": "非总监无法删除公司资产拉取任务"}), 403
+        # 归属校验：只能删除自己创建的资产拉取任务（管理员例外）
+        # 原来的「自己是否为总监」判定与请求里的目标公司无关，见安全审计 #6
+        mission_obj, error_response = await _get_owned_asset_pull_mission(
+            asset_owner_type, asset_owner_id, user_id)
+        if error_response is not None:
+            return error_response
 
-        mission_obj = await EveAssetPullMissionDBUtils.select_mission_by_owner_id_and_owner_type(asset_owner_id, asset_owner_type)
-        if not mission_obj:
-            return jsonify({"status": 400, "message": "任务不存在"}), 400
         await EveAssetPullMissionDBUtils.delete_obj(mission_obj)
         return {"status": 200, "message": "删除成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"删除资产拉取任务失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "删除资产拉取任务失败"}), 500
+        return response_helper.server_error("删除资产拉取任务失败")
 
 
 async def start_pull_asset_now(asset_owner_type: str, asset_owner_id: int):
@@ -870,6 +911,8 @@ async def start_pull_asset_now(asset_owner_type: str, asset_owner_id: int):
         "step_progress": 0,
         "is_indeterminate": 0
     })
+    # 设置 TTL 30 分钟，防止进程崩溃后状态永久卡 pulling
+    await rdm().r.expire(asset_status_key, 1800)
     try:
         await AssetManager().pull_asset_now(asset_owner_type, asset_owner_id)
         await rdm().r.hset(asset_status_key, mapping={
@@ -886,14 +929,22 @@ async def start_pull_asset_now(asset_owner_type: str, asset_owner_id: int):
             get_beijing_utctime(datetime.now()).isoformat()
         )
     except Exception as e:
-        await rdm().r.hset(asset_status_key, mapping={
-            'status': 'failed',
-            'total_page': 0,
-            'finished_page': 0,
-            "step_name": "",
-            "step_progress": 0,
-            "is_indeterminate": 0
-        })
+        try:
+            await rdm().r.hset(asset_status_key, mapping={
+                'status': 'failed',
+                'total_page': 0,
+                'finished_page': 0,
+                "step_name": "",
+                "step_progress": 0,
+                "is_indeterminate": 0
+            })
+            await rdm().r.expire(asset_status_key, 600)
+        except Exception:
+            # 兜底：Redis 写失败则删除 key，避免卡在 pulling 状态
+            try:
+                await rdm().r.delete(asset_status_key)
+            except Exception:
+                pass
         raise e
 
 
@@ -941,14 +992,22 @@ async def pull_asset_now():
         }
     """
     try:
+        user_id = g.current_user["user_id"]
         data = await request.json
         asset_owner_type = data.get('asset_owner_type')
         asset_owner_id = data.get('asset_owner_id')
 
+        # 归属校验：只能触发自己创建的资产拉取任务（管理员例外）
+        # 否则可用他人令牌重新拉取他人资产（安全审计 #4/#6 同源问题）
+        _, error_response = await _get_owned_asset_pull_mission(
+            asset_owner_type, asset_owner_id, user_id)
+        if error_response is not None:
+            return error_response
+
         asset_status_key = f'asset_pull_mission_status:{asset_owner_type}:{asset_owner_id}'
         status = await rdm().r.hget(asset_status_key, "status")
         if status == 'pulling':
-            return jsonify({"status": 400, "message": "任务正在拉取中"}), 400
+            return response_helper.bad_request("任务正在拉取中")
 
         # 获取上次拉取时间（异步操作）
         last_pull_time_str = await rdm().r.get(f"asset_pull_mission_last_pull_time:{asset_owner_type}:{asset_owner_id}")
@@ -970,7 +1029,7 @@ async def pull_asset_now():
                 # 计算时间差
                 time_diff = current_time - last_pull_time
                 if time_diff < timedelta(minutes=15):
-                    return jsonify({"status": 400, "message": "每15分钟只能拉取一次"}), 400
+                    return response_helper.bad_request("每15分钟只能拉取一次")
             except (ValueError, AttributeError) as e:
                 logger.warning(f"解析上次拉取时间失败: {e}")
 
@@ -984,11 +1043,11 @@ async def pull_asset_now():
         return {"status": 200, "message": "任务启动成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"启动资产拉取失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "启动资产拉取失败"}), 500
+        return response_helper.server_error("启动资产拉取失败")
 
 
 @api_EVE_asset_bp.route('/getAssetPullMissionStatus', methods=['POST'])
@@ -1052,11 +1111,11 @@ async def get_asset_pull_mission_status():
         return {"status": 200, "data": {'status': status, 'step_name': step_name, 'step_progress': step_progress, 'is_indeterminate': is_indeterminate}}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取资产拉取任务状态失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取资产拉取任务状态失败"}), 500
+        return response_helper.server_error("获取资产拉取任务状态失败")
 
 
 @api_EVE_asset_bp.route('/searchContainerByItemNameAndQuantity', methods=['POST'])
@@ -1140,11 +1199,11 @@ async def search_container_by_item_name_and_quantity():
         return {"status": 200, "data": output}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"搜索容器失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "搜索容器失败"}), 500
+        return response_helper.server_error("搜索容器失败")
 
 
 @api_EVE_asset_bp.route('/getAssetViewList', methods=['GET'])
@@ -1211,11 +1270,11 @@ async def get_asset_view_list():
         return {"status": 200, "data": output}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取资产视图列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取资产视图列表失败"}), 500
+        return response_helper.server_error("获取资产视图列表失败")
 
 
 @api_EVE_asset_bp.route('/getAssetViewData', methods=['GET'])
@@ -1240,6 +1299,9 @@ async def get_asset_view_data():
         200: 成功返回视图数据
             - status: 状态码 (200)
             - data: 资产视图数据 (object)
+        403: 无权查看此资产视图
+            - status: 状态码 (403)
+            - message: 错误信息 (string)
         404: 视图不存在
             - status: 状态码 (404)
             - message: 错误信息 (string)
@@ -1261,10 +1323,23 @@ async def get_asset_view_data():
 
         # GET 请求从查询参数中获取数据
         asset_view_sid = request.args.get('asset_view_sid')
-        logger.info(f"获取资产视图sid: {asset_view_sid}")
         if not asset_view_sid:
-            return jsonify({"status": 400, "message": "缺少参数 asset_view_sid"}), 400
+            return response_helper.bad_request("缺少参数 asset_view_sid")
         asset_view_obj = await AssetManager().get_asset_view_by_sid(asset_view_sid)
+        if not asset_view_obj:
+            return response_helper.not_found("资产视图不存在")
+
+        # 归属校验：仅所有者、管理员或已公开（分享）的视图可读取
+        # saveAssetViewConfig / deleteAssetView 均已比对 user_name，此处不能漏检（安全审计 #10）
+        if (
+            asset_view_obj.user_name != user_id
+            and not asset_view_obj.public
+            and not await is_admin_user(user_id)
+        ):
+            logger.warning(
+                f"用户 {user_id} 尝试读取用户 {asset_view_obj.user_name} 的资产视图，已拒绝"
+            )
+            return response_helper.forbidden("无权查看此资产视图")
 
         if asset_view_obj.view_type == 'statistics':
             output = await AssetManager().get_asset_statistics_data(user_id, asset_view_sid)
@@ -1277,10 +1352,10 @@ async def get_asset_view_data():
 
         return {"status": 200, "data": output, "view_type": asset_view_obj.view_type, "config": asset_view_obj.config}
     except KahunaException as e:
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         logger.error(f"获取资产视图数据失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取资产视图数据失败"}), 500
+        return response_helper.server_error("获取资产视图数据失败")
 
 
 @api_EVE_asset_bp.route('/saveAssetViewConfig', methods=['POST'])
@@ -1332,7 +1407,7 @@ async def save_asset_view_config():
         sid = data.get('sid')
 
         if not sid:
-            return jsonify({"status": 400, "message": "缺少参数 sid"}), 400
+            return response_helper.bad_request("缺少参数 sid")
 
         # 检查用户是否有admin角色
         user_roles = await permission_manager.get_user_roles(current_user_id)
@@ -1373,10 +1448,10 @@ async def save_asset_view_config():
             # 验证container_list格式
             if container_list is not None:
                 if not isinstance(container_list, list):
-                    return jsonify({"status": 400, "message": "container_list 必须是列表"}), 400
+                    return response_helper.bad_request("container_list 必须是列表")
                 for item in container_list:
                     if not isinstance(item, dict) or 'container_id' not in item or 'owner_id' not in item or 'location_flag' not in item:
-                        return jsonify({"status": 400, "message": "container_list 格式错误，应为 [{container_id, owner_id, location_flag}, ...]"}), 400
+                        return response_helper.bad_request("container_list 格式错误，应为 [{container_id, owner_id, location_flag}, ...]")
             update_data['container_list'] = container_list
 
         await AssetManager().save_asset_view_config(
@@ -1388,11 +1463,11 @@ async def save_asset_view_config():
         return {"status": 200, "message": "保存成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"保存资产视图配置失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "保存资产视图配置失败"}), 500
+        return response_helper.server_error("保存资产视图配置失败")
 
 
 @api_EVE_asset_bp.route('/createAssetView', methods=['POST'])
@@ -1452,15 +1527,15 @@ async def create_asset_view():
         tag = data.get('tag')
 
         if not container_list or not isinstance(container_list, list) or len(container_list) == 0:
-            return jsonify({"status": 400, "message": "缺少参数 container_list 或列表为空"}), 400
+            return response_helper.bad_request("缺少参数 container_list 或列表为空")
 
         # 验证container_list格式
         for item in container_list:
             if not isinstance(item, dict) or 'container_id' not in item or 'owner_id' not in item:
-                return jsonify({"status": 400, "message": "container_list 格式错误，应为 [{container_id, owner_id}, ...]"}), 400
+                return response_helper.bad_request("container_list 格式错误，应为 [{container_id, owner_id}, ...]")
 
         if not tag or not tag.strip():
-            return jsonify({"status": 400, "message": "缺少参数 tag 或标签为空"}), 400
+            return response_helper.bad_request("缺少参数 tag 或标签为空")
 
         # 检查用户是否有admin角色
         user_roles = await permission_manager.get_user_roles(current_user_id)
@@ -1487,11 +1562,11 @@ async def create_asset_view():
         return {"status": 200, "message": "创建监控成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"创建资产视图失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "创建资产视图失败"}), 500
+        return response_helper.server_error("创建资产视图失败")
 
 
 @api_EVE_asset_bp.route('/deleteAssetView', methods=['DELETE'])
@@ -1541,7 +1616,7 @@ async def delete_asset_view():
         sid = data.get('sid')
 
         if not sid:
-            return jsonify({"status": 400, "message": "缺少参数 sid"}), 400
+            return response_helper.bad_request("缺少参数 sid")
 
         # 检查用户是否有admin角色
         user_roles = await permission_manager.get_user_roles(current_user_id)
@@ -1568,8 +1643,8 @@ async def delete_asset_view():
         return {"status": 200, "message": "删除成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"删除资产视图失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "删除资产视图失败"}), 500
+        return response_helper.server_error("删除资产视图失败")

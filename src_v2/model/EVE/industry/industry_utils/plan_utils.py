@@ -23,7 +23,12 @@ from src_v2.model.EVE.sde import SdeUtils
 # 本地导入 - 相对导入
 from ..blueprint import BPManager as BPM
 from ..plan_configflow_operate import ConfigFlowOperateCenter
+from .lp_blueprint_cost import LpBlueprintCostCalculator
 from .material_utils import get_material_type
+
+
+# sentinel: work_list_cache 占位符，表示"正在计算中"，与"计算结果为空列表"区分
+_COMPUTING = object()
 
 
 async def _get_uncomplete_relation_list(op: ConfigFlowOperateCenter):
@@ -81,7 +86,8 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
     calculate_count = op.calculate_cache[(product_type_id, material_type_id, self_index_id)]
 
     # 判断是否需要计算 ==============================================================================================
-    if not await op.get_relation_need_calculate(product_type_id):
+    need_calc = await op.get_relation_need_calculate(product_type_id)
+    if not need_calc:
         op.all_ralation_dict[(product_type_id, material_type_id, self_index_id)]['relation'].update({
             "quantity": 0,
             "real_quantity": 0,
@@ -105,6 +111,23 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
                               for relation in product_node_in_relation if relation['relation']['index_id'] == self_index_id])
     self_index_real_quantity = sum([relation['relation']['real_quantity']
                                    for relation in product_node_in_relation if relation['relation']['index_id'] == self_index_id])
+
+    # [DIAG] 静默记录入口信息到 op，仅 crash 时 dump
+    _cache_key = (product_type_id, self_index_id)
+    _cache_hit = _cache_key in op.work_list_cache
+    _diag_entry = {
+        "self_index_id": self_index_id,
+        "order_index": order_index,
+        "cache_hit": _cache_hit,
+        "set_uped_enter": op.set_uped_jobs.get(product_type_id, -1),
+        "self_real": self_index_real_quantity,
+        "all_real": all_index_real_quantity,
+        "product_num": self_relation['product_num'],
+        "material_type_id": material_type_id,
+    }
+    if not hasattr(op, '_diag_set_uped_trace'):
+        op._diag_set_uped_trace = {}
+    op._diag_set_uped_trace.setdefault(product_type_id, []).append(_diag_entry)
 
     # 保存未处理的需求数量用于后期计算冗余
     if product_type_id not in op.node_need_quantity:
@@ -149,6 +172,7 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
         (self_index_real_quantity - last_order_index_real_remain) / self_relation['product_num'])
     if product_type_id not in op.set_uped_jobs:
         op.set_uped_jobs[product_type_id] = min_all_index_real_quantity_work
+        _diag_entry["min_all_init"] = min_all_index_real_quantity_work
     # 剩余未分配流程
     if order_index == 0:
         real_all_index_remain_work = min_all_index_real_quantity_work
@@ -164,7 +188,6 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
     material_adjust_price = await op.get_type_adjust_price(material_type_id)
     structure_info = await op.get_type_assign_structure_info(product_type_id)
     if not structure_info:
-        # raise KahunaException(f"物品 {product_type_id}: {await SdeUtils.get_name_by_id(product_type_id)} 未分配建筑")
         system_cost = {"manufacturing": 0.02, "reaction": 0.02}
     else:
         system_cost = await op.get_system_cost(structure_info['system_id'])
@@ -175,7 +198,10 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
     # 根据配置 切分工作流 or 不切分 每个(product_type_id, index)只计算一次 ==============================================================================================
     real_work_list = []
     if (product_type_id, self_index_id) not in op.work_list_cache:
-        op.work_list_cache[(product_type_id, self_index_id)] = ([], [])
+        op.work_list_cache[(product_type_id, self_index_id)] = _COMPUTING
+        if not hasattr(op, '_work_cache_events'):
+            op._work_cache_events = {}
+        op._work_cache_events[(product_type_id, self_index_id)] = asyncio.Event()
         max_job_run = await op.get_max_job_run(product_type_id)
         # 计算单轮eiv ==========================================
         material_dict = await BPM.get_bp_materials(product_type_id, pdm=op.sdm)
@@ -211,6 +237,30 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
                     this_round_work = min(
                         bp_support_runs, op.set_uped_jobs[product_type_id], this_round_max_job_run)
                     if this_round_work == 0 and real_work_waiting_to_split > 0:
+                        # [DIAG] dump set_uped_jobs 调用轨迹
+                        _trace = op._diag_set_uped_trace.get(product_type_id, [])
+                        _trace_lines = []
+                        for i, e in enumerate(_trace):
+                            _parts = [
+                                f"#{i} idx={e['self_index_id']} ord={e.get('order_index','?')} "
+                                f"cache={'hit' if e.get('cache_hit') else 'miss'} "
+                                f"enter={e.get('set_uped_enter','?')}"
+                            ]
+                            if not e.get('cache_hit'):
+                                if 'min_all_init' in e:
+                                    _parts.append(f"min_all={e['min_all_init']}")
+                                _parts.append(f"self={e.get('self_real','?')} all={e.get('all_real','?')} pn={e.get('product_num','?')}")
+                            if 'set_uped_after' in e:
+                                _parts.append(f"after={e['set_uped_after']} alloc={e.get('total_allocated','?')}")
+                            if e.get('cache_hit') and 'cached_total_allocated' in e:
+                                _parts.append(f"cached_alloc={e['cached_total_allocated']}")
+                            _trace_lines.append("  " + " | ".join(_parts))
+                        logger.error(
+                            f"[DIAG] set_uped_jobs 耗尽 trace (产品 {product_type_id}, {len(_trace)} 条记录):\n"
+                            + "\n".join(_trace_lines)
+                            + f"\n  >>> 当前: idx={self_index_id} ord={order_index} "
+                            f"cache_hit={_cache_hit} real_wait={real_work_waiting_to_split}"
+                        )
                         logger.error(f"""检测到有剩余需求，但本轮工作量为0，请检查配置
                             real_work_waiting_to_split: {real_work_waiting_to_split}
                             bp_support_runs: {bp_support_runs}
@@ -220,6 +270,7 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
                             all_index_real_quantity: {all_index_real_quantity}
                             self_relation['product_num']: {self_relation['product_num']}
                             self_index_real_quantity: {self_index_real_quantity}
+                            last_order_index_real_remain: {last_order_index_real_remain}
                         """)
                         raise KahunaException(f"物品 {product_type_id}: {await SdeUtils.get_name_by_id(product_type_id, zh=True)} 切分工作流失败")
 
@@ -251,6 +302,22 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
                 })
 
                 if this_round_work == 0 and real_work_waiting_to_split > 0:
+                    # [DIAG] dump same trace for this crash path too
+                    _trace = op._diag_set_uped_trace.get(product_type_id, [])
+                    _trace_lines = []
+                    for i, e in enumerate(_trace):
+                        _parts = [
+                            f"#{i} idx={e['self_index_id']} cache={'hit' if e.get('cache_hit') else 'miss'} enter={e.get('set_uped_enter','?')}"
+                        ]
+                        if not e.get('cache_hit') and 'min_all_init' in e:
+                            _parts.append(f"min_all={e['min_all_init']}")
+                        if 'set_uped_after' in e:
+                            _parts.append(f"after={e['set_uped_after']} alloc={e.get('total_allocated','?')}")
+                        _trace_lines.append("  " + " | ".join(_parts))
+                    logger.error(
+                        f"[DIAG] set_uped_jobs 耗尽 trace (产品 {product_type_id}, general check, {len(_trace)} 条):\n"
+                        + "\n".join(_trace_lines)
+                    )
                     logger.error(
                         f"""relation_calculater split_jobs error
                         product={product_type_id} index_id={self_index_id}
@@ -324,11 +391,18 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
         await op.calculate_work_material_avaliable(real_work_list)
         op.work_list_cache[(product_type_id, self_index_id)] = [
             real_work_list, job_list]
+        op._work_cache_events[(product_type_id, self_index_id)].set()
+        _diag_entry["set_uped_after"] = op.set_uped_jobs.get(product_type_id, -1)
+        _diag_entry["total_allocated"] = sum(w['runs'] for w in real_work_list)
     else:
-        while op.work_list_cache[(product_type_id, self_index_id)] == ([], []):
-            await asyncio.sleep(0.1)
-        real_work_list, job_list = op.work_list_cache[(
-            product_type_id, self_index_id)]
+        cached = op.work_list_cache[(product_type_id, self_index_id)]
+        if cached is _COMPUTING:
+            # 另一个任务正在计算此 key，等待其完成（防止读到空占位符）
+            await op._work_cache_events[(product_type_id, self_index_id)].wait()
+            real_work_list, job_list = op.work_list_cache[(product_type_id, self_index_id)]
+        else:
+            real_work_list, job_list = cached
+        _diag_entry["cached_total_allocated"] = sum(w.get('runs', 0) for w in real_work_list)
 
     # 计算多余数量 ==============================================================================================
     real_product_quantity = self_relation['product_num'] * \
@@ -383,8 +457,6 @@ async def _relation_calculater(plan_settings: dict, relation: dict, product_node
         "need_calculate": True
     })
 
-    logger.debug(
-        f"relation index {self_relation['index_id']} {self_relation['product']}->{self_relation['material']} calculate complete")
     # await tqdm_manager.update_mission("relation_moniter_process", 1)
 
 
@@ -416,27 +488,44 @@ async def update_plan_status(op: ConfigFlowOperateCenter, all_relation_list: Lis
     op.all_relation_between_nodes_dict = all_relation_between_nodes_dict
     op.all_ralation_dict = all_ralation_dict
 
+    # 限制并发关系计算数量，防止 Redis 连接池耗尽（MaxConnectionsError）
+    # 每个关系计算会调用多次 Redis（get_type_adjust_price 等），需严格控制并发
+    relation_semaphore = asyncio.Semaphore(20)
+
     async def relation_calculater_with_semaphore(relation: dict, product_node_in_relation: List[dict], same_route_relations: List[dict]):
-        # async with neo4j_manager.semaphore:
-        await _relation_calculater(plan_settings, relation, product_node_in_relation, same_route_relations, op)
+        async with relation_semaphore:
+            await _relation_calculater(plan_settings, relation, product_node_in_relation, same_route_relations, op)
 
     # await tqdm_manager.add_mission(f"relation_moniter_process-> username: {user_name} plan_name: {plan_name}", len(all_relation_list))
     logger.info(
         f"relation_moniter_process-> username: {user_name} plan_name: {plan_name} start")
     last_progress = 0
     uncomplete_relation_list = await _get_uncomplete_relation_list(op)
+    logger.info(
+        f"relation_moniter_process-> username: {user_name} plan_name: {plan_name} "
+        f"initial uncomplete_relations={len(uncomplete_relation_list)}, total={len(all_relation_list)}")
     while uncomplete_relation_list:
+        # 检查哪些关系可以计算
         check_tasks = [
             asyncio.create_task(_is_relation_calculate_avaliable(op, relation)) for relation in uncomplete_relation_list
         ]
+        logger.debug(
+            f"relation_moniter_process-> {user_name}/{plan_name}: "
+            f"checking {len(check_tasks)} relations")
         check_results = await asyncio.gather(*check_tasks)
 
+        # 取可以计算的关系
         calculate_tasks = [
             asyncio.create_task(relation_calculater_with_semaphore(
                 relation, product_node_in_relation, same_route_relations))
             for res, product_node_in_relation, same_route_relations, relation in check_results if res == True
         ]
-        await asyncio.gather(*calculate_tasks)
+        if calculate_tasks:
+            await asyncio.gather(*calculate_tasks)
+        else:
+            logger.warning(
+                f"relation_moniter_process-> {user_name}/{plan_name}: "
+                f"no relations ready, {len(uncomplete_relation_list)} still uncomplete")
 
         # mission_count = await tqdm_manager.get_mission_count(f"relation_moniter_process-> username: {user_name} plan_name: {plan_name}")
         logger.info(
@@ -473,6 +562,44 @@ async def _get_work_product_class_type(type_id: int, sdm=None):
         return '其他'
 
 
+def calculate_tax_items(children: list, tax_confs: list) -> list:
+    """Calculate tax items based on children material costs and tax configurations.
+    
+    Args:
+        children: list of dicts with {material_type_node, quantity, jita_buy_price}
+        tax_confs: list of dicts with {target_category, tax_rate}
+    
+    Returns:
+        list of dicts with {category, target_category, tax_rate, tax_amount}
+    """
+    if not tax_confs:
+        return []
+    
+    # Group children costs by material_type_node
+    category_costs = {}
+    for child in children:
+        category = child.get('material_type_node', '杂货')
+        qty = float(child.get('quantity', 0))
+        price = float(child.get('jita_buy_price', 0))
+        cost = qty * price
+        category_costs[category] = category_costs.get(category, 0) + cost
+    
+    # Calculate tax for each config
+    result = []
+    for conf in tax_confs:
+        target = conf.get('target_category', '')
+        rate = conf.get('tax_rate', 0)
+        base_cost = category_costs.get(target, 0)
+        tax_amount = round(base_cost * rate / 100, 2)
+        result.append({
+            'category': f'{target}税' if target else '税',
+            'target_category': target,
+            'tax_rate': rate,
+            'tax_amount': tax_amount
+        })
+    return result
+
+
 async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, subprocess=False, inrdm=None, sdm=None):
     """
     获取计划表格视图数据
@@ -486,7 +613,7 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
         rdm = inrdm
 
     # 定义原材料大类
-    material_type = ["矿石", "冰矿产物", "燃料块", "元素", "气云", "行星工业", "杂货"]
+    material_type = ["矿物", "冰矿产物", "燃料块", "元素", "气云", "行星工业", "杂货"]
 
     if not subprocess:
         await rdm.r.hset(op.current_progress_key, mapping={"name": "获取路径数据", "progress": 50, "is_indeterminate": 1})
@@ -630,22 +757,26 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
         # mission_count = await tqdm_manager.update_mission(f"分类节点 {plan_name}", 1)
 
         # 整理工作流输出
-        work_flow.extend([{
-            "type_id": work["type_id"],
-            "active_id": await BPM.get_activity_id_by_product_typeid(work["type_id"], pdm=sdm),
-            "type_name_zh": await SdeUtils.get_name_by_id(work["type_id"], zh=True, pdm=sdm),
-            "type_name": await SdeUtils.get_name_by_id(work["type_id"], pdm=sdm),
-            "avaliable": work["avaliable"],
-            "runs": work["runs"],
-            "bp_object": work["bp_object"],
-            "type_order_id": node["order_id"],
-            "mater_eff": work["mater_eff"],
-            "time_eff": work["time_eff"],
-            "class_type": await _get_work_product_class_type(work["type_id"], sdm=op.sdm),
-            "eiv": work.get("eiv", 0),
-            "active_time": work.get("active_time", 0),
-        } for work in node.get("real_job_list", []) if work
-        ])
+        for work in node.get("real_job_list", []):
+            if not work:
+                continue
+            work_flow.append({
+                "type_id": work["type_id"],
+                "active_id": await BPM.get_activity_id_by_product_typeid(work["type_id"], pdm=sdm),
+                "type_name_zh": await SdeUtils.get_name_by_id(work["type_id"], zh=True, pdm=sdm),
+                "type_name": await SdeUtils.get_name_by_id(work["type_id"], pdm=sdm),
+                "avaliable": work["avaliable"],
+                "runs": work["runs"],
+                "bp_object": work["bp_object"],
+                "type_order_id": node["order_id"],
+                "mater_eff": work["mater_eff"],
+                "time_eff": work["time_eff"],
+                "class_type": await _get_work_product_class_type(work["type_id"], sdm=op.sdm),
+                "category_name": await SdeUtils.get_category_by_id(work["type_id"], zh=True, pdm=sdm),
+                "market_group_list": await SdeUtils.get_market_group_list(work["type_id"], zh=True, pdm=sdm),
+                "eiv": work.get("eiv", 0),
+                "active_time": work.get("active_time", 0),
+            })
 
         # 整理蓝图库存
         if not subprocess:
@@ -783,6 +914,26 @@ async def get_plan_tableview_data(op: ConfigFlowOperateCenter, node_dict: dict, 
         if '_children_dict' in eiv_cost_dict[top_product_type_id]:
             eiv_cost_dict[top_product_type_id]['children'] = list(eiv_cost_dict[top_product_type_id]['_children_dict'].values())
             del eiv_cost_dict[top_product_type_id]['_children_dict']
+        # Calculate tax_items for this product if tax_confs are configured
+        tax_confs = getattr(op, 'tax_confs', [])
+        if tax_confs and '_children_dict_raw' not in eiv_cost_dict[top_product_type_id]:
+            children = eiv_cost_dict[top_product_type_id].get('children', [])
+            eiv_cost_dict[top_product_type_id]['tax_items'] = calculate_tax_items(children, tax_confs)
+        else:
+            eiv_cost_dict[top_product_type_id]['tax_items'] = []
+    
+    # 计算势力蓝图产品的LP成本
+    if plan_settings.get("calculate_lp_blueprint_cost", False):
+        calculator = LpBlueprintCostCalculator()
+        for top_product_type_id in list(eiv_cost_dict.keys()):
+            try:
+                cost = await calculator.calc_blueprint_cost(
+                    top_product_type_id, sdm=sdm, db=None
+                )
+                product_num = eiv_cost_dict[top_product_type_id].get("product_num", 1)
+                eiv_cost_dict[top_product_type_id]["blueprint_cost"] = cost * product_num
+            except Exception:
+                eiv_cost_dict[top_product_type_id]["blueprint_cost"] = 0.0
     
     return {
         "flow_output": flow_output,

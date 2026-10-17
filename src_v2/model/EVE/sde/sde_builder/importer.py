@@ -23,6 +23,8 @@ from .market_groups_model import MarketGroups, process_market_groups_row
 from .map_solar_systems_model import MapSolarSystems, process_map_solar_systems_row
 from .map_regions_model import MapRegions, process_map_regions_row
 from .type_materials_model import TypeMaterials, process_type_materials_row
+from .planet_schematics_model import PlanetSchematics, PlanetSchematicTypes, process_planet_schematics_row
+from .npc_corporations_model import NpcCorporations, process_npc_corporations_row
 
 
 class SDEImporter:
@@ -333,7 +335,17 @@ class SDEImporter:
         if table_name == 'typeMaterials':
             logger.debug("使用特殊处理导入 typeMaterials 表")
             return await self.import_type_materials(conn, file_path)
-        
+
+        # 特殊处理：planetSchematics 表
+        if table_name == 'planetSchematics':
+            logger.info("检测到 planetSchematics.jsonl，使用特殊处理导入行星工业蓝图表")
+            return await self.import_planet_schematics(conn, file_path)
+
+        # 特殊处理：npcCorporations 表
+        if table_name == 'npcCorporations':
+            logger.info("检测到 npcCorporations.jsonl，使用特殊处理导入NPC公司表")
+            return await self.import_npc_corporations(conn, file_path)
+
         # 通用处理：其他表
         # 解析文件获取数据
         data_iterator = self.parser.parse_file(file_path)
@@ -696,7 +708,79 @@ class SDEImporter:
         except Exception as e:
             logger.error(f"导入 MetaGroups 表失败: {file_path}, 错误: {e}")
             raise
-    
+
+    async def import_npc_corporations(self, conn, file_path: str) -> int:
+        """
+        特殊处理：导入 NpcCorporations 表数据
+
+        Args:
+            conn: 数据库连接
+            file_path: npcCorporations.jsonl 文件路径
+
+        Returns:
+            导入的记录数
+        """
+        import json
+
+        logger.info(f"使用特殊处理导入 NpcCorporations 表: {file_path}")
+
+        table_name = 'npcCorporations'
+        columns = [
+            'corporationID', 'name_en', 'name_zh', 'factionID',
+            'description_en', 'description_zh', 'tickerName',
+            'stationID', 'solarSystemID', 'raceID', 'ceoID',
+            'iconID', 'lpOfferTables'
+        ]
+
+        batch = []
+        total_count = 0
+        line_count = 0
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        # 解析原始 JSON
+                        raw_row = json.loads(line)
+
+                        # 使用特殊处理函数处理数据
+                        processed_row = process_npc_corporations_row(raw_row)
+
+                        batch.append(processed_row)
+                        line_count += 1
+
+                        # 达到批量大小时执行插入
+                        if len(batch) >= self.batch_size:
+                            await self.bulk_insert_via_sql(conn, table_name, columns, batch)
+                            total_count += len(batch)
+                            batch = []
+
+                            if total_count % 50000 == 0:
+                                logger.info(f"已导入 {total_count} 条记录到 {table_name}")
+
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"第 {line_count + 1} 行 JSON 解析失败: {e}")
+                        continue
+                    except Exception as e:
+                        logger.warning(f"第 {line_count + 1} 行处理失败: {e}")
+                        continue
+
+            # 插入剩余数据
+            if batch:
+                await self.bulk_insert_via_sql(conn, table_name, columns, batch)
+                total_count += len(batch)
+
+            logger.info(f"NpcCorporations 表导入完成: {file_path}, 共 {total_count} 条记录")
+            return total_count
+
+        except Exception as e:
+            logger.error(f"导入 NpcCorporations 表失败: {file_path}, 错误: {e}")
+            raise
+
     async def import_inv_groups(self, conn, file_path: str) -> int:
         """
         特殊处理：导入 InvGroups 表数据
@@ -1118,6 +1202,92 @@ class SDEImporter:
             logger.error(f"导入 TypeMaterials 表失败: {file_path}, 错误: {e}")
             raise
     
+    async def import_planet_schematics(self, conn, file_path: str) -> int:
+        """
+        特殊处理：导入行星工业蓝图相关表数据（2个表）
+
+        Args:
+            conn: 数据库连接
+            file_path: planetSchematics.jsonl 文件路径
+
+        Returns:
+            导入的总记录数（2个表的总和）
+        """
+        import json
+
+        logger.info(f"使用特殊处理导入行星工业蓝图表: {file_path}")
+
+        if not os.path.exists(file_path):
+            logger.error(f"行星工业蓝图文件不存在: {file_path}")
+            return 0
+
+        # 定义2个表的列名
+        schematics_columns = ['schematicID', 'cycleTime', 'name_en', 'name_zh', 'pins']
+        types_columns = ['schematicID', 'typeID', 'isInput', 'quantity']
+
+        # 批量收集数据
+        schematics_batch: List[Dict[str, Any]] = []
+        types_batch: List[Dict[str, Any]] = []
+
+        total_schematics = 0
+        total_types = 0
+        line_count = 0
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    try:
+                        raw_row = json.loads(line)
+                        schematic_record, types_records = process_planet_schematics_row(raw_row)
+
+                        if schematic_record:
+                            schematics_batch.append(schematic_record)
+                        if types_records:
+                            types_batch.extend(types_records)
+
+                        line_count += 1
+
+                        # 达到批量大小时执行插入
+                        total_batch_size = len(schematics_batch) + len(types_batch)
+                        if total_batch_size >= self.batch_size:
+                            if schematics_batch:
+                                await self.bulk_insert_via_sql(conn, 'planetSchematics', schematics_columns, schematics_batch)
+                                total_schematics += len(schematics_batch)
+                                schematics_batch = []
+                            if types_batch:
+                                await self.bulk_insert_via_sql(conn, 'planetSchematicTypes', types_columns, types_batch)
+                                total_types += len(types_batch)
+                                types_batch = []
+
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"第 {line_count + 1} 行 JSON 解析失败: {e}")
+                        continue
+                    except Exception as e:
+                        logger.warning(f"第 {line_count + 1} 行处理失败: {e}")
+                        continue
+
+            # 插入剩余数据
+            if schematics_batch:
+                await self.bulk_insert_via_sql(conn, 'planetSchematics', schematics_columns, schematics_batch)
+                total_schematics += len(schematics_batch)
+            if types_batch:
+                await self.bulk_insert_via_sql(conn, 'planetSchematicTypes', types_columns, types_batch)
+                total_types += len(types_batch)
+
+            logger.info(f"行星工业蓝图表导入完成: {file_path}")
+            logger.info(f"  planetSchematics: {total_schematics} 条记录")
+            logger.info(f"  planetSchematicTypes: {total_types} 条记录")
+            logger.info(f"  总计: {total_schematics + total_types} 条记录")
+            return total_schematics + total_types
+
+        except Exception as e:
+            logger.error(f"导入行星工业蓝图表失败: {file_path}, 错误: {e}")
+            raise
+
     async def full_update(self, extract_dir: str) -> bool:
         """
         执行全量更新
@@ -1182,6 +1352,12 @@ class SDEImporter:
                                 'industryActivities',
                                 'industryActivityMaterials',
                                 'industryActivityProducts'
+                            ])
+                        # 特殊处理：planetSchematics.jsonl -> 2个行星工业蓝图表
+                        elif table_name == 'planetSchematics':
+                            tables_to_clear.extend([
+                                'planetSchematics',
+                                'planetSchematicTypes'
                             ])
                         else:
                             tables_to_clear.append(table_name)

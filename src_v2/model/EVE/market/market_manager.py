@@ -18,25 +18,27 @@ from src_v2.core.log import logger
 # import Exception
 from src_v2.core.utils import KahunaException, SingletonMeta, tqdm_manager
 from src_v2.model.EVE.character.character_manager import CharacterManager
+from src_v2.model.EVE.eve_constants import (
+    B_9C24_KEEPSTAR_ID,
+    FRT_4H_STRUCTURE_ID,
+    JITA_SYSTEM_ID,
+    JITA_TRADE_HUB_STRUCTURE_ID,
+    PERIMETER_SYSTEM_ID,
+    PIMI_STRUCTURE_LIST,
+    PLEX_ID,
+    REGION_FORGE_ID,
+    REGION_PLEX_ID,
+    REGION_VALE_ID,
+    S33RB_O_STRUCTURE_ID,
+)
 from src_v2.model.EVE.eveesi import eveesi
-
-REGION_FORGE_ID = 10000002
-REGION_VALE_ID = 10000003
-REGION_PLEX_ID = 19000001
-JITA_TRADE_HUB_STRUCTURE_ID = 60003760
-JITA_SYSTEM_ID = 30000142
-PERIMETER_SYSTEM_ID = 30000144
-PLEX_ID = 44992
-FRT_4H_STRUCTURE_ID = 1035466617946
-S33RB_O_STRUCTURE_ID = 1045441547980
-B_9C24_KEEPSTAR_ID = 1046831245129
-PIMI_STRUCTURE_LIST = [1042508032148, 1042499803831, 1044752365771]
 
 
 class MarketManager(metaclass=SingletonMeta):
     def __init__(self):
         self.update_jita_price_lock = asyncio.Lock()
         self.update_frt_price_lock = asyncio.Lock()
+        self._redis_semaphore = asyncio.Semaphore(10)  # 限制并发 Redis 写入，防止连接池耗尽
 
     @staticmethod
     def _resolve_region_id_for_type(region_id: int, type_id: int) -> int:
@@ -140,9 +142,10 @@ class MarketManager(metaclass=SingletonMeta):
             )
 
     async def _batch_insert_redis(self, market_zone: str, batch: list):
-        """批量插入Redis的辅助方法"""
-        for type_id, price_data in batch:
-            await get_redis_manager().r.hset(f"market_price:{market_zone}:{type_id}", mapping=price_data)
+        """批量插入Redis的辅助方法，通过信号量限制并发连接数"""
+        async with self._redis_semaphore:
+            for type_id, price_data in batch:
+                await get_redis_manager().r.hset(f"market_price:{market_zone}:{type_id}", mapping=price_data)
 
     async def _fetch_plex_orders_and_price(self) -> tuple[list[dict], dict | None]:
         logger.info("Requesting PLEX market.")
@@ -220,7 +223,7 @@ class MarketManager(metaclass=SingletonMeta):
         await self._save_orders_to_database(REGION_VALE_ID, flat_frt_orders)
 
         # 分批处理并并发插入Redis
-        batch_size = 100  # 每批处理100个type_id
+        batch_size = 500  # 每批处理100个type_id
         items = list(type_price_cache.items())
         tasks = []
 
@@ -285,7 +288,7 @@ class MarketManager(metaclass=SingletonMeta):
             type_price_cache[PLEX_ID] = plex_price
 
         # 分批处理并并发插入Redis
-        batch_size = 100  # 每批处理100个type_id
+        batch_size = 500  # 每批处理100个type_id
         items = list(type_price_cache.items())
         tasks = []
 

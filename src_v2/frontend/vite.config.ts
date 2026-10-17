@@ -30,6 +30,9 @@ export default defineConfig(async ({ command, mode }) => {
   
   return {
     plugins,
+    esbuild: {
+      pure: ['console.log', 'console.debug'],
+    },
     build: {
       rollupOptions: {
         output: {

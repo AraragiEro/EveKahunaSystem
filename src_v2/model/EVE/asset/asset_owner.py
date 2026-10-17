@@ -23,9 +23,11 @@ from ..log_server import logger
 
 # 查价缓存
 
-REGION_FORGE_ID = 10000002
-JITA_TRADE_HUB_STRUCTURE_ID = 60003760
-FRT_4H_STRUCTURE_ID = 1035466617946
+from ...model.EVE.eve_constants import (
+    FRT_4H_STRUCTURE_ID,
+    JITA_TRADE_HUB_STRUCTURE_ID,
+    REGION_FORGE_ID,
+)
 
 
 class AssetOwner():

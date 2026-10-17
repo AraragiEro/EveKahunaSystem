@@ -16,8 +16,6 @@ from math import ceil, sqrt
 from typing import Dict, List, Tuple
 
 from src_v2.core.config.config import config
-
-# 本地导入 - 核心工具
 from src_v2.core.database.connect_manager import get_neo4j_manager
 from src_v2.core.database.connect_manager import get_postgres_manager as pdm
 from src_v2.core.database.connect_manager import get_redis_manager as rdm
@@ -28,54 +26,32 @@ from src_v2.core.database.kahuna_database_utils_v2 import (
     EveIndustryPlanProductDBUtils,
     EveIndustryPlanProductJSONBDBUtils,
 )
-from src_v2.core.database.neo4j_utils import Neo4jIndustryUtils as NIU
+from src_v2.core.database.neo4j_utils import Neo4jAssetUtils as NAU, Neo4jIndustryUtils as NIU
 from src_v2.core.log import logger
 from src_v2.core.utils import KahunaException, SingletonMeta, tqdm_manager
+
+# 本地导入 - 核心工具
+# 企业版成本刷新器为可选依赖：社区版（无 src_v2/enterprise 目录）下置 None，
+# 使用点必须判空，避免顶层 ImportError 导致整个服务无法启动。
+try:
+    from src_v2.enterprise.utils.cost_refresher import CostRefresher
+except ImportError:  # 社区版 / 开源版独立运行
+    CostRefresher = None
+    logger.warning("企业版成本刷新器不可用（src_v2.enterprise 缺失），市场成本骨架缓存功能将跳过")
 
 # 本地导入 - EVE 模块
 from src_v2.model.EVE.market.market_manager import MarketManager
 from src_v2.model.EVE.sde import SdeUtils
 
+# 本地导入 - 相对导入
+from .blueprint import BPManager as BPM
+
 # 本地导入 - industry_utils 工具模块
 from .industry_utils import (
     AsyncCounter,
-    MarketTree,
-    add_config_to_plan,
-    add_industrypermision,
-    create_config_flow_config,
-    create_default_config_flow_preset,
-    delete_config_flow_config,
-    delete_config_flow_preset,
-    delete_config_from_plan,
-    delete_industrypermision,
-    fetch_recommended_presets,
-    get_config_flow_config_list,
-    get_config_flow_list,
-    get_config_flow_preset_detail,
-    get_config_flow_presets,
-    get_item_info,
-    get_location_flag_list,
-    get_market_tree,
-    get_material_type,
     get_plan_tableview_data,
-    get_structure_assign_keyword_suggestions,
-    get_structure_list,
-    get_type_list,
-    get_user_all_container_permission,
-    load_config_flow_preset,
-    load_shared_config_flow_preset,
-    modify_config_flow_config,
-    save_config_flow_preset,
-    save_config_flow_preset_config,
-    save_config_flow_to_plan,
-    share_config_flow_preset,
-    update_config_flow_preset_name,
-    update_container_permission_location_flag,
-    update_container_permission_tag,
     update_plan_status,
 )
-
-# 本地导入 - 相对导入
 from .plan_configflow_operate import ConfigFlowOperateCenter
 
 SUBWORKER_COUNT = config.getint("APP", "SUBWORKER_COUNT", fallback=3)
@@ -91,6 +67,8 @@ class IndustryManager(metaclass=SingletonMeta):
         self.calculate_queue_lock = asyncio.Lock()  # 保护队列操作
         self.calculate_semaphore = asyncio.Semaphore(5)  # 最多5个并发任务
         self._queue_processor_task = None
+        self._cleanup_task = None
+        self._periodic_cleanup_task = None
         self._start_queue_processor()
 
         self._process_pool = None
@@ -221,12 +199,18 @@ class IndustryManager(metaclass=SingletonMeta):
                 if "type_id" not in product or \
                         "quantity" not in product:
                     raise KahunaException(f"产品数据结构错误。")
-                product_data.append({
+                p = {
                     "type": "product",
                     "type_id": product["type_id"],
                     "quantity": product["quantity"],
                     "active": product.get("active", True)
-                })
+                }
+                note_val = product.get("note", "").strip() if isinstance(product.get("note"), str) else None
+                if note_val:
+                    if len(note_val) > 200:
+                        raise KahunaException("产品备注不能超过200个字符")
+                    p["note"] = note_val
+                product_data.append(p)
             elif product["type"] == "group":
                 if "name" not in product:
                     raise KahunaException(f"产品数据结构错误。")
@@ -244,12 +228,18 @@ class IndustryManager(metaclass=SingletonMeta):
                     if "type_id" not in sub_product or \
                             "quantity" not in sub_product:
                         raise KahunaException(f"产品数据结构错误。")
-                    product_data[-1]["products"].append({
+                    sp = {
                         "type": "product",
                         "type_id": sub_product["type_id"],
                         "quantity": sub_product["quantity"],
                         "active": sub_product.get("active", True)
-                    })
+                    }
+                    note_val = sub_product.get("note", "").strip() if isinstance(sub_product.get("note"), str) else None
+                    if note_val:
+                        if len(note_val) > 200:
+                            raise KahunaException("产品备注不能超过200个字符")
+                        sp["note"] = note_val
+                    product_data[-1]["products"].append(sp)
 
         logger.info(f"save_plan_products: {user_id} {plan_name} {products}")
         plan_product_obj = await EveIndustryPlanProductJSONBDBUtils.select_by_user_name_and_plan_name(user_id, plan_name)
@@ -337,7 +327,7 @@ class IndustryManager(metaclass=SingletonMeta):
                 f"已强制kill {killed_count} 个进程，清理了 {len(cleaned_type_ids)} 个 running_type 条目")
 
         except Exception as e:
-            logger.error(f"强制kill进程池时出错: {e}", exc_info=True)
+            logger.error(f"[batch] 强制kill进程池时出错: {e}", exc_info=True)
 
         return killed_count, cleaned_type_ids
 
@@ -352,9 +342,17 @@ class IndustryManager(metaclass=SingletonMeta):
         total_count = len(type_id_list)
         progress_key = None
         total_progress_key = None
+        calculate_cost_lock_key = None
         if market_id is not None:
             progress_key = f"market_cost_calculation_progress:{op.user_name}:{market_id}"
             total_progress_key = f"market_cost_calculation_total:{op.user_name}:{market_id}"
+            if CostRefresher is not None:
+                calculate_cost_lock_key = CostRefresher._calculate_cost_lock_key(op.user_name, market_id)
+                # 设置分布式锁（1小时过期，防止服务器崩溃后锁永远存在）
+                await rdm().r.set(calculate_cost_lock_key, "1", ex=3600)
+            else:
+                # 社区版没有成本刷新定时器，无需分布式锁，进度计算照常进行
+                logger.warning("企业版成本刷新器不可用，跳过市场成本计算的分布式锁")
             await rdm().r.set(total_progress_key, total_count)
             await rdm().r.hset(progress_key, mapping={
                 "status": "running",
@@ -391,6 +389,10 @@ class IndustryManager(metaclass=SingletonMeta):
         cost_dict = {}
         await tqdm_manager.add_mission(f"calculate_cost_{op.user_name}_{market_id}", len(type_id_list))
 
+        # 主进程一次性查询 Structure 节点数据，打包进 plan_data 传给子进程
+        # 避免子进程中 Neo4j 异步驱动 session() 不可靠的问题
+        structure_nodes = await NAU.get_structure_nodes()
+
         # 分批处理，每批SUBWORKER_COUNT个任务
         completed_count = 0
         result_key = None
@@ -422,6 +424,11 @@ class IndustryManager(metaclass=SingletonMeta):
                 plan_settings["considerate_bp_relation"] = False
                 plan_settings["considerate_running_job"] = False
                 plan_settings["full_split"] = False
+                plan_settings["calculate_lp_blueprint_cost"] = False
+
+                # 按 1000 流程计算成本：quantity = 1000 * 每流程产出数
+                products_per_run = await BPM.get_bp_product_quantity_typeid(type_id)
+                plan_quantity = 1000 * products_per_run
 
                 plan_data = {
                     "plan_name": plan_name,
@@ -431,9 +438,10 @@ class IndustryManager(metaclass=SingletonMeta):
                     "products": [{
                         "index_id": 1,
                         "product_type_id": type_id,
-                        # 加大数量，避免计算结果不准确
-                        "quantity": 1000
-                    }]
+                        # 按 1000 流程计算，确保成本精度
+                        "quantity": plan_quantity
+                    }],
+                    "_structure_nodes": structure_nodes,  # 主进程预查询，子进程直接用
                 }
 
                 # 创建任务并跟踪进程池future
@@ -559,8 +567,7 @@ class IndustryManager(metaclass=SingletonMeta):
                                     "current_step": f"已完成 {completed_count}/{total_count}"
                                 })
                             except KahunaException as e:
-                                traceback.print_exc()
-                                logger.error(f"计算任务失败: {e}")
+                                logger.error(f"[batch] 计算任务失败: {str(e)[:100]}", exc_info=True)
                                 has_error = True
                                 completed_count += 1
                                 await rdm().r.hset(progress_key, mapping={
@@ -570,8 +577,7 @@ class IndustryManager(metaclass=SingletonMeta):
                                     "current_step": f"任务失败: {str(e)}"
                                 })
                             except Exception as e:
-                                traceback.print_exc()
-                                logger.error(f"计算任务失败: {e}")
+                                logger.error(f"[batch] 计算任务失败: {str(e)[:100]}", exc_info=True)
                                 has_error = True
                                 completed_count += 1
                                 await rdm().r.hset(progress_key, mapping={
@@ -585,11 +591,10 @@ class IndustryManager(metaclass=SingletonMeta):
                         remaining_futures = pending
 
                 except Exception as e:
-                    traceback.print_exc()
-                    logger.error(f"批次处理异常: {e}")
+                    logger.error(f"[batch] 批次处理异常: {str(e)[:100]}", exc_info=True)
                     has_error = True
                     # 最激进的清理策略：直接kill进程池中的所有进程
-                    logger.warning(f"批次处理异常，强制kill进程池中的所有进程")
+                    logger.warning(f"[batch] 批次处理异常，强制kill进程池中的所有进程")
                     killed_count, _ = IndustryManager._force_kill_process_pool(
                         batch_process_pool, running_type, batch_futures_map)
                     try:
@@ -606,7 +611,7 @@ class IndustryManager(metaclass=SingletonMeta):
                             except asyncio.CancelledError:
                                 pass
                             except Exception as cancel_err:
-                                logger.error(f"取消任务时出错: {cancel_err}")
+                                logger.error(f"[batch] 取消任务时出错: {cancel_err}")
                             completed_count += 1
                     await rdm().r.hset(progress_key, mapping={
                         "status": "running",
@@ -624,7 +629,7 @@ class IndustryManager(metaclass=SingletonMeta):
                         # 进程池已经关闭，忽略
                         pass
                     except Exception as cleanup_err:
-                        logger.warning(f"清理批次进程池时出错: {cleanup_err}")
+                        logger.warning(f"[batch] 清理批次进程池时出错: {cleanup_err}")
             else:
                 # 没有market_id的情况，使用asyncio.gather
                 try:
@@ -633,11 +638,10 @@ class IndustryManager(metaclass=SingletonMeta):
                         cost_dict[result[0]] = result[1]
                         completed_count += 1
                 except Exception as e:
-                    traceback.print_exc()
-                    logger.error(f"批次计算任务失败: {e}")
+                    logger.error(f"[batch] 批次计算任务失败: {str(e)[:100]}", exc_info=True)
                     has_error = True
                     # 最激进的清理策略：直接kill进程池中的所有进程
-                    logger.warning(f"批次计算失败，强制kill进程池中的所有进程")
+                    logger.warning(f"[batch] 批次计算失败，强制kill进程池中的所有进程")
                     killed_count, _ = IndustryManager._force_kill_process_pool(
                         batch_process_pool, running_type, batch_futures_map)
                     try:
@@ -657,7 +661,7 @@ class IndustryManager(metaclass=SingletonMeta):
                         # 进程池已经关闭，忽略
                         pass
                     except Exception as cleanup_err:
-                        logger.warning(f"清理批次进程池时出错: {cleanup_err}")
+                        logger.warning(f"[batch] 清理批次进程池时出错: {cleanup_err}")
 
             # 清理当前批次的futures
             futures.clear()
@@ -681,6 +685,20 @@ class IndustryManager(metaclass=SingletonMeta):
                 else:
                     # 存储结果（不设置过期时间，作为缓存）
                     await rdm().r.set(result_key, json.dumps(cost_dict))
+                    # 保存材料骨架并设置刷新日期，确保后续可按日期自动刷新价格
+                    if CostRefresher is not None:
+                        await CostRefresher.save_skeletons_from_full_result(
+                            op.user_name, market_id, cost_dict
+                        )
+                    else:
+                        # 社区版无成本刷新器，跳过骨架缓存，不影响本次计算结果
+                        logger.warning("企业版成本刷新器不可用，跳过材料骨架保存")
+                    today_str = date.today().isoformat()
+                    refresh_date_key = f"cost_refresh_date:{op.user_name}:{market_id}"
+                    await rdm().r.set(refresh_date_key, today_str)
+                    logger.info(
+                        f"已更新成本刷新日期: scope={op.user_name}, market_id={market_id}, date={today_str}"
+                    )
                     await rdm().r.hset(progress_key, mapping={
                         "status": "completed",
                         "completed": completed_count,
@@ -689,6 +707,13 @@ class IndustryManager(metaclass=SingletonMeta):
                     })
                 logger.info(
                     f"result save complete. result_key:{result_key}")
+            # 释放分布式锁
+            if calculate_cost_lock_key:
+                try:
+                    await rdm().r.delete(calculate_cost_lock_key)
+                    logger.info(f"释放计算分布式锁: {calculate_cost_lock_key}")
+                except Exception as e:
+                    logger.error(f"释放计算分布式锁失败: {e}")
         await tqdm_manager.complete_mission(f"calculate_cost_{op.user_name}_{market_id}")
 
         return cost_dict
@@ -699,6 +724,7 @@ class IndustryManager(metaclass=SingletonMeta):
 
     @classmethod
     async def calculate_plan(cls, op: ConfigFlowOperateCenter):
+        _t0 = time.monotonic()
         await rdm().r.set(op.total_progress_key, 0)
         await rdm().r.hset(op.current_progress_key, mapping={"name": "开始计算", "progress": 0})
 
@@ -753,18 +779,37 @@ class IndustryManager(metaclass=SingletonMeta):
 
         # node_dict_task = asyncio.create_task(NIU.get_user_plan_node_with_distance(op.user_name, op.plan_name))
 
-        await op_init_task
+        # 等待 init_at_begin 完成，设置超时防止因外部 I/O (ESI/Neo4j) 卡死而永久阻塞主流程
+        try:
+            await asyncio.wait_for(op_init_task, timeout=90.0)
+        except asyncio.TimeoutError:
+            op_init_task.cancel()
+            logger.warning(f"[{user_id}][{plan_name}] init_at_begin 超时 (30s)，将使用默认值继续计算")
+        except Exception as e:
+            logger.warning(f"[{user_id}][{plan_name}] init_at_begin 异常: {e}，将使用默认值继续计算")
         await rdm().r.hset(op.current_progress_key, mapping={"name": "更新树状态", "progress": 0})
+        # Step: 获取所有 PLANN_BP_DEPEND_ON 关系
+        _t1 = time.monotonic()
         all_relation_list = await NIU.get_relations("PLAN_BP_DEPEND_ON", {"user_name": op.user_name, "plan_name": op.plan_name})
+        logger.info(f"[{user_id}][{plan_name}] get_relations 完成: {len(all_relation_list)} 条关系 (耗时 {time.monotonic() - _t1:.2f}s)")
+        # Step: 更新计划状态（逐批处理关系计算）
+        _t2 = time.monotonic()
         await update_plan_status(op, all_relation_list)
+        logger.info(f"[{user_id}][{plan_name}] update_plan_status 完成 (耗时 {time.monotonic() - _t2:.2f}s)")
         await rdm().r.set(op.total_progress_key, 80)
 
         await rdm().r.hset(op.current_progress_key, mapping={"name": "数据汇总", "progress": 0, "is_indeterminate": 1})
+        _t3 = time.monotonic()
         node_dict = {
             node['type_id']: node for node in await NIU.get_user_plan_node_with_distance(op.user_name, op.plan_name)
         }
+        logger.info(f"[{user_id}][{plan_name}] get_user_plan_node_with_distance 完成: {len(node_dict)} 节点 (耗时 {time.monotonic() - _t3:.2f}s)")
+        _t4 = time.monotonic()
         result_data = await get_plan_tableview_data(op, node_dict)
+        logger.info(f"[{user_id}][{plan_name}] get_plan_tableview_data 完成 (耗时 {time.monotonic() - _t4:.2f}s)")
         await rdm().r.set(op.total_progress_key, 100)
+        _total = time.monotonic() - _t0
+        logger.info(f"[{user_id}][{plan_name}] calculate_plan 总耗时 {_total:.2f}s")
         return result_data
 
     @classmethod
@@ -889,16 +934,6 @@ class IndustryManager(metaclass=SingletonMeta):
         )
 
     @classmethod
-    async def get_plan_tableview_data(cls, op: ConfigFlowOperateCenter, node_dict: dict):
-        """获取计划表格视图数据（代理方法，保持向后兼容）"""
-        return await get_plan_tableview_data(op, node_dict)
-
-    @staticmethod
-    async def get_market_tree(node) -> List[Dict]:
-        """获取市场树（代理方法，保持向后兼容）"""
-        return await get_market_tree(node)
-
-    @classmethod
     async def _init_index_root_status(cls, plan_user_dict: dict, product_data: dict):
         pass
 
@@ -1020,120 +1055,12 @@ class IndustryManager(metaclass=SingletonMeta):
         logger.info(f"create_plan_bp_tree_{type_id}_{type_name} complete")
 
     # 权限管理方法（代理方法，保持向后兼容）
-    @classmethod
-    async def add_industrypermision(cls, user_id: str, data):
-        return await add_industrypermision(user_id, data)
-
-    @classmethod
-    async def delete_industrypermision(cls, user_id: str, data):
-        return await delete_industrypermision(user_id, data)
-
-    @classmethod
-    async def get_user_all_container_permission(cls, user_id: str):
-        return await get_user_all_container_permission(user_id)
-
-    @classmethod
-    async def get_location_flag_list(cls, asset_owner_id: int, asset_container_id: int):
-        return await get_location_flag_list(asset_owner_id, asset_container_id)
-
-    @classmethod
-    async def update_container_permission_location_flag(cls, user_id: str, data):
-        return await update_container_permission_location_flag(user_id, data)
-
-    @classmethod
-    async def update_container_permission_tag(cls, user_id: str, data):
-        return await update_container_permission_tag(user_id, data)
 
     # 结构相关方法（代理方法，保持向后兼容）
-    @classmethod
-    async def get_structure_list(cls, user_id: str):
-        return await get_structure_list(user_id)
-
-    @classmethod
-    async def get_structure_assign_keyword_suggestions(cls, assign_type: str, query):
-        return await get_structure_assign_keyword_suggestions(assign_type, query)
 
     # 类型列表方法（代理方法，保持向后兼容）
-    @classmethod
-    async def get_type_list(cls):
-        return await get_type_list()
 
     # 配置管理方法（代理方法，保持向后兼容）
-    @classmethod
-    async def create_config_flow_config(cls, user_id: str, data):
-        return await create_config_flow_config(user_id, data)
-
-    @classmethod
-    async def fetch_recommended_presets(cls, user_id: str, preset_name: str):
-        return await fetch_recommended_presets(user_id, preset_name)
-
-    @classmethod
-    async def create_default_config_flow_preset(cls, user_id: str):
-        return await create_default_config_flow_preset(user_id)
-
-    @classmethod
-    async def modify_config_flow_config(cls, user_id: str, data, is_admin: bool = False):
-        return await modify_config_flow_config(user_id, data, is_admin=is_admin)
-
-    @classmethod
-    async def delete_config_flow_config(cls, user_id: str, data):
-        return await delete_config_flow_config(user_id, data)
-
-    @classmethod
-    async def get_config_flow_config_list(cls, user_id: str):
-        return await get_config_flow_config_list(user_id)
-
-    @classmethod
-    async def add_config_to_plan(cls, user_id: str, data):
-        return await add_config_to_plan(user_id, data)
-
-    @classmethod
-    async def get_config_flow_list(cls, user_id: str, plan_name: str):
-        return await get_config_flow_list(user_id, plan_name)
-
-    @classmethod
-    async def delete_config_from_plan(cls, user_id: str, data):
-        return await delete_config_from_plan(user_id, data)
-
-    @classmethod
-    async def save_config_flow_to_plan(cls, user_id: str, plan_name: str, data):
-        return await save_config_flow_to_plan(user_id, plan_name, data)
-
-    @classmethod
-    async def save_config_flow_preset(cls, user_id: str, preset_name: str, config_list):
-        return await save_config_flow_preset(user_id, preset_name, config_list)
-
-    @classmethod
-    async def get_config_flow_presets(cls, user_id: str):
-        return await get_config_flow_presets(user_id)
-
-    @classmethod
-    async def load_config_flow_preset(cls, user_id: str, preset_id: int, plan_name: str):
-        return await load_config_flow_preset(user_id, preset_id, plan_name)
-
-    @classmethod
-    async def delete_config_flow_preset(cls, user_id: str, preset_id: int):
-        return await delete_config_flow_preset(user_id, preset_id)
-
-    @classmethod
-    async def update_config_flow_preset_name(cls, user_id: str, preset_id: int, preset_name: str):
-        return await update_config_flow_preset_name(user_id, preset_id, preset_name)
-
-    @classmethod
-    async def share_config_flow_preset(cls, user_id: str, preset_id: int):
-        return await share_config_flow_preset(user_id, preset_id)
-
-    @classmethod
-    async def load_shared_config_flow_preset(cls, user_id: str, share_code: str):
-        return await load_shared_config_flow_preset(user_id, share_code)
-
-    @classmethod
-    async def get_config_flow_preset_detail(cls, user_id: str, preset_id: int):
-        return await get_config_flow_preset_detail(user_id, preset_id)
-
-    @classmethod
-    async def save_config_flow_preset_config(cls, user_id: str, preset_id: int, config_list: list):
-        return await save_config_flow_preset_config(user_id, preset_id, config_list)
 
     @classmethod
     async def get_plan_settings(cls, user_id: str, plan_name: str):
@@ -1143,9 +1070,6 @@ class IndustryManager(metaclass=SingletonMeta):
         return plan_obj.settings
 
     # 物品信息方法（代理方法，保持向后兼容）
-    @classmethod
-    async def get_item_info(cls, type_id: int):
-        return await get_item_info(type_id)
 
     # 计算任务队列管理方法
     def _start_queue_processor(self):
@@ -1153,11 +1077,60 @@ class IndustryManager(metaclass=SingletonMeta):
         if self._queue_processor_task is None or self._queue_processor_task.done():
             self._queue_processor_task = asyncio.create_task(
                 self._process_calculate_queue())
+            # 清理上次运行的残留排队状态（服务器重启后内存队列已清空）
+            if self._cleanup_task is None or self._cleanup_task.done():
+                self._cleanup_task = asyncio.create_task(
+                    self._clear_stale_calculate_status())
+            # 启动定期 stale 清理 timer（防止运行中产生的 stuck 状态永久阻塞）
+            if self._periodic_cleanup_task is None or self._periodic_cleanup_task.done():
+                self._periodic_cleanup_task = asyncio.create_task(
+                    self._periodic_stale_cleanup(interval_seconds=300))
             logger.info("计算任务队列处理协程已启动")
+
+    async def _clear_stale_calculate_status(self, include_running: bool = True):
+        """清理 Redis 中残留的 waiting/pending 状态。
+
+        Args:
+            include_running: 是否同时清理 "running" 状态。
+                启动时设为 True（内存无计算任务，所有 running 都是残留）；
+                定期清理时设为 False（避免误删正在运行的计算状态）。
+        """
+        try:
+            pattern = "plan_calculate_status:*:*"
+            cleared = 0
+            cursor = 0
+            while True:
+                cursor, keys = await rdm().r.scan(cursor=cursor, match=pattern, count=100)
+                for key in keys:
+                    key_str = key.decode() if isinstance(key, bytes) else key
+                    status = await rdm().r.get(key_str)
+                    # waiting: 总是残留（内存队列为空时该状态无意义）
+                    should_clean = (status or "").startswith("waiting:")
+                    # pending/running 只在启动清理时删除（include_running=True），
+                    # 定期清理不删：pending 是合法过渡状态，running 是正在执行的任务
+                    if include_running and status in ("pending", "running"):
+                        should_clean = True
+                    if should_clean:
+                        # key 格式: plan_calculate_status:{user_id}:{plan_name}
+                        parts = key_str.split(":", 2)
+                        if len(parts) >= 3:
+                            user_id = parts[1]
+                            plan_name = parts[2]
+                            await rdm().r.delete(f"plan_calculate_total_progress:{user_id}:{plan_name}")
+                            await rdm().r.delete(f"plan_calculate_current_progress:{user_id}:{plan_name}")
+                        await rdm().r.delete(key_str)
+                        cleared += 1
+                if cursor == 0:
+                    break
+            if cleared:
+                logger.info(f"清理了 {cleared} 个残留的计算状态")
+        except Exception as e:
+            logger.warning(f"清理残留计算状态失败: {e}")
 
     async def _process_calculate_queue(self):
         """处理计算任务队列的协程"""
         while True:
+            user_id = plan_name = "unknown"
             try:
                 # 从队列中获取任务
                 task_info = await self.calculate_queue.get()
@@ -1180,9 +1153,33 @@ class IndustryManager(metaclass=SingletonMeta):
 
             except asyncio.CancelledError:
                 logger.info("计算任务队列处理协程被取消")
+                # 尝试恢复：将当前任务重新入队，避免丢失
+                if user_id != "unknown":
+                    try:
+                        await self.calculate_queue.put((user_id, plan_name))
+                        async with self.calculate_queue_lock:
+                            if (user_id, plan_name) not in self.calculate_queue_items:
+                                self.calculate_queue_items.insert(0, (user_id, plan_name))
+                        logger.info(f"[{user_id}][{plan_name}] 取消时恢复任务到队列前端")
+                    except Exception:
+                        pass  # 恢复失败不阻塞取消传播
                 raise
             except Exception as e:
-                logger.error(f"处理计算任务队列时出错: {traceback.format_exc()}")
+                # 先记录原始异常，确保不会因后续 Redis 操作失败而丢失
+                logger.error(f"[{user_id}][{plan_name}] 队列处理异常", exc_info=True)
+
+                # Best-effort: 设置失败状态，避免任务永久卡在 running
+                try:
+                    status_key = f"plan_calculate_status:{user_id}:{plan_name}"
+                    await rdm().r.set(status_key, f"failed:内部错误 - {str(e)[:200]}", ex=3600)
+                    logger.info(f"[{user_id}][{plan_name}] 已设置 Redis 失败状态")
+                except Exception as set_err:
+                    logger.error(f"[{user_id}][{plan_name}] 设置 Redis 失败状态时出错: {set_err}")
+                    # 兜底：写 Redis 失败则删除 key，避免卡 running
+                    try:
+                        await rdm().r.delete(status_key)
+                    except Exception:
+                        pass
                 # 即使出错也要标记任务完成
                 self.calculate_queue.task_done()
 
@@ -1217,7 +1214,7 @@ class IndustryManager(metaclass=SingletonMeta):
                             products = product.get("products", [])
                             product_count += len(products)
             except Exception as e:
-                logger.warning(f"获取计划产品条目数量失败: {e}, 将使用默认值0")
+                logger.warning(f"[{user_id}][{plan_name}] 获取计划产品条目数量失败: {e}, 将使用默认值0")
                 product_count = 0
 
             # 执行计算
@@ -1240,6 +1237,18 @@ class IndustryManager(metaclass=SingletonMeta):
 
             result_data = await IndustryManager.calculate_plan(op)
 
+            # 计算缺失蓝图需求（从 work_flow 中筛选 bp_object.fake 条目）
+            try:
+                from src_v2.model.EVE.industry.industry_utils.bp_requirement_analyzer import (
+                    analyze_blueprint_requirements,
+                )
+                work_flow = result_data.get("work_flow", [])
+                if work_flow:
+                    missing_blueprint_workflow = await analyze_blueprint_requirements(work_flow)
+                    result_data["missing_blueprint_workflow"] = missing_blueprint_workflow
+            except Exception as e:
+                logger.error(f"[{user_id}][{plan_name}] 计算缺失蓝图需求失败: {e}", exc_info=True)
+
             # 计算完成，设置状态为已完成
             await rdm().r.set(result_key, json.dumps(result_data))
             # await rdm().r.expire(result_key, 3600)
@@ -1253,41 +1262,80 @@ class IndustryManager(metaclass=SingletonMeta):
                 history_record.calculate_result = result_data
                 await EveIndustryCalculateHistoryDBUtils.save_obj(history_record)
 
-            logger.info(f"计划 {plan_name} 计算完成")
+            logger.info(f"[{user_id}][{plan_name}] 计算完成")
         except KahunaException as e:
-            # 计算失败，设置状态为失败
-            traceback.print_exc()
             error_msg = str(e)
-            await rdm().r.set(status_key, f"failed:{error_msg}")
-            await rdm().r.expire(status_key, 3600)
+            # 先记录原始异常，确保不会因后续 Redis/DB 操作失败而丢失
+            logger.error(f"[{user_id}][{plan_name}] 计算失败(KahunaException): {error_msg}", exc_info=True)
 
-            # 更新历史记录：计算失败
+            # Best-effort: 设置 Redis 失败状态
+            try:
+                await rdm().r.set(status_key, f"failed:{error_msg}")
+                await rdm().r.expire(status_key, 3600)
+            except Exception as redis_err:
+                logger.error(f"[{user_id}][{plan_name}] 设置 Redis 失败状态时出错: {redis_err}")
+                # 兜底：删除 status key，避免卡在 "running" 状态阻塞后续任务
+                try:
+                    await rdm().r.delete(status_key)
+                    logger.info(f"[{user_id}][{plan_name}] Redis 写失败，已删除 status key 避免卡住")
+                except Exception:
+                    pass
+
+            # Best-effort: 更新 PostgreSQL 历史记录
             calculate_end_time = datetime.utcnow()
             if history_record:
-                history_record.calculate_time = calculate_end_time
-                # 将错误信息保存到 calculate_result
-                history_record.calculate_result = {
-                    "error": error_msg, "exception_type": "KahunaException"}
-                await EveIndustryCalculateHistoryDBUtils.save_obj(history_record)
-
-            logger.error(f"计划 {plan_name} 计算失败: {error_msg}")
+                try:
+                    history_record.calculate_time = calculate_end_time
+                    history_record.calculate_result = {
+                        "error": error_msg, "exception_type": "KahunaException"}
+                    await EveIndustryCalculateHistoryDBUtils.save_obj(history_record)
+                except Exception as db_err:
+                    logger.error(f"[{user_id}][{plan_name}] 保存计算历史记录失败: {db_err}")
         except Exception as e:
-            # 计算失败，设置状态为失败
-            traceback.print_exc()
             error_msg = f"计算过程发生错误: {str(e)}"
-            await rdm().r.set(status_key, f"failed:{error_msg}")
-            await rdm().r.expire(status_key, 3600)
+            # 先记录原始异常，确保不会因后续 Redis/DB 操作失败而丢失
+            logger.error(f"[{user_id}][{plan_name}] 计算失败", exc_info=True)
 
-            # 更新历史记录：计算失败
+            # Best-effort: 设置 Redis 失败状态
+            try:
+                await rdm().r.set(status_key, f"failed:{error_msg}")
+                await rdm().r.expire(status_key, 3600)
+            except Exception as redis_err:
+                logger.error(f"[{user_id}][{plan_name}] 设置 Redis 失败状态时出错: {redis_err}")
+                # 兜底：删除 status key，避免卡在 "running" 状态阻塞后续任务
+                try:
+                    await rdm().r.delete(status_key)
+                    logger.info(f"[{user_id}][{plan_name}] Redis 写失败，已删除 status key 避免卡住")
+                except Exception:
+                    pass
+
+            # Best-effort: 更新 PostgreSQL 历史记录
             calculate_end_time = datetime.utcnow()
             if history_record:
-                history_record.calculate_time = calculate_end_time
-                # 将错误信息保存到 calculate_result
-                history_record.calculate_result = {
-                    "error": error_msg, "exception_type": "Exception", "traceback": traceback.format_exc()}
-                await EveIndustryCalculateHistoryDBUtils.save_obj(history_record)
+                try:
+                    history_record.calculate_time = calculate_end_time
+                    history_record.calculate_result = {
+                        "error": error_msg, "exception_type": "Exception", "traceback": traceback.format_exc()}
+                    await EveIndustryCalculateHistoryDBUtils.save_obj(history_record)
+                except Exception as db_err:
+                    logger.error(f"[{user_id}][{plan_name}] 保存计算历史记录失败: {db_err}")
 
-            logger.error(f"计划 {plan_name} 计算失败: {traceback.format_exc()}")
+    async def _periodic_stale_cleanup(self, interval_seconds: int = 300):
+        """定期清理残留的 pending/waiting 计算状态（不清理 running，避免误删正在运行的任务）。
+
+        与 _clear_stale_calculate_status 不同，此方法周期性运行（默认每5分钟），
+        且不清理 "running" 状态，仅清理确实无意义的 pending/waiting 残留。
+        """
+        while True:
+            await asyncio.sleep(interval_seconds)
+            # 队列处理器心跳检查：如果已停止则自动重启
+            if self._queue_processor_task and self._queue_processor_task.done():
+                logger.warning("队列处理器已停止，尝试重启")
+                self._start_queue_processor()
+            try:
+                await self._clear_stale_calculate_status(include_running=False)
+            except Exception as e:
+                logger.warning(f"定期 stale 清理失败: {e}")
 
     async def _update_queue_positions(self):
         """更新队列中所有等待任务的位置"""
@@ -1308,6 +1356,14 @@ class IndustryManager(metaclass=SingletonMeta):
         instance = cls()
         # 确保队列处理协程已启动
         instance._start_queue_processor()
+
+        # 等待启动残留清理完成，避免清理任务误删我们即将设置的 pending key
+        if instance._cleanup_task is not None and not instance._cleanup_task.done():
+            try:
+                await instance._cleanup_task
+            except Exception:
+                pass
+
         status_key = f"plan_calculate_status:{user_id}:{plan_name}"
 
         # 检查是否已有正在进行的计算
@@ -1333,9 +1389,30 @@ class IndustryManager(metaclass=SingletonMeta):
 
             async def run_with_semaphore():
                 async with instance.calculate_semaphore:
-                    await instance._calculate_plan_async(user_id, plan_name)
-                    # 任务完成后更新队列位置
-                    await instance._update_queue_positions()
+                    try:
+                        await instance._calculate_plan_async(user_id, plan_name)
+                    except Exception as e:
+                        # 先记录原始异常，确保不会因后续 Redis 操作失败而丢失
+                        logger.error(f"[{user_id}][{plan_name}] 异步计算未捕获异常", exc_info=True)
+
+                        # Best-effort: 设置 Redis 失败状态
+                        try:
+                            status_key = f"plan_calculate_status:{user_id}:{plan_name}"
+                            await rdm().r.set(status_key, f"failed:内部错误 - {str(e)[:200]}", ex=3600)
+                            logger.info(f"[{user_id}][{plan_name}] 已设置 Redis 失败状态")
+                        except Exception as set_err:
+                            logger.error(f"[{user_id}][{plan_name}] 设置 Redis 失败状态时出错: {set_err}")
+                            # 兜底：写 Redis 失败则删除 key，避免卡 running
+                            try:
+                                await rdm().r.delete(status_key)
+                            except Exception:
+                                pass
+                    finally:
+                        # Best-effort: 任务完成后更新队列位置
+                        try:
+                            await instance._update_queue_positions()
+                        except Exception as queue_err:
+                            logger.error(f"[{user_id}][{plan_name}] 更新队列位置失败: {queue_err}")
             asyncio.create_task(run_with_semaphore())
         else:
             # 没有可用槽位，加入队列
@@ -1366,6 +1443,20 @@ class IndustryManager(metaclass=SingletonMeta):
             }
 
         # 解析状态
+        # 如果是 waiting 但内存队列为空（服务器重启后），清除残留状态
+        # 注意：pending 状态是有效的过渡状态，直接启动路径不加入队列，不能清理
+        if status.startswith("waiting:"):
+            instance = cls()
+            if not instance.calculate_queue_items:
+                # 内存队列为空，说明是残留状态，清理并返回 idle
+                await rdm().r.delete(status_key)
+                return {
+                    "status": "idle",
+                    "total_progress": None,
+                    "current_step": None,
+                    "is_indeterminate": 1
+                }
+
         if status.startswith("failed:"):
             error_msg = status[7:]  # 去掉 "failed:" 前缀
             return {
@@ -1513,15 +1604,16 @@ async def _async_calculation_worker(type_id: int, plan_data: dict):
 
     from src_v2.core.log import logger
 
-    # 关闭子进程的所有日志输出
-    # 1. 设置 logger 级别为 CRITICAL（最高级别，所有低于此级别的日志都不会输出）
-    logger.setLevel(logging.CRITICAL)
-    # 2. 移除所有处理器，彻底禁用日志输出
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    # 3. 禁用根 logger，防止其他模块重新初始化 logger
+    # 放开子进程日志输出（排查批次超时问题）
+    logger.setLevel(logging.DEBUG)
+    # 添加 stderr handler 使子进程日志可见
+    _stderr_handler = logging.StreamHandler()
+    _stderr_handler.setFormatter(logging.Formatter(
+        '[subprocess] %(asctime)s [%(name)s] %(levelname)s: %(message)s'))
+    logger.addHandler(_stderr_handler)
+    # 根 logger 保持 INFO 级别，避免第三方库日志泛滥
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.CRITICAL)
+    root_logger.setLevel(logging.INFO)
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
@@ -1579,11 +1671,27 @@ async def _async_calculation_worker(type_id: int, plan_data: dict):
                 "user_name": op.user_name, "plan_name": op.plan_name},
             ndm=ndm
         )
+
+        # 重操作后重建 Neo4j 驱动：长时间大量操作后驱动端连接池 in_use 标记可能残留
+        # 后续 refresh_structure_info → get_structure_nodes → session() 可能永久阻塞
+        await ndm.close()
+        ndm = get_new_neo4j_manager()
+        await ndm.init(subprocess=True)
+        op.npm = ndm  # 同步更新 op 内部的引用
+
+        # 主进程预查询的 Structure 节点数据直接填充，跳过子进程 Neo4j 查询
+        structure_nodes = plan_data.get("_structure_nodes")
+        if structure_nodes:
+            op._structure_info = {
+                n["structure_name"]: n for n in structure_nodes
+            }
+            op.type_assign_structure_info_cache_status = True
+
         await update_plan_status(op, all_relation_list, subprocess=True)
+
         node_dict = {
             node['type_id']: node for node in await NIU.get_user_plan_node_with_distance(op.user_name, op.plan_name, ndm=ndm)
         }
-        # await MarketManager().update_jita_price(rdm=rdm)
         result = await get_plan_tableview_data(op, node_dict, subprocess=True, inrdm=rdm, sdm=sdm)
         return result
     finally:

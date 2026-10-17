@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { http } from '@/http'
 import {
   ArrowDown,
   ChatLineRound,
   Cpu,
+  DataAnalysis,
   Document,
   House,
   Monitor,
@@ -21,6 +23,7 @@ import { useEdition } from '@/composables/useEdition'
 import { useThemeStore, type ThemeMode } from '@/stores/theme'
 import smallSideBar from './components/sideBar/smallSideBar.vue'
 import HelpDrawer from './components/HelpDrawer.vue'
+import RouteProgressBar from './components/global/RouteProgressBar.vue'
 import VipPricingDialog from './components/VipPricingDialog.vue'
 import githubIcon from '@/assets/github-mark.svg'
 import aifadianLogo from '@/assets/横版-白底-透明背景.png'
@@ -33,7 +36,7 @@ const themeStore = useThemeStore()
 const { isEnterprise } = useEdition()
 
 const GITHUB_REPO_URL = 'https://github.com/AraragiEro/EveKahunaSystem.git'
-const publicPages = ['login', 'landing', 'announcements', 'forbidden', 'characterAuthClose', 'publicStorage', 'publicWorkflow', 'allianceContract']
+const publicPages = ['login', 'landing', 'announcements', 'forbidden', 'characterAuthClose', 'publicStorage', 'publicWorkflow', 'allianceContract', 'priceEstimator', 'piProfit']
 
 const donateLink = computed(() => import.meta.env.VITE_DONATE_LINK as string | undefined)
 const showDonateButton = computed(() => !!donateLink.value)
@@ -48,6 +51,7 @@ const themeIconMap = {
 const currentThemeIcon = computed(() => themeIconMap[themeStore.mode])
 type MenuIconComponent =
   | typeof Tickets
+  | typeof DataAnalysis
   | typeof House
   | typeof Cpu
   | typeof PieChart
@@ -63,10 +67,10 @@ const menuItems = computed(() => {
 
   items.push({
     id: idIndex++,
-    icon: Tickets,
-    label: 'TODO',
-    active: currentPath === '/todolist' || currentPath === '/',
-    route: '/todolist',
+    icon: DataAnalysis,
+    label: '仪表盘',
+    active: currentPath === '/dashboard' || currentPath === '/',
+    route: '/dashboard',
   })
 
   if (userRoles.includes('vip_alpha') || userRoles.includes('vip_omega')) {
@@ -153,7 +157,12 @@ const openDonate = () => {
   }
 }
 
-const handleLogout = () => {
+const handleLogout = async () => {
+  try {
+    await http.post('/auth/logout')
+  } catch {
+    // 即使后端注销失败也清除前端状态
+  }
   authStore.logout()
   router.push('/login')
 }
@@ -218,7 +227,10 @@ const handleKeyDown = (event: KeyboardEvent) => {
 
 let timeUpdateInterval: number | null = null
 
-onMounted(() => {
+onMounted(async () => {
+  // 应用启动时从 httpOnly cookie 恢复认证状态
+  // 避免页面刷新后 Pinia store 被清空导致 isAuthenticated 误判
+  await authStore.checkAuth()
   window.addEventListener('keydown', handleKeyDown)
   timeUpdateInterval = window.setInterval(() => {
     currentTime.value = Date.now()
@@ -235,6 +247,7 @@ onUnmounted(() => {
 
 <template>
   <div class="kahuna-container">
+    <RouteProgressBar />
     <div v-if="isPublicPage" class="public-page-scroll">
       <router-view />
     </div>
@@ -246,7 +259,7 @@ onUnmounted(() => {
         <el-header class="main-header">
           <div class="header-content">
             <div class="header-title">
-              <h2>Kahuna-System V1.5.2</h2>
+              <h2>Kahuna-System V1.6.1</h2>
               <el-tag :type="isEnterprise ? 'success' : 'info'" size="small" class="edition-tag">
                 {{ isEnterprise ? '企业版' : '社区版' }}
               </el-tag>

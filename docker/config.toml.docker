@@ -13,6 +13,8 @@ API_OPENAPI_PATH = "/api/openapi.json"
 PIC_RENDER_PROXY = ""
 PROXY = ""
 PORT = 0
+# 应用签名密钥（JWT / 会话签名）：生产必须改成随机长密钥（建议 ≥32 位）
+# 可用环境变量 KAHUNA_SECRET_KEY 覆盖（优先于本项）；留空或仍是模板占位符时启动会中断
 SECRET_KEY = "change-me-to-a-random-secret-key"
 
 [GOOGLE]
@@ -20,9 +22,13 @@ CREDENTIALS = "credentials/google-service-account.json"
 MARKET_MONITOR_SPREADSHEET_ID = ""
 
 [ADMIN]
-create_admin = true
-admin_user = "kahuna"
-admin_passwd = "kahuna"
+# 默认管理员账号创建（安全审计 #11：模板不再内置 kahuna/kahuna 这类默认口令）
+# 部署时必须显式填写 admin_user / admin_passwd 后把 create_admin 置为 true；
+# 口令要求：≥12 位，且不得使用 kahuna/kahuna、admin/admin、password、123456 之类默认值；
+# 留空或弱口令时，启动会拒绝创建管理员账号（仅记录日志，不中断服务启动）。
+create_admin = false
+admin_user = ""
+admin_passwd = ""
 
 [POSTGREDB]
 Host = ""
@@ -34,6 +40,8 @@ Password = ""
 [REDIS]
 Host = ""
 Port = 6379
+# 生产建议设置强口令；也可用环境变量 REDIS_PASSWORD 覆盖本项（留空 = 无认证）
+Password = ""
 
 [NEO4J]
 Host = ""
@@ -147,3 +155,23 @@ publicData = false
 "esi-alliances.read_contacts.v1" = false
 "esi-characters.read_fw_stats.v1" = false
 "esi-corporations.read_fw_stats.v1" = false
+
+
+# ============================================
+# MCP 中间件安全配置
+# ============================================
+[MCP]
+# MCP 内部 API 认证密钥（必须与 Docker 环境变量 QUART_API_KEY 一致）
+# 生产环境必须填写一个随机长字符串
+API_KEY = ""
+
+# ============================================
+# 服务间认证（供 MCP 中间件 / QQ 机器人等无法登录的服务调用）
+# ============================================
+[SERVICE]
+# 共享服务密钥：调用方在请求头 X-Internal-API-Key 中携带
+# 生成：python -c "import secrets; print(secrets.token_urlsafe(32))"
+# 留空 = 拒绝所有服务间请求（fail-closed，不会再退回无校验状态）
+API_KEY = ""
+# 灰度开关：enforce = 强制执行（默认）；warn = 仅记录告警不拦截（切换期使用）
+MODE = "enforce"

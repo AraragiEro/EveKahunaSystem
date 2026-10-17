@@ -157,6 +157,8 @@ class EveAuthedCharacter(PostgreModel):
     expires_time = Column(DateTime)
     corporation_id = Column(Integer)
     director = Column(Boolean)
+    refresh_failure_count = Column(Integer, default=0)  # token 刷新连续失败次数
+    last_refresh_error = Column(Text, nullable=True)     # 最近一次刷新失败的错误信息
 
 
 all_model.append(EveAuthedCharacter)
@@ -550,6 +552,52 @@ class EveOverviewHistory(PostgreModel):
 
 all_model.append(EveOverviewHistory)
 
+
+class EveCharacterOrdersStats(PostgreModel):
+    __tablename__ = "eve_character_orders_stats"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(Text, nullable=False, index=True)
+    period_type = Column(Text, nullable=False)
+    period_start = Column(Date, nullable=False)
+    buy_order_count = Column(Integer, default=0)
+    sell_order_count = Column(Integer, default=0)
+    buy_volume = Column(BigInteger, default=0)
+    sell_volume = Column(BigInteger, default=0)
+    buy_total_isk = Column(Float, default=0.0)
+    sell_total_isk = Column(Float, default=0.0)
+    updated_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_name", "period_type", "period_start", name="uix_orders_stats"),
+    )
+
+
+all_model.append(EveCharacterOrdersStats)
+
+
+class EveCharacterOrdersStatsDetail(PostgreModel):
+    __tablename__ = "eve_character_orders_stats_detail"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(Text, nullable=False, index=True)
+    period_type = Column(Text, nullable=False)
+    period_start = Column(Date, nullable=False)
+    type_id = Column(Integer, nullable=False, index=True)
+    is_buy_order = Column(Boolean, nullable=False)
+    order_count = Column(Integer, default=0)
+    volume = Column(BigInteger, default=0)
+    total_isk = Column(Float, default=0.0)
+    updated_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_name", "period_type", "period_start", "type_id", "is_buy_order",
+            name="uix_orders_stats_detail",
+        ),
+    )
+
+
+all_model.append(EveCharacterOrdersStatsDetail)
+
 # 公司合同
 
 
@@ -626,13 +674,19 @@ class EveIndustryPlanTaskClaim(PostgreModel):
     claimed_by = Column(Text, ForeignKey("user.user_name"), nullable=False)
     claimed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+    # 接取数量（支持部分接取，如接取40线中的20线）
+    claimed_quantity = Column(Integer, default=1, nullable=False)
+
     # 任务状态（claimed: 已接取, completed: 已完成, cancelled: 已取消）
     status = Column(Text, default="claimed")
 
-    # 唯一约束：防止重复接取（核心并发控制）
+    # 唯一约束：同一用户对同一工作流项只能有一条接取记录
     __table_args__ = (
         UniqueConstraint(
-            "plan_token", "workflow_item_key", name="uq_task_claim_per_item"
+            "plan_token",
+            "workflow_item_key",
+            "claimed_by",
+            name="uq_task_claim_per_user_item",
         ),
         Index("idx_claim_plan_token", "plan_token"),
         Index("idx_claim_claimed_by", "claimed_by"),
@@ -640,3 +694,140 @@ class EveIndustryPlanTaskClaim(PostgreModel):
 
 
 all_model.append(EveIndustryPlanTaskClaim)
+
+
+# ============ 工作流实施标记功能 ============
+
+
+class EveIndustryPlanTaskImplementation(PostgreModel):
+    """工作流实施标记记录表（云端备份）"""
+
+    __tablename__ = "eve_industry_plan_task_implementation"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # 关联信息
+    user_name = Column(Text, index=True, nullable=False)
+    plan_name = Column(Text, index=True, nullable=False)
+    calculation_id = Column(BigInteger, index=True, nullable=False)
+
+    # 工作流项标识
+    workflow_item_key = Column(Text, nullable=False)
+
+    # 实施信息
+    implemented = Column(Boolean, default=True)
+    runs_implemented = Column(Integer, nullable=True)
+
+    # 时间戳（用于冲突解决）
+    modified_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    modified_by_client = Column(Text)  # 标识哪个客户端做的修改
+
+    __table_args__ = (
+        # 唯一约束：同一计算周期内同一工作流项只能有一条记录
+        UniqueConstraint(
+            "user_name",
+            "plan_name",
+            "calculation_id",
+            "workflow_item_key",
+            name="uq_impl_user_plan_calc_item",
+        ),
+        Index("idx_impl_modified", "modified_at"),
+        Index("idx_impl_user_plan_calc", "user_name", "plan_name", "calculation_id"),
+    )
+
+
+all_model.append(EveIndustryPlanTaskImplementation)
+
+
+class EveLpValueSnapshot(PostgreModel):
+    __tablename__ = "eve_lp_value_snapshot"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snapshot_date = Column(Date, nullable=False, index=True)       # 快照日期
+    corporation_id = Column(Integer, nullable=False, index=True)    # 军团ID
+    corporation_name = Column(Text, nullable=True)                  # 军团英文名
+    corporation_name_zh = Column(Text, nullable=True)               # 军团中文名
+    faction_id = Column(Integer, nullable=True)                     # 势力ID
+    lp_buy_value = Column(Float, nullable=True)                     # LP收单标准价值 (ISK/LP)
+    lp_sell_value = Column(Float, nullable=True)                    # LP出单标准价值 (ISK/LP) — 前5加权
+    lp_sell_value_all = Column(Float, nullable=True)                # LP出单价值 — 全部有效物品加权平均
+    top_items_json = Column(JSONB, nullable=True)                   # Top-5物品JSON
+    total_offers = Column(Integer, default=0)                       # 总兑换项数
+    evaluated_offers = Column(Integer, default=0)                   # 有效评估数
+    excluded_offers = Column(Integer, default=0)                    # 排除数
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('snapshot_date', 'corporation_id', name='uq_lp_snapshot_date_corp'),
+    )
+
+
+all_model.append(EveLpValueSnapshot)
+
+
+class EveLpValueSnapshotDetail(PostgreModel):
+    __tablename__ = "eve_lp_value_snapshot_detail"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snapshot_id = Column(Integer, nullable=False, index=True)       # 关联snapshot.id
+    corporation_id = Column(Integer, nullable=False, index=True)
+    offer_id = Column(Integer, nullable=False)                      # ESI offer_id
+    type_id = Column(Integer, nullable=False, index=True)           # 物品typeID
+    type_name_en = Column(Text, nullable=True)                      # 物品英文名
+    type_name_zh = Column(Text, nullable=True)                      # 物品中文名
+    quantity = Column(Integer, nullable=False)                      # 单次兑换数量
+    lp_cost = Column(Integer, nullable=False)                       # LP消耗
+    isk_cost = Column(BigInteger, nullable=False)                   # ISK消耗
+    market_buy_price = Column(Float, nullable=True)                 # Jita max_buy
+    market_sell_price = Column(Float, nullable=True)                # Jita min_sell
+    daily_volume_30d = Column(Float, nullable=True)                 # 30天日均成交量
+    daily_value_30d = Column(Float, nullable=True)                  # 30天日均成交额
+    lp_buy_value = Column(Float, nullable=True)                     # LP收单价值
+    lp_sell_value = Column(Float, nullable=True)                    # LP出单价值
+    is_in_top = Column(Boolean, default=False)                      # 是否入选Top-5
+    excluded = Column(Boolean, default=False)                       # 是否被排除
+    excluded_reason = Column(Text, nullable=True)                   # 排除原因
+
+    __table_args__ = (
+        Index('idx_lp_detail_snapshot_corp', 'snapshot_id', 'corporation_id'),
+    )
+
+
+all_model.append(EveLpValueSnapshotDetail)
+
+
+class EsiUsageLog(PostgreModel):
+    """ESI 请求调用日志表"""
+
+    __tablename__ = "esi_usage_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, index=True, nullable=False)
+    endpoint = Column(Text, nullable=False)
+    pool_name = Column(Text, nullable=True)
+    character_id = Column(Integer, nullable=True, default=0)
+    status_code = Column(Integer, nullable=True)
+    latency_ms = Column(Float, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+
+all_model.append(EsiUsageLog)
+
+
+# ============ 系数监控 - 用户关注星系 ============
+
+
+class UserWatchedSystem(PostgreModel):
+    """用户关注的星系列表（系数监控用）"""
+
+    __tablename__ = "user_watched_system"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_name = Column(Text, nullable=False, index=True)
+    system_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_name", "system_id", name="uq_user_watched_system"),
+    )
+
+
+all_model.append(UserWatchedSystem)

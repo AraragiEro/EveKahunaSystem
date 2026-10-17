@@ -1,3 +1,10 @@
+VALID_TAX_CATEGORIES = ["矿物", "冰矿产物", "燃料块", "元素", "气云", "行星工业", "杂货", "EIV成本"]
+
+TAX_CONFIG_SCHEMA = {
+    "target_category": "str - must be one of VALID_TAX_CATEGORIES",
+    "tax_rate": "float - between 0.0 and 100.0 (percentage)"
+}
+
 DEFAULT_MATERIAL_CONFIG = {
     "预设原材料-矿物": {
         # 矿物

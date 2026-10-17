@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useHelpStore } from '@/stores/help'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 // 导入图片资源
 import docIndustry1 from '@/assets/doc-industry-1.png'
@@ -71,11 +72,14 @@ const closeImageViewer = () => {
   imageViewerSrc.value = ''
 }
 
-// 转义 HTML 属性值
+// 转义 HTML 属性值（纯字符串替换，无 DOM 操作）
 const escapeHtml = (str: string): string => {
-  const div = document.createElement('div')
-  div.textContent = str
-  return div.innerHTML
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }
 
 // 自定义图片渲染器
@@ -93,20 +97,20 @@ renderer.image = (href: string, title: string | null, text: string) => {
 
 // 导入 markdown 文件（使用 ?raw 后缀）
 import summaryWhatIsKahunaSystem from '@/docs/summary-what-is-kahuna-system.md?raw'
-const summaryWhatIsKahunaSystemHtml = marked(summaryWhatIsKahunaSystem, { renderer }) as string
+const summaryWhatIsKahunaSystemHtml = DOMPurify.sanitize(marked(summaryWhatIsKahunaSystem, { renderer }) as string)
 import summaryPrice from '@/docs/summary-price.md?raw'
-const summaryPriceHtml = marked(summaryPrice, { renderer }) as string
+const summaryPriceHtml = DOMPurify.sanitize(marked(summaryPrice, { renderer }) as string)
 import summaryQA from '@/docs/summary-QA.md?raw'
-const summaryQAHtml = marked(summaryQA, { renderer }) as string
+const summaryQAHtml = DOMPurify.sanitize(marked(summaryQA, { renderer }) as string)
 
 import gettingStartIndustry from '@/docs/getting-start-industry.md?raw'
-const gettingStartIndustryHtml = marked(gettingStartIndustry, { renderer }) as string
+const gettingStartIndustryHtml = DOMPurify.sanitize(marked(gettingStartIndustry, { renderer }) as string)
 import gettingStartExampleIshtar from '@/docs/getting-start-example-ishtar.md?raw'
-const gettingStartExampleIshtarHtml = marked(gettingStartExampleIshtar, { renderer }) as string
+const gettingStartExampleIshtarHtml = DOMPurify.sanitize(marked(gettingStartExampleIshtar, { renderer }) as string)
 import gettingStartStorage from '@/docs/getting-start-storage.md?raw'
-const gettingStartStorageHtml = marked(gettingStartStorage, { renderer }) as string
+const gettingStartStorageHtml = DOMPurify.sanitize(marked(gettingStartStorage, { renderer }) as string)
 import gettingStartSetting from '@/docs/getting-start-setting.md?raw'
-const gettingStartSettingHtml = marked(gettingStartSetting, { renderer }) as string
+const gettingStartSettingHtml = DOMPurify.sanitize(marked(gettingStartSetting, { renderer }) as string)
 
 const helpStore = useHelpStore()
 

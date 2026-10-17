@@ -4,6 +4,7 @@ from src_v2.core.config.config import config
 from src_v2.core.database.kahuna_database_utils_v2 import EveCorporationContractDBUtils
 from src_v2.core.log import logger
 from src_v2.core.utils import tqdm_manager
+from src_v2.core.utils.datetime_utils import safe_parse_datetime
 from src_v2.model.EVE.character.character_manager import CharacterManager
 from src_v2.model.EVE.eveesi.esi_api.contracts import (
     corporations_corporation_contracts,
@@ -97,28 +98,13 @@ class ContractManager():
             # 转换合同数据格式并批量入库
             def convert_contract_to_db_row(contract: dict) -> dict:
                 """将API返回的合同数据转换为数据库行格式"""
-                def parse_datetime(dt_str):
-                    """解析ISO格式的日期时间字符串"""
-                    if not dt_str:
-                        return None
-                    if isinstance(dt_str, datetime):
-                        dt = dt_str
-                    else:
-                        # 处理带 Z 的 ISO 字符串
-                        dt_str = dt_str.replace("Z", "+00:00")
-                        dt = datetime.fromisoformat(dt_str)
-                    # 如果是 offset-aware，转换为 UTC 后移除时区信息
-                    if dt.tzinfo is not None:
-                        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-                    return dt
-
                 row = {
                     "acceptor_id": contract.get("acceptor_id"),
                     "assignee_id": contract.get("assignee_id"),
                     "availability": contract.get("availability"),
                     "contract_id": contract.get("contract_id"),
-                    "date_expired": parse_datetime(contract.get("date_expired")),
-                    "date_issued": parse_datetime(contract.get("date_issued")),
+                    "date_expired": safe_parse_datetime(contract.get("date_expired")),
+                    "date_issued": safe_parse_datetime(contract.get("date_issued")),
                     "for_corporation": contract.get("for_corporation"),
                     "issuer_corporation_id": contract.get("issuer_corporation_id"),
                     "issuer_id": contract.get("issuer_id"),
@@ -126,8 +112,8 @@ class ContractManager():
                     "type": contract.get("type"),
                     "buyout": contract.get("buyout"),
                     "collateral": contract.get("collateral"),
-                    "date_accepted": parse_datetime(contract.get("date_accepted")),
-                    "date_completed": parse_datetime(contract.get("date_completed")),
+                    "date_accepted": safe_parse_datetime(contract.get("date_accepted")),
+                    "date_completed": safe_parse_datetime(contract.get("date_completed")),
                     "days_to_complete": contract.get("days_to_complete"),
                     "end_location_id": contract.get("end_location_id"),
                     "price": contract.get("price"),

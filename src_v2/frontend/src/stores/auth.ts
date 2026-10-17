@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { http } from '@/http'
+import { clearResponseCache } from '@/utils/responseCache'
 
 export interface User {
   id: string
@@ -53,12 +54,10 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
 
   /**
-   * token: 登录后后端返回的认证 token。
-   * localStorage 是浏览器提供的一种本地存储机制，可以将数据以键值对的形式永久保存在用户的浏览器中。
-   * 即使刷新页面或关闭浏览器，数据也不会丢失，除非主动清除。
-   * 这里我们尝试从 localStorage 读取 token，实现“自动登录”或“记住登录状态”的效果。
+   * token: 登录后后端通过 httpOnly Cookie 自动管理，前端不再存储。
+   * 保留此 ref 用于向后兼容（App.vue 等组件可能引用）。
    */
-  const token = ref<string | null>(localStorage.getItem('auth_token'))
+  const token = ref<string | null>(null)
 
   /**
    * isLoading: 标记当前是否正在进行登录等异步操作，用于页面上显示加载动画。
@@ -78,10 +77,10 @@ export const useAuthStore = defineStore('auth', () => {
   // -------------------- 计算属性（getter） --------------------
   /**
    * isAuthenticated: 是否已认证（已登录）。
-   * 只有 token 和 user 都存在时才算登录成功。
+   * 基于 user 是否存在判断（token 由 httpOnly Cookie 管理）。
    * computed 是 Vue 的计算属性，依赖的值变化时会自动重新计算。
    */
-  const isAuthenticated = computed(() => !!token.value && !!user.value)
+  const isAuthenticated = computed(() => !!user.value)
 
   /**
    * userRole: 当前用户的角色（如 'admin'、'user'），未登录时为 'guest'。
@@ -112,10 +111,8 @@ export const useAuthStore = defineStore('auth', () => {
         return { success: false, error: error.value }
       }
 
-      // 保存 token 和用户信息到状态和 localStorage
-      token.value = data.token
+      // 保存用户信息到状态（token 由 httpOnly Cookie 自动管理）
       user.value = data.user
-      localStorage.setItem('auth_token', data.token)
       
       // 设置认证缓存，避免登录后立即跳转时再次验证
       lastAuthCheckAtMs.value = Date.now()
@@ -132,28 +129,25 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
-   * logout: 登出方法，清空用户信息和 token，并从 localStorage 移除 token。
-   * 页面会自动变为未登录状态。
+   * logout: 登出方法，清空用户信息。
+   * Cookie 由后端登出接口自动清除。
    */
   const logout = () => {
     user.value = null
-    token.value = null
-    localStorage.removeItem('auth_token')
     // 清除缓存
     lastAuthCheckAtMs.value = null
     lastAuthCheckResult.value = false
+    // 清空只读接口响应缓存，防止下一个登录用户读到上一位用户的缓存数据
+    clearResponseCache()
   }
 
   /**
-   * checkAuth: 检查当前 token 是否有效（比如页面刷新后）。
-   * 会向后端请求当前用户信息，如果 token 无效则自动登出。
+   * checkAuth: 检查当前认证状态（页面刷新后）。
+   * 会向后端请求当前用户信息（cookie 自动发送），如果认证无效则登出。
    * 通常在路由守卫或页面初始化时调用。
    */
   const checkAuth = async () => {
-    // 没有 token 直接返回未认证
-    if (!token.value) return false
-
-    // 短时缓存命中：5分钟内直接返回上次校验结果（需要已有 user）
+    // 短时缓存命中：30秒内直接返回上次校验结果（需要已有 user）
     if (
       lastAuthCheckAtMs.value &&
       Date.now() - lastAuthCheckAtMs.value < AUTH_CACHE_TTL_MS &&
@@ -167,54 +161,51 @@ export const useAuthStore = defineStore('auth', () => {
       // 用统一HTTP封装请求当前用户信息
       const response = await http.get('/auth/me')
 
+      // http.ts 拦截器已在 401 时自动 logout()，此处令牌已失效
+      if (response.status === 401) {
+        lastAuthCheckAtMs.value = Date.now()
+        lastAuthCheckResult.value = false
+        return false
+      }
+
       // 解析后端返回的数据
       let data: any
       try {
         data = await response.json()
       } catch (parseError) {
-        // 如果解析失败，尝试获取文本
-        await response.text()
-        logout()
-        lastAuthCheckAtMs.value = Date.now()
-        lastAuthCheckResult.value = false
-        return false
+        // 解析失败，保留当前状态
+        return !!user.value
       }
 
       // 检查 data 是否为对象且包含 status
       if (!data || typeof data !== 'object' || !('status' in data)) {
-        logout()
-        lastAuthCheckAtMs.value = Date.now()
-        lastAuthCheckResult.value = false
-        return false
+        return !!user.value
       }
 
-      // 检查 status 是否为 200
+      // 成功：更新用户信息
       if (data.status === 200) {
-        // token 有效，保存用户信息（后端返回的数据结构包含 id, username, roles, vipEndDate）
+        // 身份发生切换（如换号登录）时清空响应缓存，避免读到上一位用户的数据
+        const previousUserId = user.value?.id
+        if (previousUserId && String(previousUserId) !== String(data.id)) {
+          clearResponseCache()
+        }
         user.value = {
           id: data.id,
           username: data.username,
-          email: '', // 后端没有返回 email，保持空字符串
+          email: '',
           roles: data.roles,
           vipEndDate: data.vipEndDate
         }
-        // 刷新缓存
         lastAuthCheckAtMs.value = Date.now()
         lastAuthCheckResult.value = true
         return true
-      } else {
-        // token 无效，自动登出
-        logout()
-        lastAuthCheckAtMs.value = Date.now()
-        lastAuthCheckResult.value = false
-        return false
       }
+
+      // 非200非401（如500），保留当前登录状态
+      return !!user.value
     } catch (err) {
-      // 网络等异常也自动登出
-      logout()
-      lastAuthCheckAtMs.value = Date.now()
-      lastAuthCheckResult.value = false
-      return false
+      // 网络异常等，保留当前登录状态
+      return !!user.value
     }
   }
 

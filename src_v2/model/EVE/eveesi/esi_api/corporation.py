@@ -11,7 +11,7 @@ from src_v2.core.utils import tqdm_manager
 # https://esi.evetech.net/corporations/{corporation_id}
 @esi_request
 async def corporations_corporation_id(corporation_id: int, log=True):
-    data, _, _ = await get_request_async(f"https://esi.evetech.net/latest/corporations/{corporation_id}/",
+    data, *_ = await get_request_async(f"https://esi.evetech.net/latest/corporations/{corporation_id}/",
                        log=log, max_retries=1)
     return data
 
@@ -19,7 +19,7 @@ async def corporations_corporation_id(corporation_id: int, log=True):
 # https://esi.evetech.net/corporations/{corporation_id}/icons
 @esi_request
 async def corporations_corporation_id_icons(corporation_id: int, log=True):
-    data, _, _ = await get_request_async(f"https://esi.evetech.net/latest/corporations/{corporation_id}/icons/",
+    data, *_ = await get_request_async(f"https://esi.evetech.net/latest/corporations/{corporation_id}/icons/",
                        log=log, max_retries=1)
     return data
 
@@ -34,7 +34,7 @@ async def corporations_corporation_id_blueprints(access_token, corporation_id: i
         ac_token = await access_token
     else:
         ac_token = access_token
-    data, pages, _ = await get_request_async(
+    data, pages, *_ = await get_request_async(
         f"https://esi.evetech.net/latest/corporations/{corporation_id}/blueprints/",
         headers={"Authorization": f"Bearer {ac_token}"}, params={"page": page}, log=log, max_retries=max_retries,
         no_retry_code=[OUT_PAGE_ERROR]
@@ -50,7 +50,8 @@ async def corporations_corporation_id_blueprints(access_token, corporation_id: i
         tasks.append(asyncio.create_task(corporations_corporation_id_blueprints(ac_token, corporation_id, p, max_retries, log)))
     page_results = await asyncio.gather(*tasks)
     for data_page in page_results:
-        data.append(data_page)
+        if data_page is not None:
+            data.append(data_page)
     await tqdm_manager.complete_mission(f'corporations_corporation_id_blueprints_{corporation_id}')
 
     return data
@@ -62,6 +63,6 @@ async def corporations_corporation_id_blueprints(access_token, corporation_id: i
 @esi_request
 async def corporations_corporation_id_members(access_token, corporation_id: int, log=True):
     ac_token = await access_token
-    data, _, _ = await get_request_async(f"https://esi.evetech.net/latest/corporations/{corporation_id}/members/",
+    data, *_ = await get_request_async(f"https://esi.evetech.net/latest/corporations/{corporation_id}/members/",
                        headers={"Authorization": f"Bearer {ac_token}"}, log=log, max_retries=1)
     return data

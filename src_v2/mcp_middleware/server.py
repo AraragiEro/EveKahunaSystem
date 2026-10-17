@@ -67,6 +67,7 @@ async def start_mcp_server():
     logger.info("=" * 60)
 
     # 使用 Uvicorn 启动
+    # ws="none" 跳过 websockets 导入，避免与 pyppeteer 的 websockets<11 约束冲突
     uvicorn_config = uvicorn.Config(
         app=mcp_app,
         host=config.mcp_host,
@@ -74,6 +75,7 @@ async def start_mcp_server():
         log_level="info",
         reload=False,
         workers=1,
+        ws="none",
     )
     server = uvicorn.Server(uvicorn_config)
     await server.serve()

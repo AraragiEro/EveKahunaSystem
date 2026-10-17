@@ -98,10 +98,7 @@ const filteredAssetView = computed(() => {
 
 <template>
     <div v-loading="loading" class="sell-view-content">
-        <div v-if="!loading && assetView.length === 0" class="empty-state">
-            <el-empty description="暂无数据" />
-        </div>
-        <div v-else class="sell-view-container">
+        <div class="sell-view-container">
             <!-- 配置信息卡片 -->
             <el-card class="config-card" shadow="hover">
                 <div class="config-header">
@@ -138,23 +135,26 @@ const filteredAssetView = computed(() => {
                     </el-button>
                 </div>
             </div>
-
-            <!-- 搜索框 -->
-            <div class="search-container">
-                <el-input
-                    v-model="searchKeyword"
-                    placeholder="搜索资产名称（支持中文/英文）"
-                    clearable
-                    class="search-input"
-                >
-                    <template #prefix>
-                        <el-icon><Search /></el-icon>
-                    </template>
-                </el-input>
+            <div v-if="!loading && assetView.length === 0" class="empty-state">
+                <el-empty description="暂无数据" />
             </div>
+            <template v-else>
+                <!-- 搜索框 -->
+                <div class="search-container">
+                    <el-input
+                        v-model="searchKeyword"
+                        placeholder="搜索资产名称（支持中文/英文）"
+                        clearable
+                        class="search-input"
+                    >
+                        <template #prefix>
+                            <el-icon><Search /></el-icon>
+                        </template>
+                    </el-input>
+                </div>
 
-            <!-- 资产列表 -->
-            <div class="asset-grid">
+                <!-- 资产列表 -->
+                <div class="asset-grid">
                 <el-card 
                     v-for="asset in filteredAssetView" 
                     :key="asset.type_id" 
@@ -167,7 +167,7 @@ const filteredAssetView = computed(() => {
                             <img 
                                 :src="`https://imageserver.eveonline.com/Type/${asset.type_id}_64.png`" 
                                 :alt="asset.type_name"
-                                class="asset-icon"
+                                class="asset-icon" loading="lazy"
                             />
                             <!-- 可售标记 -->
                             <!-- <div class="asset-sellable-badge">S</div> -->
@@ -193,8 +193,9 @@ const filteredAssetView = computed(() => {
                     </div>
                 </el-card>
             </div>
-        </div>
+        </template>
     </div>
+</div>
 </template>
 
 <style scoped>

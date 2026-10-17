@@ -17,9 +17,12 @@ from .sde_builder import (
     MapSolarSystems,
     MapRegions,
     IndustryBlueprints,
+    IndustryActivityMaterials,
+    IndustryActivityProducts,
     MetaGroups,
     MarketGroups,
     TypeMaterials,
+    NpcCorporations,
 )
 from src_v2.core.log import logger
 from src_v2.core.database.connect_manager import get_neo4j_manager as neo4j_manager
@@ -359,8 +362,7 @@ class SdeUtils:
                 result = await session.execute(stmt)
                 return result.scalar()
         except Exception as e:
-            task = asyncio.current_task()
-            traceback.print_stack(task)
+            traceback.print_exc()
             logger.warning(f"获取 type_id={invtpye_id} 的组名称时出错: {e}")
             return None
 
@@ -604,8 +606,7 @@ class SdeUtils:
                 market_group_list.reverse()
                 return market_group_list
         except Exception as e:
-            task = asyncio.current_task()
-            traceback.print_stack(task)
+            traceback.print_exc()
             logger.warning(f"获取 type_id={type_id} 的市场组列表时出错: {e}")
             return []
 
@@ -689,6 +690,48 @@ class SdeUtils:
         except Exception as e:
             logger.warning(f"获取 system_id={system_id} 的星系信息时出错: {e}")
             return None
+
+    @staticmethod
+    async def search_solar_systems(keyword: str, limit: int = 20) -> List[dict]:
+        """搜索星系（通过名称模糊匹配，不区分大小写）
+        
+        Args:
+            keyword: 搜索关键字，至少 2 个字符
+            limit: 最多返回结果数
+        
+        Returns:
+            [{system_id, system_name, system_name_zh}, ...]
+        """
+        if len(keyword) < 2:
+            return []
+        try:
+            pattern = f"%{keyword}%"
+            m = await get_db_manager()
+            async with m.get_readonly_session() as session:
+                stmt = (
+                    select(
+                        MapSolarSystems.solarSystemID,
+                        MapSolarSystems.solarSystemName_en,
+                        MapSolarSystems.solarSystemName_zh,
+                    )
+                    .where(
+                        MapSolarSystems.solarSystemName_en.ilike(pattern)
+                        | MapSolarSystems.solarSystemName_zh.ilike(pattern)
+                    )
+                    .limit(limit)
+                )
+                result = await session.execute(stmt)
+                return [
+                    {
+                        "system_id": row[0],
+                        "system_name": row[1],
+                        "system_name_zh": row[2],
+                    }
+                    for row in result.all()
+                ]
+        except Exception as e:
+            logger.warning(f"搜索星系 '{keyword}' 时出错: {e}")
+            return []
 
     @staticmethod
     def maybe_chinese(strs):
@@ -1085,6 +1128,91 @@ class SdeUtils:
             logger.warning(f"获取压缩矿类型ID列表失败: {e}")
             traceback.print_exc()
             return ([], [])
+
+    # ────────────────────────── LP 评估相关查询 ──────────────────────────
+
+    @staticmethod
+    async def get_npc_corporations_with_lp() -> list[dict]:
+        """获取所有拥有 LP 商店的 NPC 军团。"""
+        async with (await get_db_manager()).get_readonly_session() as session:
+            from sqlalchemy import text
+            result = await session.execute(
+                text(
+                    'SELECT "corporationID", "name_en", "name_zh", "factionID" '
+                    'FROM "npcCorporations" WHERE "lpOfferTables" IS NOT NULL'
+                )
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+
+    @staticmethod
+    async def get_bpc_type_ids(type_ids: set[int]) -> set[int]:
+        """判断哪些 type_id 属于蓝图层 (categoryID=9)。"""
+        if not type_ids:
+            return set()
+        async with (await get_db_manager()).get_readonly_session() as session:
+            from sqlalchemy import text
+            result = await session.execute(
+                text(
+                    'SELECT it."typeID" '
+                    'FROM "invTypes" it '
+                    'JOIN "invGroups" ig ON it."groupID" = ig."groupID" '
+                    'WHERE ig."categoryID" = 9 AND it."typeID" = ANY(:tids)'
+                ),
+                {"tids": list(type_ids)},
+            )
+            return {row[0] for row in result.fetchall()}
+
+    @staticmethod
+    async def get_type_names_batch(type_ids: set[int]) -> dict[int, dict]:
+        """批量查询物品中英文名称。"""
+        if not type_ids:
+            return {}
+        async with (await get_db_manager()).get_readonly_session() as session:
+            from sqlalchemy import text
+            result = await session.execute(
+                text(
+                    'SELECT "typeID", "typeName_en", "typeName_zh" '
+                    'FROM "invTypes" WHERE "typeID" = ANY(:tids)'
+                ),
+                {"tids": list(type_ids)},
+            )
+            return {
+                row[0]: {"en": row[1] or "", "zh": row[2] or ""}
+                for row in result.fetchall()
+            }
+
+    @staticmethod
+    async def get_bpc_manufacturing_details(bpc_type_ids: set[int]) -> dict[int, dict]:
+        """
+        批量查询 BPC 的制造产品与原料 (activityID=1)。
+
+        Returns:
+            {bpc_type_id: {"product": (type_id, qty), "materials": [(type_id, qty), ...]}}
+        """
+        if not bpc_type_ids:
+            return {}
+        details: dict[int, dict] = {bid: {"product": None, "materials": []} for bid in bpc_type_ids}
+        async with (await get_db_manager()).get_readonly_session() as session:
+            from sqlalchemy import text
+            # 产品
+            r = await session.execute(
+                text(
+                    'SELECT "blueprintTypeID", "productTypeID", "quantity" '
+                    'FROM "industryActivityProducts" '
+                    'WHERE "activityID" = 1 AND "blueprintTypeID" = ANY(:bids)'
+                ), {"bids": list(bpc_type_ids)})
+            for row in r.fetchall():
+                details[row[0]]["product"] = (row[1], row[2])
+            # 原料
+            r = await session.execute(
+                text(
+                    'SELECT "blueprintTypeID", "materialTypeID", "quantity" '
+                    'FROM "industryActivityMaterials" '
+                    'WHERE "activityID" = 1 AND "blueprintTypeID" = ANY(:bids)'
+                ), {"bids": list(bpc_type_ids)})
+            for row in r.fetchall():
+                details[row[0]]["materials"].append((row[1], row[2]))
+        return details
 
     @staticmethod
     @cached(ttl=3600, serializer=PickleSerializer())

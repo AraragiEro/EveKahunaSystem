@@ -20,6 +20,8 @@ const editDialogVisible = ref(false)
 const addDialogVisible = ref(false)
 const editingVipState = ref<VipState | null>(null)
 const searchUserName = ref('')
+const sortProp = ref<string>('')
+const sortOrder = ref<'ascending' | 'descending' | ''>('')
 const userOptions = ref<UserOption[]>([])
 const userSearchLoading = ref(false)
 
@@ -41,15 +43,46 @@ const vipLevelOptions = [
   { label: 'VIP Omega', value: 'vip_omega' }
 ]
 
-// 过滤后的VIP状态列表
+// 过滤+排序后的VIP状态列表
 const filteredVipStates = computed(() => {
-  if (!searchUserName.value.trim()) {
-    return vipStates.value
+  let result = vipStates.value
+
+  // 按用户名筛选
+  if (searchUserName.value.trim()) {
+    const searchTerm = searchUserName.value.trim().toLowerCase()
+    result = result.filter(state =>
+      state.userName.toLowerCase().includes(searchTerm)
+    )
   }
-  const searchTerm = searchUserName.value.trim().toLowerCase()
-  return vipStates.value.filter(state => 
-    state.userName.toLowerCase().includes(searchTerm)
-  )
+
+  // 按排序列排序
+  if (sortProp.value && sortOrder.value) {
+    const prop = sortProp.value as keyof VipState
+    const ascending = sortOrder.value === 'ascending'
+    result = [...result].sort((a, b) => {
+      const aVal = a[prop]
+      const bVal = b[prop]
+
+      if (prop === 'vipEndDate') {
+        // 空日期排到末尾
+        const aTime = aVal ? new Date(aVal).getTime() : 0
+        const bTime = bVal ? new Date(bVal).getTime() : 0
+        if (!aVal && !bVal) return 0
+        if (!aVal) return 1
+        if (!bVal) return -1
+        return ascending ? aTime - bTime : bTime - aTime
+      }
+
+      // 字符串比较
+      const aStr = (aVal ?? '') as string
+      const bStr = (bVal ?? '') as string
+      if (aStr < bStr) return ascending ? -1 : 1
+      if (aStr > bStr) return ascending ? 1 : -1
+      return 0
+    })
+  }
+
+  return result
 })
 
 // 加载VIP状态列表
@@ -69,6 +102,12 @@ const loadVipStates = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 表格排序变化
+const handleSortChange = ({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }) => {
+  sortProp.value = prop ?? ''
+  sortOrder.value = order ?? ''
 }
 
 // 打开编辑对话框
@@ -235,8 +274,9 @@ onMounted(() => {
       v-loading="loading"
       stripe
       style="width: 100%"
+      @sort-change="handleSortChange"
     >
-      <el-table-column prop="userName" label="用户名" width="200" />
+      <el-table-column prop="userName" label="用户名" width="200" sortable="custom" />
       <el-table-column prop="vipLevel" label="VIP等级" width="150">
         <template #default="{ row }">
           <el-tag :type="row.vipLevel === 'vip_alpha' ? 'success' : 'warning'">
@@ -244,7 +284,7 @@ onMounted(() => {
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="vipEndDate" label="到期时间" width="200">
+      <el-table-column prop="vipEndDate" label="到期时间" width="200" sortable="custom">
         <template #default="{ row }">
           <span :class="{ 'expired-text': isExpired(row.vipEndDate) }">
             {{ formatDateTime(row.vipEndDate) }}

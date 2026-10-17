@@ -1,7 +1,7 @@
 [project]
 name = "astrbot-plugin-kahunabot"
-version = "1.4.0"
-description = "Add your description here"
+version = "1.6.1"
+description = "EVE Online 工业规划与资产管理系统"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -25,7 +25,7 @@ dependencies = [
     "redis>=7.0.1",
     "requests>=2.32.5",
     "requests-oauthlib>=2.0.0",
-    "sqlalchemy>=2.0.44",
+    "sqlalchemy[asyncio]>=2.0.44",
     "thefuzz>=0.22.1",
     "tqdm>=4.67.1",
     "tomli-w>=1.0.0",
@@ -41,7 +41,34 @@ dependencies = [
     "google-auth>=2.40.3",
     "google-auth-httplib2>=0.2.0",
     "pysocks>=1.7.1",
-    "mcp>=1.12.0",
+    "mcp>=1.12.0,<2.0.0",
+    "alembic>=1.18.4",
+]
+
+[dependency-groups]
+test = [
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.2.0",
+    "pytest-cov>=6.0.0",
+    "pytest-mock>=3.14.0",
+    "pytest-timeout>=2.3.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "unit: 单元测试，无外部依赖",
+    "dao: DAO 层测试，需要 SQLite 内存数据库",
+    "api: API 路由测试，需要 Quart 测试客户端",
+    "integration: 完整集成测试，需要 Docker 容器",
+    "slow: 耗时测试",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
 ]
 
 [[tool.uv.index]]

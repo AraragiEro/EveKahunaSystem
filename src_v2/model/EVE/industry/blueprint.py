@@ -5,6 +5,7 @@ from cachetools import LRUCache
 import asyncio
 from sqlalchemy import select
 from aiocache import cached
+from aiocache.serializers import PickleSerializer
 
 from ..sde import SdeUtils
 from ..sde.sde_builder import IndustryActivityMaterials, IndustryActivityProducts, IndustryBlueprints, InvTypes, IndustryActivities
@@ -250,8 +251,10 @@ class BPManager:
         return max(1, 86400 // production_time)  # 86400秒 = 1天
 
     @classmethod
-    @cached(ttl=3600)
+    @cached(ttl=3600, serializer=PickleSerializer())
     async def get_activity_id_by_product_typeid(cls, product_typeid: int, pdm = None) -> Optional[int]:
+        from src_v2.core.log import logger
+        logger.debug(f"[cache] get_activity_id_by_product_typeid MISS: type={product_typeid}")
         if pdm:
             m = pdm
         else:

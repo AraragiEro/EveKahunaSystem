@@ -518,11 +518,16 @@ const handleChartTypeChange = () => {
   updateChart()
 }
 
-// 监听窗口大小变化
+// 监听窗口大小变化 (RAF throttle)
+let resizeRAF: number | null = null
 const handleResize = () => {
-  if (chartInstance) {
-    chartInstance.resize()
-  }
+  if (resizeRAF !== null) return
+  resizeRAF = requestAnimationFrame(() => {
+    if (chartInstance) {
+      chartInstance.resize()
+    }
+    resizeRAF = null
+  })
 }
 
 onMounted(async () => {
@@ -539,6 +544,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   disposeChart()
+  if (resizeRAF !== null) cancelAnimationFrame(resizeRAF)
   window.removeEventListener('resize', handleResize)
   cleanupThemeWatcher?.()
   cleanupThemeWatcher = null

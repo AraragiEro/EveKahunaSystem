@@ -1,13 +1,45 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { setupAuthGuards } from './guards'
-import { getEnterpriseRoutes } from './enterprise'
-import TodoListView from '../views/TodoListView.vue'
-import HomeView from '../views/HomeView.vue'
+import { registerRouteProgress } from '@/composables/useRouteProgress'
 
 // 条件加载企业版路由
-// 使用动态导入，避免顶层 await，使用懒加载方式
+// 社区版（开源同步）会删除 src/router/enterprise.ts，
+// 所以用 import.meta.glob 可选加载：模块不存在时得到空对象，
+// 不会产生 rollup 无法解析的静态导入路径，社区版也能正常构建。
 const APP_EDITION = (import.meta.env.VITE_APP_EDITION as string) || 'community'
+
+type EnterpriseRouteModule = {
+  getEnterpriseRoutes?: (edition: string) => RouteRecordRaw[]
+}
+
+const enterpriseRouteModules = import.meta.glob('./enterprise.ts', { eager: true }) as Record<
+  string,
+  EnterpriseRouteModule
+>
+
+/**
+ * 解析企业版路由
+ * 仅当 APP_EDITION === 'enterprise' 且企业版路由模块存在时才加载，否则返回空数组
+ * @param edition 应用版本 ('enterprise' | 'community')
+ */
+function resolveEnterpriseRoutes(edition: string): RouteRecordRaw[] {
+  if (edition !== 'enterprise') {
+    return []
+  }
+  const enterpriseModule = enterpriseRouteModules['./enterprise.ts']
+  if (!enterpriseModule || typeof enterpriseModule.getEnterpriseRoutes !== 'function') {
+    // 企业版路由模块不存在（社区版/裁剪版）时静默跳过
+    console.warn('[路由] 未找到企业版路由模块，已跳过企业版路由')
+    return []
+  }
+  try {
+    return enterpriseModule.getEnterpriseRoutes(edition)
+  } catch (error) {
+    console.warn('[路由] 企业版路由加载失败:', error)
+    return []
+  }
+}
 
 // 定义基础路由
 const baseRoutes = [
@@ -34,15 +66,19 @@ const baseRoutes = [
       redirect: '/landing'
     },
     {
-      path: '/todolist',
-      name: 'todolist',
-      component: TodoListView,
+      path: '/dashboard',
+      name: 'dashboard',
+      component: () => import('../views/DashboardView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/todolist',
+      redirect: '/dashboard'
     },
     {
       path: '/home',
       name: 'home',
-      component: HomeView,
+      component: () => import('../views/HomeView.vue'),
       meta: { requiresAuth: true , roles: ['vip_alpha', 'vip_omega'] },
       redirect: '/home/overview',
       children: [
@@ -55,6 +91,11 @@ const baseRoutes = [
           path: 'history',
           name: 'homeHistory',
           component: () => import('../views/home/history.vue'),
+        },
+        {
+          path: 'orderStats',
+          name: 'homeOrderStats',
+          component: () => import('../views/home/orderStats.vue'),
         },
       ],
     },
@@ -124,6 +165,12 @@ const baseRoutes = [
       ],
     },
     {
+      path: '/utils/piProfit',
+      name: 'piProfit',
+      component: () => import('../views/industry/piProfit.vue'),
+      meta: { requiresAuth: false },
+    },
+    {
       path: '/corpShop',
       name: 'corpShop',
       component: () => import('../views/corpShop.vue'),
@@ -132,6 +179,11 @@ const baseRoutes = [
       path: '/utils',
       name: 'utils',
       component: () => import('../views/utilsView.vue'),
+    },
+    {
+      path: '/utils/estimator',
+      name: 'priceEstimator',
+      component: () => import('../views/PriceEstimatorView.vue'),
     },
     {
       path: '/messageBoard',
@@ -169,6 +221,16 @@ const baseRoutes = [
           name: 'websiteDataStatistics',
           component: () => import('../views/admin/websiteDataStatistics.vue'),
         },
+        {
+          path: 'websiteManagement',
+          name: 'websiteManagement',
+          component: () => import('../views/admin/websiteManagement.vue'),
+        },
+        {
+          path: 'esiModuleStatus',
+          name: 'esiModuleStatus',
+          component: () => import('../views/admin/esiModuleStatus.vue'),
+        },
       ],
     },
     {
@@ -198,12 +260,15 @@ const baseRoutes = [
 ]
 
 // 条件添加企业版路由
-const routes: RouteRecordRaw[] = [...baseRoutes, ...getEnterpriseRoutes(APP_EDITION)]
+const routes: RouteRecordRaw[] = [...baseRoutes, ...resolveEnterpriseRoutes(APP_EDITION)]
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,
 })
+
+// 注册路由切换进度条（必须早于认证守卫，否则要等认证通过才会显示）
+registerRouteProgress(router)
 
 // 设置认证守卫
 setupAuthGuards(router)

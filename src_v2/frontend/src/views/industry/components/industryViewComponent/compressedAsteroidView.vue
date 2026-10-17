@@ -2,7 +2,8 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { http } from '@/http'
 import { ElMessage } from 'element-plus'
-import { DocumentCopy, Check } from '@element-plus/icons-vue'
+import { DocumentCopy, Check, Delete, CirclePlus, Setting } from '@element-plus/icons-vue'
+import { useOreBlacklist } from '@/composables/useOreBlacklist'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
 import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
@@ -25,7 +26,10 @@ const wastePenalty = ref(0.1) // 多余矿物权重，默认0.1
 const shortagePenalty = ref(2.0) // 不足矿物权重，默认2.0
 const liquidityImpact = ref(5.0) // 收单流动性溢价系数，默认0（不启用）
 const purchaseTimeLimit = ref(7) // 采购时间上限（天），默认7天
+const marketSupplyRatio = ref(100) // 市场供给比例（百分比），默认100%，仅扫单模式生效
 const shippingCostPerVolume = ref(0) // 运费设置，单位为isk/立方，默认0
+const allowDirectMineralPurchase = ref(true) // 是否允许直接购买矿物
+const outputValueRewardRate = ref(0.0) // 产出价值奖励系数，默认0.0
 const purchaseMode = ref<'扫单' | '收单'>('扫单') // 采购模式：扫单或收单
 const quantityMode = ref<'缺失' | '全部'>('缺失') // 数量模式：缺失或全部
 const lastFetchTime = ref<string | null>(null) // 上次获取数据的时间（ISO 格式）
@@ -40,6 +44,45 @@ const customMineralData = ref<Array<{
 const importDialogVisible = ref(false) // 导入弹窗显示状态
 const importText = ref('') // 导入的文本内容
 const importLoading = ref(false) // 导入处理中的状态
+const blacklistDialogVisible = ref(false) // 黑名单弹窗显示状态
+const blacklistSearchText = ref('') // 黑名单搜索文本
+
+// 矿石黑名单
+const { blacklist, blacklistedIdArray, addToBlacklist, removeFromBlacklist, isBlacklisted } = useOreBlacklist()
+
+// 自动补全：搜索矿石名称
+const fetchOreSuggestions = async (queryString: string, cb: Function) => {
+    if (!queryString) {
+        cb([])
+        return
+    }
+    try {
+        const res = await http.post('/EVE/industry/getTypeSuggestionsList', { type_name: queryString })
+        const data = await res.json()
+        cb(queryString ? (data.data || []) : [])
+    } catch {
+        cb([])
+    }
+}
+
+// 自动补全选中后查找 type_id 并加入黑名单
+const handleBlacklistSelect = async (item: { value: string }) => {
+    const selectedName = item.value
+    blacklistSearchText.value = ''
+    try {
+        const res = await http.post('/EVE/industry/searchMineralOrIceProduct', { name: selectedName })
+        const data = await res.json()
+        if (data.status === 200 && data.data) {
+            addToBlacklist(data.data.type_id, data.data.type_name_zh || selectedName)
+            ElMessage.success(`已将「${data.data.type_name_zh || selectedName}」加入黑名单`)
+        } else {
+            ElMessage.warning(`未找到矿石: ${selectedName}`)
+        }
+    } catch {
+        ElMessage.error('查询矿石信息失败')
+    }
+}
+
 const compressedAsteroidData = ref<{
     purcheses_res?: Record<string, {
         quantity: number
@@ -109,7 +152,10 @@ const saveToLocalStorage = () => {
             purchaseMode: purchaseMode.value,
             liquidityImpact: liquidityImpact.value,
             purchaseTimeLimit: purchaseTimeLimit.value,
+            marketSupplyRatio: marketSupplyRatio.value,
             shippingCostPerVolume: shippingCostPerVolume.value,
+            allowDirectMineralPurchase: allowDirectMineralPurchase.value,
+            outputValueRewardRate: outputValueRewardRate.value,
             fetchTime: new Date().toISOString()
         }
         
@@ -177,8 +223,17 @@ const loadFromLocalStorage = () => {
                 if (modeData.purchaseTimeLimit !== undefined) {
                     purchaseTimeLimit.value = modeData.purchaseTimeLimit
                 }
+                if (modeData.marketSupplyRatio !== undefined) {
+                    marketSupplyRatio.value = modeData.marketSupplyRatio
+                }
                 if (modeData.shippingCostPerVolume !== undefined) {
                     shippingCostPerVolume.value = modeData.shippingCostPerVolume
+                }
+                if (modeData.allowDirectMineralPurchase !== undefined) {
+                    allowDirectMineralPurchase.value = modeData.allowDirectMineralPurchase
+                }
+                if (modeData.outputValueRewardRate !== undefined) {
+                    outputValueRewardRate.value = modeData.outputValueRewardRate
                 }
                 if (modeData.fetchTime) {
                     lastFetchTime.value = modeData.fetchTime
@@ -213,7 +268,7 @@ const getCompressedAsteroidData = async () => {
     let mineralData: any[] = []
     
     // 如果使用自定义数据，使用自定义数据
-    if (useCustomData.value && customMineralData.value.length > 0) {
+    if (useCustomData.value && customMineralData.value.length> 0) {
         mineralData = customMineralData.value.map((item) => ({
             type_id: item.type_id,
             type_name: item.type_name,
@@ -221,9 +276,9 @@ const getCompressedAsteroidData = async () => {
             real_quantity: item.real_quantity
         }))
     } else {
-        // materialData 的结构是 [{ layer_id: "矿石", children: [...] }, ...]
-        // 需要找到 layer_id === '矿石' 或 '冰矿产物' 的对象，然后合并它们的 children
-        const mineralLayers = (props.materialData || []).filter(item => ['矿石', '冰矿产物'].includes(item.layer_id))
+        // materialData 的结构是 [{ layer_id: "矿物", children: [...] }, ...]
+        // 需要找到 layer_id === '矿物' 或 '冰矿产物' 的对象，然后合并它们的 children
+        const mineralLayers = (props.materialData || []).filter(item => ['矿物', '冰矿产物'].includes(item.layer_id))
         // 合并所有匹配层的 children
         const allChildren: any[] = []
         mineralLayers.forEach(layer => {
@@ -256,12 +311,15 @@ const getCompressedAsteroidData = async () => {
             mineral_data: mineralData,
             refinement_rate: refinementRate.value / 100, // 将百分比转换为小数
             waste_penalty: wastePenalty.value,
-            shortage_penalty: shortagePenalty.value,
             purchase_mode: purchaseMode.value,
             quantity_mode: quantityModeParam,
             liquidity_impact: liquidityImpactParam,
             purchase_time_limit: purchaseTimeLimitParam,
-            shipping_cost_per_volume: shippingCostPerVolume.value
+            market_supply_ratio: marketSupplyRatio.value / 100, // 百分比转小数
+            shipping_cost_per_volume: shippingCostPerVolume.value,
+            allow_direct_mineral_purchase: allowDirectMineralPurchase.value,
+            output_value_reward_rate: outputValueRewardRate.value,
+            blacklist: blacklistedIdArray.value
         })
         
         if (!res.ok) {
@@ -318,12 +376,12 @@ const formatAccounting = (value: number | string | null | undefined): string => 
 // 需求矿物数据（从 props.materialData 提取）
 const requiredMinerals = computed(() => {
     // 如果使用自定义数据，直接返回自定义数据
-    if (useCustomData.value && customMineralData.value.length > 0) {
+    if (useCustomData.value && customMineralData.value.length> 0) {
         return customMineralData.value
     }
     
-    // 找到所有 layer_id === '矿石' 或 '冰矿产物' 的对象
-    const mineralLayers = (props.materialData || []).filter(item => ['矿石', '冰矿产物'].includes(item.layer_id))
+    // 找到所有 layer_id === '矿物' 或 '冰矿产物' 的对象
+    const mineralLayers = (props.materialData || []).filter(item => ['矿物', '冰矿产物'].includes(item.layer_id))
     if (mineralLayers.length === 0) {
         return []
     }
@@ -682,7 +740,7 @@ const mineralComparisonTableData = computed(() => {
     })
     
     // 显示所有有需求或产出的矿物（过滤掉既无需求也无产出的行）
-    return result.filter(row => row.required_quantity > 0 || row.produced_quantity > 0)
+    return result.filter(row => row.required_quantity> 0 || row.produced_quantity> 0)
 })
 
 // 步骤5：桑吉图数据准备（按价值分配比例）
@@ -794,15 +852,13 @@ const sankeyChartRef = ref<HTMLElement>()
 let sankeyChartInstance: echarts.ECharts | null = null
 let cleanupThemeWatcher: (() => void) | null = null
 
-// 防抖定时器
-let resizeTimer: number | null = null
+// RAF throttle
+let resizeRAF: number | null = null
 
-// 窗口resize处理函数（带防抖）
+// 窗口resize处理函数 (RAF throttle)
 const handleResize = () => {
-    if (resizeTimer) {
-        clearTimeout(resizeTimer)
-    }
-    resizeTimer = window.setTimeout(() => {
+    if (resizeRAF !== null) return
+    resizeRAF = requestAnimationFrame(() => {
         if (sankeyChartInstance) {
             try {
                 sankeyChartInstance.resize()
@@ -810,7 +866,8 @@ const handleResize = () => {
                 console.error('图表resize失败:', error)
             }
         }
-    }, 100)
+        resizeRAF = null
+    })
 }
 
 // 检查容器是否准备好
@@ -819,7 +876,7 @@ const isContainerReady = (): boolean => {
         return false
     }
     const rect = sankeyChartRef.value.getBoundingClientRect()
-    return rect.width > 0 && rect.height > 0
+    return rect.width> 0 && rect.height> 0
 }
 
 // 初始化桑吉图
@@ -923,7 +980,7 @@ const updateSankeyChart = () => {
                         .filter(link => link.target === name)
                         .reduce((sum, link) => sum + (link.rawValue || 0), 0)
                     
-                    if (totalValue > 0) {
+                    if (totalValue> 0) {
                         return `${name}<br/>总价值: ${formatAccounting(totalValue)} ISK`
                     }
                     
@@ -962,6 +1019,10 @@ watch(
     () => {
         nextTick(() => {
             updateSankeyChart()
+            // 当矿物采购表格出现/消失时，桑基图容器宽度会变化（24→12 或 12→24），需要 resize
+            if (sankeyChartInstance) {
+                sankeyChartInstance.resize()
+            }
         })
     },
     { deep: true }
@@ -1088,10 +1149,10 @@ watch(
         if (newValue) {
             // 切换到自定义数据模式
             // 如果有自定义数据且已计算过，直接显示结果
-            if (customMineralData.value.length > 0 && compressedAsteroidData.value) {
+            if (customMineralData.value.length> 0 && compressedAsteroidData.value) {
                 console.log('切换到自定义数据模式，使用已有计算结果')
                 // 数据已经存在，图表会自动更新
-            } else if (customMineralData.value.length > 0) {
+            } else if (customMineralData.value.length> 0) {
                 // 有自定义数据但未计算，可以提示用户点击求解
                 console.log('切换到自定义数据模式，请点击求解按钮进行计算')
             } else {
@@ -1107,6 +1168,16 @@ watch(
         }
         // 保存状态
         saveToLocalStorage()
+    }
+)
+
+// 监听 wastePenalty 变化，自动限制 outputValueRewardRate 不超过它
+watch(
+    () => wastePenalty.value,
+    (newVal) => {
+        if (outputValueRewardRate.value> newVal) {
+            outputValueRewardRate.value = newVal
+        }
     }
 )
 
@@ -1132,10 +1203,10 @@ onMounted(() => {
 onUnmounted(() => {
     cleanupThemeWatcher?.()
     cleanupThemeWatcher = null
-    // 清理防抖定时器
-    if (resizeTimer) {
-        clearTimeout(resizeTimer)
-        resizeTimer = null
+    // 清理 RAF 定时器
+    if (resizeRAF !== null) {
+        cancelAnimationFrame(resizeRAF)
+        resizeRAF = null
     }
     
     // 销毁图表实例
@@ -1151,6 +1222,33 @@ onUnmounted(() => {
     // 移除事件监听器
     window.removeEventListener('resize', handleResize)
 })
+
+// 单值复制到剪贴板（模板 @click 中使用的辅助函数 — navigator 在模板中不可直接访问）
+const copyToClipboard = async (text: string, successMsg: string) => {
+    if (!text) {
+        ElMessage.warning('没有可复制的内容')
+        return
+    }
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text)
+            ElMessage.success(successMsg)
+        } else {
+            // 降级方案：传统 execCommand
+            const textarea = document.createElement('textarea')
+            textarea.value = text
+            textarea.style.position = 'fixed'
+            textarea.style.left = '-9999px'
+            document.body.appendChild(textarea)
+            textarea.select()
+            document.execCommand('copy')
+            document.body.removeChild(textarea)
+            ElMessage.success(successMsg)
+        }
+    } catch (err) {
+        console.error('复制失败:', err)
+    }
+}
 
 // 复制矿石名称和数量
 const copyOreData = () => {
@@ -1228,7 +1326,7 @@ const parseImportText = async () => {
             if (!line) continue
             
             // 使用空格或制表符切分
-            const parts = line.split(/\s+/).filter(part => part.length > 0)
+            const parts = line.split(/\s+/).filter(part => part.length> 0)
             if (parts.length === 0) continue
             
             let quantity: number | null = null
@@ -1239,7 +1337,7 @@ const parseImportText = async () => {
                 // 尝试解析为数字（支持千分位分隔符）
                 const numStr = part.replace(/,/g, '')
                 const num = parseFloat(numStr)
-                if (!isNaN(num) && isFinite(num) && num > 0) {
+                if (!isNaN(num) && isFinite(num) && num> 0) {
                     quantity = num
                     break
                 } else {
@@ -1259,7 +1357,7 @@ const parseImportText = async () => {
             
             // 尝试组合名称片段查询
             let found = false
-            for (let j = nameParts.length; j > 0; j--) {
+            for (let j = nameParts.length; j> 0; j--) {
                 const testName = nameParts.slice(0, j).join(' ')
                 try {
                     const res = await http.post('/EVE/industry/searchMineralOrIceProduct', {
@@ -1332,7 +1430,7 @@ const parseImportText = async () => {
         
         // 显示结果
         const successMsg = `成功导入 ${parsedData.length} 种矿物`
-        if (errors.length > 0) {
+        if (errors.length> 0) {
             ElMessage.warning(`${successMsg}，但有 ${errors.length} 行解析失败`)
             console.warn('解析错误:', errors)
         } else {
@@ -1344,7 +1442,7 @@ const parseImportText = async () => {
         importText.value = ''
         
         // 如果已开启自定义数据模式，自动触发计算
-        if (useCustomData.value && parsedData.length > 0) {
+        if (useCustomData.value && parsedData.length> 0) {
             await getCompressedAsteroidData()
         }
     } catch (error) {
@@ -1391,6 +1489,21 @@ const openImportDialog = () => {
                     style="width: 150px;"
                 />
             </div>
+            <div class="control-item">
+                <label>产出价值奖励：</label>
+                <el-input-number
+                    v-model="outputValueRewardRate"
+                    :min="0"
+                    :max="wastePenalty"
+                    :step="0.01"
+                    :precision="2"
+                    controls-position="right"
+                    style="width: 150px;"
+                />
+                <span class="hint-text" style="margin-left: 10px;">
+                    不能超过多余矿物惩罚，越大越倾向选择高产出矿石
+                </span>
+            </div>
             <!-- <div class="control-item">
                 <label>不足矿物惩罚：</label>
                 <el-input-number
@@ -1426,7 +1539,7 @@ const openImportDialog = () => {
                     controls-position="right"
                     style="width: 150px;"
                 />
-                <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                <span class="hint-text" style="margin-left: 10px;">
                     仅在收单模式生效，0 为关闭，建议 0.1～5.0
                 </span>
             </div>
@@ -1442,8 +1555,24 @@ const openImportDialog = () => {
                     style="width: 150px;"
                 />
                 <span class="unit">天</span>
-                <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                <span class="hint-text" style="margin-left: 10px;">
                     用于流动性检查，基于30天平均交易量计算预期交易量
+                </span>
+            </div>
+            <div class="control-item" v-if="purchaseMode === '扫单'">
+                <label>市场供给比例：</label>
+                <el-input-number
+                    v-model="marketSupplyRatio"
+                    :min="1"
+                    :max="100"
+                    :step="1"
+                    :precision="0"
+                    controls-position="right"
+                    style="width: 150px;"
+                />
+                <span class="unit">%</span>
+                <span class="hint-text" style="margin-left: 10px;">
+                    将市场挂单总量乘以此比例作为购买上限，避免实际抢购时供应不足
                 </span>
             </div>
             <div class="control-item">
@@ -1475,12 +1604,30 @@ const openImportDialog = () => {
                     inactive-text="否"
                 />
             </div>
+            <div class="control-item">
+                <label>允许直接购买矿物：</label>
+                <el-switch
+                    v-model="allowDirectMineralPurchase"
+                    active-text="是"
+                    inactive-text="否"
+                />
+                <span class="hint-text" style="margin-left: 10px;">
+                    关闭后求解器仅通过矿石化矿获取矿物
+                </span>
+            </div>
             <el-button 
                 v-if="useCustomData" 
                 @click="openImportDialog"
                 type="primary"
-            >
+           >
                 导入自定义清单
+            </el-button>
+            <el-button 
+                @click="blacklistDialogVisible = true"
+                type="warning"
+                plain
+            >
+                <el-icon :size="16"><Setting /></el-icon> 黑名单管理
             </el-button>
             <el-button @click="getCompressedAsteroidData" :loading="loading" type="primary">
                 <el-icon :size="18"><Cpu /></el-icon> 求解
@@ -1492,7 +1639,7 @@ const openImportDialog = () => {
         </div>
         
         <!-- 矿物需求表格（未获取数据时显示） -->
-        <div v-if="!compressedAsteroidData && requiredMinerals.length > 0" class="required-minerals-container">
+        <div v-if="!compressedAsteroidData && requiredMinerals.length> 0" class="required-minerals-container">
             <el-card shadow="never">
                 <template #header>
                     <span>矿物需求</span>
@@ -1500,10 +1647,8 @@ const openImportDialog = () => {
                 <el-table
                     :data="requiredMinerals"
                     border
-                    max-height="100%"
-                    show-overflow-tooltip
-                    style="font-size: 14px;"
-                >
+                    max-height="100%" style="font-size: 14px;"
+               >
                     <el-table-column label="类型" width="70">
                         <template #default="{ row }">
                             <img 
@@ -1512,6 +1657,7 @@ const openImportDialog = () => {
                                 alt="类型" 
                                 width="40" 
                                 height="40" 
+                                loading="lazy"
                             />
                         </template>
                     </el-table-column>
@@ -1552,7 +1698,7 @@ const openImportDialog = () => {
                                 :value="totalVolume" 
                                 :precision="2"
                                 suffix=" m³"
-                            >
+                           >
                                 <template #title>
                                     <div class="statistic-title">
                                         <span class="statistic-icon">📦</span>
@@ -1573,7 +1719,7 @@ const openImportDialog = () => {
                                 :value="totalPurchaseCost" 
                                 :precision="2"
                                 suffix=" ISK"
-                            >
+                           >
                                 <template #title>
                                     <div class="statistic-title">
                                         <span class="statistic-icon">🛒</span>
@@ -1594,7 +1740,7 @@ const openImportDialog = () => {
                                 :value="totalRequiredValue" 
                                 :precision="2"
                                 suffix=" ISK"
-                            >
+                           >
                                 <template #title>
                                     <div class="statistic-title">
                                         <span class="statistic-icon">🎯</span>
@@ -1610,7 +1756,7 @@ const openImportDialog = () => {
                                 :value="estimatedShippingCost" 
                                 :precision="2"
                                 suffix=" ISK"
-                            >
+                           >
                                 <template #title>
                                     <div class="statistic-title">
                                         <span class="statistic-icon">🚚</span>
@@ -1627,7 +1773,7 @@ const openImportDialog = () => {
                                 :value="totalProducedValue" 
                                 :precision="2"
                                 suffix=" ISK"
-                            >
+                           >
                                 <template #title>
                                     <div class="statistic-title">
                                         <span class="statistic-icon">✨</span>
@@ -1652,7 +1798,7 @@ const openImportDialog = () => {
                                 :value="totalCostWithShipping" 
                                 :precision="2"
                                 suffix=" ISK"
-                            >
+                           >
                                 <template #title>
                                     <div class="statistic-title">
                                         <span class="statistic-icon">💳</span>
@@ -1685,10 +1831,8 @@ const openImportDialog = () => {
                     <el-table
                         :data="mineralComparisonTableData"
                         border
-                        max-height="600"
-                        show-overflow-tooltip
-                        style="font-size: 14px;"
-                    >
+                        max-height="600" style="font-size: 14px;"
+                   >
                         <el-table-column label="类型" width="70">
                             <template #default="{ row }">
                                 <img 
@@ -1697,6 +1841,7 @@ const openImportDialog = () => {
                                     alt="类型" 
                                     width="40" 
                                     height="40" 
+                                    loading="lazy"
                                 />
                             </template>
                         </el-table-column>
@@ -1733,7 +1878,7 @@ const openImportDialog = () => {
                         </el-table-column>
                         <el-table-column label="不足数量" prop="shortage_quantity" width="120">
                             <template #default="{ row }">
-                                <span :style="{ color: row.shortage_quantity > 0 ? '#f56c6c' : 'inherit' }">
+                                <span :style="{ color: row.shortage_quantity> 0 ? '#f56c6c' : 'inherit' }">
                                     {{ formatAccounting(row.shortage_quantity) }}
                                 </span>
                             </template>
@@ -1743,7 +1888,7 @@ const openImportDialog = () => {
                                 不足价值 {{ formatAccounting(totalShortageValue) }}
                             </template>
                             <template #default="{ row }">
-                                <span :style="{ color: row.shortage_value > 0 ? '#f56c6c' : 'inherit' }">
+                                <span :style="{ color: row.shortage_value> 0 ? '#f56c6c' : 'inherit' }">
                                     {{ formatAccounting(row.shortage_value) }}
                                 </span>
                             </template>
@@ -1763,10 +1908,8 @@ const openImportDialog = () => {
                     <el-table
                         :data="orePurchaseTableData"
                         border
-                        max-height="600"
-                        show-overflow-tooltip
-                        style="font-size: 14px;"
-                    >
+                        max-height="600" style="font-size: 14px;"
+                   >
                         <el-table-column width="70">
                             <template #header>
                                 <el-button 
@@ -1785,17 +1928,30 @@ const openImportDialog = () => {
                                     alt="类型" 
                                     width="40" 
                                     height="40" 
+                                    loading="lazy"
                                 />
                             </template>
                         </el-table-column>
                         <el-table-column label="矿石名称" prop="name_zh" width="200">
                             <template #default="{ row }">
-                                {{ row.name_zh || row.name }}
+                                <span
+                                    style="cursor: pointer;"
+                                    title="点击复制"
+                                    @click="copyToClipboard(row.name_zh || row.name || '', '已复制矿石名称')"
+                               >
+                                    {{ row.name_zh || row.name }}
+                                </span>
                             </template>
                         </el-table-column>
                         <el-table-column label="数量" prop="quantity" width="120">
                             <template #default="{ row }">
-                                {{ formatAccounting(row.quantity) }}
+                                <span
+                                    style="cursor: pointer;"
+                                    title="点击复制"
+                                    @click="copyToClipboard(String(row.quantity || ''), '已复制数量')"
+                               >
+                                    {{ formatAccounting(row.quantity) }}
+                                </span>
                             </template>
                         </el-table-column>
                         <el-table-column label="平均价格" prop="avrprice" width="180">
@@ -1803,9 +1959,9 @@ const openImportDialog = () => {
                                 <div>
                                     <div>{{ formatAccounting(row.avrprice) }}</div>
                                     <div
-                                        v-if="row.liquidity_premium_rate && row.liquidity_premium_rate > 0"
-                                        style="font-size: 12px; color: #909399; margin-top: 2px;"
-                                    >
+                                        v-if="row.liquidity_premium_rate && row.liquidity_premium_rate> 0"
+                                        class="liquidity-hint"
+                                   >
                                         流动性溢价：+{{ formatAccounting(row.liquidity_premium_rate * 100) }}%
                                     </div>
                                 </div>
@@ -1824,6 +1980,28 @@ const openImportDialog = () => {
                                 {{ formatAccounting(row.output_value) }}
                             </template>
                         </el-table-column>
+                        <el-table-column label="操作" width="110" fixed="right">
+                            <template #default="{ row }">
+                                <el-button
+                                    v-if="isBlacklisted(Number(row.type_id))"
+                                    size="small"
+                                    type="danger"
+                                    plain
+                                    @click="removeFromBlacklist(Number(row.type_id))"
+                                >
+                                    <el-icon><Delete /></el-icon> 移除
+                                </el-button>
+                                <el-button
+                                    v-else
+                                    size="small"
+                                    type="warning"
+                                    plain
+                                    @click="addToBlacklist(Number(row.type_id), row.name_zh || row.name || '')"
+                                >
+                                    <el-icon><CirclePlus /></el-icon> 加入黑名单
+                                </el-button>
+                            </template>
+                        </el-table-column>
                     </el-table>
                 </el-card>
                     </div>
@@ -1833,11 +2011,11 @@ const openImportDialog = () => {
                 <el-col 
                     :xs="24" 
                     :sm="24" 
-                    :md="mineralPurchaseTableData.length > 0 ? 12 : 24" 
-                    :lg="mineralPurchaseTableData.length > 0 ? 12 : 24" 
-                    :xl="mineralPurchaseTableData.length > 0 ? 12 : 24" 
+                    :md="mineralPurchaseTableData.length> 0 ? 12 : 24" 
+                    :lg="mineralPurchaseTableData.length> 0 ? 12 : 24" 
+                    :xl="mineralPurchaseTableData.length> 0 ? 12 : 24" 
                     class="layout-item"
-                >
+               >
                     <!-- 桑吉图 -->
                     <div class="sankey-chart">
                 <el-card shadow="never">
@@ -1847,20 +2025,20 @@ const openImportDialog = () => {
                     <div 
                         ref="sankeyChartRef" 
                         style="width: 100%; height: 600px;"
-                    ></div>
+                   ></div>
                 </el-card>
                     </div>
                 </el-col>
 
                 <el-col 
-                    v-if="mineralPurchaseTableData.length > 0"
+                    v-if="mineralPurchaseTableData.length> 0"
                     :xs="24" 
                     :sm="24" 
                     :md="12" 
                     :lg="12" 
                     :xl="12" 
                     class="layout-item"
-                >
+               >
                     <!-- 矿物采购表格 -->
                     <div class="mineral-purchase">
                 <el-card shadow="never">
@@ -1870,10 +2048,8 @@ const openImportDialog = () => {
                     <el-table
                         :data="mineralPurchaseTableData"
                         border
-                        max-height="600"
-                        show-overflow-tooltip
-                        style="font-size: 14px;"
-                    >
+                        max-height="600" style="font-size: 14px;"
+                   >
                         <el-table-column width="70">
                             <template #header>
                                 <el-button 
@@ -1892,17 +2068,30 @@ const openImportDialog = () => {
                                     alt="类型" 
                                     width="40" 
                                     height="40" 
+                                    loading="lazy"
                                 />
                             </template>
                         </el-table-column>
                         <el-table-column label="矿物名称" prop="name_zh" width="200">
                             <template #default="{ row }">
-                                {{ row.name_zh || row.name }}
+                                <span
+                                    style="cursor: pointer;"
+                                    title="点击复制"
+                                    @click="copyToClipboard(row.name_zh || row.name || '', '已复制矿物名称')"
+                               >
+                                    {{ row.name_zh || row.name }}
+                                </span>
                             </template>
                         </el-table-column>
                         <el-table-column label="数量" prop="quantity" width="120">
                             <template #default="{ row }">
-                                {{ formatAccounting(row.quantity) }}
+                                <span
+                                    style="cursor: pointer;"
+                                    title="点击复制"
+                                    @click="copyToClipboard(String(row.quantity || ''), '已复制数量')"
+                               >
+                                    {{ formatAccounting(row.quantity) }}
+                                </span>
                             </template>
                         </el-table-column>
                         <el-table-column label="平均价格" prop="avrprice" width="150">
@@ -1933,9 +2122,9 @@ const openImportDialog = () => {
             title="导入自定义清单"
             width="600px"
             :close-on-click-modal="false"
-        >
+       >
             <div style="margin-bottom: 10px;">
-                <p style="color: #606266; font-size: 14px; margin-bottom: 10px;">
+                <p class="import-dialog-hint" style="margin-bottom: 10px;">
                     请输入矿物需求清单，每行格式：矿物名称 数量<br/>
                     例如：类银超金属 Mexallon 50000000
                 </p>
@@ -1954,6 +2143,45 @@ const openImportDialog = () => {
                         确定
                     </el-button>
                 </span>
+            </template>
+        </el-dialog>
+        
+        <!-- 黑名单管理弹窗 -->
+        <el-dialog
+            v-model="blacklistDialogVisible"
+            title="矿石黑名单管理"
+            width="600px"
+            :close-on-click-modal="false"
+        >
+            <div style="margin-bottom: 16px;">
+                <el-autocomplete
+                    v-model="blacklistSearchText"
+                    :fetch-suggestions="fetchOreSuggestions"
+                    placeholder="搜索矿石名称添加至黑名单..."
+                    :trigger-on-focus="false"
+                    clearable
+                    style="width: 100%"
+                    @select="handleBlacklistSelect"
+                />
+            </div>
+            <el-table :data="blacklist" border max-height="400" v-if="blacklist.length > 0">
+                <el-table-column label="矿石名称" prop="name_zh" />
+                <el-table-column label="Type ID" prop="type_id" width="100" />
+                <el-table-column label="操作" width="80" fixed="right">
+                    <template #default="{ row }">
+                        <el-button
+                            size="small"
+                            type="danger"
+                            :icon="Delete"
+                            circle
+                            @click="removeFromBlacklist(row.type_id)"
+                        />
+                    </template>
+                </el-table-column>
+            </el-table>
+            <el-empty v-else description="暂无黑名单矿石" />
+            <template #footer>
+                <el-button @click="blacklistDialogVisible = false">关闭</el-button>
             </template>
         </el-dialog>
     </div>
@@ -1981,12 +2209,12 @@ const openImportDialog = () => {
 
 .control-item .unit {
     font-size: 14px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .control-item .fetch-time {
     font-size: 14px;
-    color: #909399;
+    color: var(--k-color-text-secondary);
 }
 
 .required-minerals-container {
@@ -2115,7 +2343,6 @@ const openImportDialog = () => {
 
 .statistic-item-volume .volume-details {
     font-size: 12px;
-    color: #909399;
     margin-top: auto;
     padding-top: 12px;
     text-align: left;
@@ -2125,7 +2352,7 @@ const openImportDialog = () => {
 
 .statistic-item-volume .volume-total {
     font-weight: 600;
-    color: var(--el-text-color-primary);
+    color: var(--k-color-text);
     margin-top: 4px;
 }
 
@@ -2171,7 +2398,6 @@ const openImportDialog = () => {
 
 .statistic-item-total-cost .total-cost-details {
     font-size: 12px;
-    color: #909399;
     margin-top: auto;
     padding-top: 12px;
     text-align: left;
@@ -2181,13 +2407,13 @@ const openImportDialog = () => {
 
 .statistic-item-total-cost .total-cost-total {
     font-weight: 600;
-    color: var(--el-text-color-primary);
+    color: var(--k-color-text);
     margin-top: 4px;
 }
 
 .statistic-item-total-cost .total-cost-discount {
     font-weight: 600;
-    color: var(--el-color-primary);
+    color: var(--k-color-primary);
     margin-top: 8px;
     padding-top: 8px;
     border-top: 1px solid var(--el-border-color-lighter);
@@ -2195,7 +2421,6 @@ const openImportDialog = () => {
 
 .statistic-item-purchase .purchase-details {
     font-size: 12px;
-    color: #909399;
     margin-top: auto;
     padding-top: 12px;
     text-align: left;
@@ -2205,13 +2430,12 @@ const openImportDialog = () => {
 
 .statistic-item-purchase .purchase-total {
     font-weight: 600;
-    color: var(--el-text-color-primary);
+    color: var(--k-color-text);
     margin-top: 4px;
 }
 
 .statistic-item-produced .produced-details {
     font-size: 12px;
-    color: #909399;
     margin-top: auto;
     padding-top: 12px;
     text-align: left;
@@ -2221,7 +2445,7 @@ const openImportDialog = () => {
 
 .statistic-item-produced .discount-ratio {
     font-weight: 600;
-    color: var(--el-text-color-primary);
+    color: var(--k-color-text);
 }
 
 .statistic-title {
@@ -2322,6 +2546,26 @@ const openImportDialog = () => {
     margin-bottom: 0;
 }
 
+/* 提示文字（替代硬编码灰色） */
+.hint-text,
+.liquidity-hint,
+.import-dialog-hint {
+    color: var(--k-color-text-secondary);
+}
+
+.hint-text {
+    font-size: 12px;
+}
+
+.liquidity-hint {
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.import-dialog-hint {
+    font-size: 14px;
+}
+
 /* Theme override */
 .compressed-asteroid-container,
 .layout-item,
@@ -2367,12 +2611,5 @@ const openImportDialog = () => {
 
 :deep(.el-table th.el-table__cell) {
     background: var(--k-color-surface-soft) !important;
-}
-
-:deep([style*='color: #909399']),
-:deep([style*='color:#909399']),
-:deep([style*='color: #606266']),
-:deep([style*='color:#606266']) {
-    color: var(--k-color-text-secondary) !important;
 }
 </style>

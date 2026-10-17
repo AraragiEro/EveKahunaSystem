@@ -99,26 +99,34 @@ class QuartBackendClient:
 
     # ===== 市场相关 API =====
 
-    async def get_market_price(self, type_name: str) -> Dict[str, Any]:
+    async def get_market_price(self, type_name: str, market_zone: str = "jita") -> Dict[str, Any]:
         """获取市场价格"""
         return await self.call_api(
             method="GET",
             path="/api/internal/mcp/market/price",
-            params={"type_name": type_name},
+            params={"type_name": type_name, "market_zone": market_zone},
         )
 
     async def get_market_cost(
-        self, type_name: str, user_name: str = "system", plan_name: str = "default"
+        self, type_name: str, qq: int = None, plan_name: str = "default",
+        force_recalculate: bool = False,
     ) -> Dict[str, Any]:
-        """获取生产成本"""
+        """获取生产成本
+
+        成本缓存作用域由后端按 qq 绑定解析（user_name 已不再受理）。
+        """
+        params = {
+            "type_name": type_name,
+            "plan_name": plan_name,
+        }
+        if qq is not None:
+            params["qq"] = qq
+        if force_recalculate:
+            params["force_recalculate"] = "true"
         return await self.call_api(
             method="GET",
             path="/api/internal/mcp/market/cost",
-            params={
-                "type_name": type_name,
-                "user_name": user_name,
-                "plan_name": plan_name,
-            },
+            params=params,
         )
 
     async def fuzz_type_name(self, type_name: str) -> Dict[str, Any]:
@@ -162,8 +170,48 @@ class QuartBackendClient:
             params={"qq": qq, "planname": planname},
         )
 
-    async def get_company_medica_vouchers(self) -> Dict[str, Any]:
-        """获取公司医疗抵扣额度"""
+    async def get_company_medica_vouchers(self, qq: int) -> Dict[str, Any]:
+        """获取公司医疗抵扣额度（只返回该 QQ 的记录）"""
         return await self.call_api(
-            method="GET", path="/api/internal/mcp/company/medica-vouchers"
+            method="GET",
+            path="/api/internal/mcp/company/medica-vouchers",
+            params={"qq": qq},
+        )
+
+    # ===== 估价器 API =====
+
+    async def price_estimate(self, text: str, coefficient: float = 1.0) -> Dict[str, Any]:
+        """估价计算"""
+        return await self.call_api(
+            method="POST",
+            path="/api/EVE/price-estimator/calculate",
+            json_data={"text": text, "coefficient": coefficient},
+        )
+
+    async def price_estimate_cost_start(
+        self, type_ids: list[int], result_uuid: str
+    ) -> Dict[str, Any]:
+        """启动成本计算"""
+        return await self.call_api(
+            method="POST",
+            path="/api/EVE/price-estimator/calculate-cost",
+            json_data={"type_ids": type_ids, "result_uuid": result_uuid},
+        )
+
+    async def price_estimate_cost_status(self, task_id: str) -> Dict[str, Any]:
+        """查询成本计算进度"""
+        return await self.call_api(
+            method="GET",
+            path="/api/EVE/price-estimator/calculate-cost/status",
+            params={"task_id": task_id},
+        )
+
+    # ===== 系数相关 API =====
+
+    async def get_watched_system_coefficients(self, qq: int) -> Dict[str, Any]:
+        """获取用户关注星系的制造/反应系数"""
+        return await self.call_api(
+            method="GET",
+            path="/api/internal/mcp/coefficient/watched-systems",
+            params={"qq": qq},
         )

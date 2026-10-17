@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import os
 from pathlib import Path
 
 from quart import Quart, request, send_from_directory
@@ -12,13 +13,23 @@ from src_v2.core.log import logger
 from .api import init_api
 
 app = Quart(__name__)
-app.secret_key = config["APP"]["SECRET_KEY"]
+
+# 安全审计 #12：签名密钥优先取环境变量，其次读配置文件
+# 日志只记录来源，不打印密钥值
+_secret_key_from_env = (os.environ.get("KAHUNA_SECRET_KEY") or "").strip()
+if _secret_key_from_env:
+    app.secret_key = _secret_key_from_env
+    _secret_key_source = "环境变量 KAHUNA_SECRET_KEY"
+else:
+    app.secret_key = config.get("APP", "SECRET_KEY", fallback="")
+    _secret_key_source = "配置文件 APP.SECRET_KEY"
+logger.info(f"应用签名密钥来源: {_secret_key_source}（长度 {len(app.secret_key or '')}）")
 
 # 配置请求体大小限制（50MB），用于支持大型配置保存
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
 
 # 根据配置决定是否启用API文档
-enable_api_docs = config.getboolean("APP", "ENABLE_API_DOCS", fallback=True)
+enable_api_docs = config.getboolean("APP", "ENABLE_API_DOCS", fallback=False)
 api_docs_path = config.get("APP", "API_DOCS_PATH", fallback="/api/docs")
 api_openapi_path = config.get("APP", "API_OPENAPI_PATH", fallback="/api/openapi.json")
 
@@ -30,7 +41,7 @@ if enable_api_docs:
         swagger_ui_path=api_docs_path,
         info=Info(
             title="KahunaBot API",
-            version="1.4.0",
+            version="1.6.1",
             description="KahunaBot API 接口文档 - EVE Online 工业规划与资产管理系统",
         ),
         security_schemes={
@@ -46,6 +57,33 @@ else:
 
 init_api(app)
 
+
+@app.route("/api/health", methods=["GET"])
+async def health_check():
+    """健康检查端点"""
+    return {"status": "ok", "service": "kahunabot"}
+
+
+@app.after_request
+async def add_cors_headers(response):
+    """添加 CORS 头部，允许前端开发跨域和外部 API 访问"""
+    origin = request.headers.get('Origin', '')
+    # 允许的域名白名单
+    allowed_origins = [
+        'http://localhost:5173',          # Vite 开发服务器
+        'http://localhost:9527',          # 本地生产
+        'https://www.setcr-alero.icu',    # 生产域名
+        'https://kahubabot.setcr-alero.icu',
+        'https://bottest.setcr-alero.icu',
+    ]
+    if origin in allowed_origins or not origin:
+        if origin:
+            response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-CSRF-Token'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Max-Age'] = '86400'  # 24h 预检缓存
+    return response
 
 def serve_vue():
     """注册前端静态文件路由（用于生产模式）"""

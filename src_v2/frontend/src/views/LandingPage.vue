@@ -13,6 +13,7 @@ import {
   ZoomIn,
 } from '@element-plus/icons-vue'
 import VipPricingPlans from '@/components/VipPricingPlans.vue'
+import LandingTrustBar from '@/components/LandingTrustBar.vue'
 import mainViewImage from '@/assets/landing-page-mainView.png'
 import githubIconWhite from '@/assets/github-mark-white.svg'
 import aifadianLogo from '@/assets/横版-黑底-透明背景.png'
@@ -41,8 +42,11 @@ const showQQGroupButton = computed(() => !!qqGroupNumber.value)
 
 const openGitHub = () => window.open(GITHUB_REPO_URL, '_blank')
 const openDonate = () => donateLink.value && window.open(donateLink.value, '_blank')
-const goToHome = () => router.push(authStore.isAuthenticated ? '/home' : '/login')
+const goToHome = () => router.push(authStore.isAuthenticated ? '/dashboard' : '/login')
 const goToAnnouncements = () => router.push('/announcements')
+const scrollToPricing = () => {
+  document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })
+}
 
 const openPreview = (images: string | string[], index = 0) => {
   previewImageList.value = Array.isArray(images) ? images : [images]
@@ -107,6 +111,7 @@ const features = [
               {{ authStore.isAuthenticated ? '进入系统' : '立即开始' }}
               <el-icon><ArrowRight /></el-icon>
             </el-button>
+            <el-button size="large" class="ghost-btn" @click="scrollToPricing">查看方案</el-button>
             <el-button size="large" class="ghost-btn" @click="openGitHub">
               <img :src="githubIconWhite" alt="GitHub" class="github-icon" />
               GitHub
@@ -123,6 +128,8 @@ const features = [
         </div>
       </div>
     </section>
+
+    <LandingTrustBar />
 
     <section class="feature-section">
       <div class="section-header">
@@ -158,15 +165,28 @@ const features = [
       </div>
     </section>
 
-    <section class="pricing-section">
+    <section id="pricing" class="pricing-section">
       <div class="section-header">
         <h2>订阅方案</h2>
-        <p>支持试用，按阶段升级</p>
+        <p>Omega 支持 7 天免费试用，满意再续费</p>
       </div>
       <VipPricingPlans />
     </section>
 
-    <footer class="landing-footer">© 2026 Kahuna System</footer>
+    <footer class="landing-footer">
+      <div class="footer-links">
+        <a :href="GITHUB_REPO_URL" target="_blank" rel="noopener">GitHub</a>
+        <span class="footer-sep">·</span>
+        <router-link to="/announcements">公告</router-link>
+        <span v-if="showQQGroupButton" class="footer-sep">·</span>
+        <span v-if="showQQGroupButton">QQ群 {{ qqGroupNumber }}</span>
+        <template v-if="showDonateButton">
+          <span class="footer-sep">·</span>
+          <a :href="donateLink" target="_blank" rel="noopener">支持作者</a>
+        </template>
+      </div>
+      <div class="footer-copy">© 2026 Kahuna System</div>
+    </footer>
 
     <el-dialog v-model="previewVisible" width="88%" top="6vh" class="image-preview-dialog">
       <div class="preview-wrap">
@@ -265,7 +285,7 @@ const features = [
   height: 48px;
   border: 0;
   border-radius: 12px;
-  background: linear-gradient(135deg, #2b74ff 0%, #36a9ff 100%);
+  background: linear-gradient(135deg, #2b74ff 0%, #36a9ff 100%) !important;
   box-shadow: 0 12px 28px rgba(50, 125, 255, 0.35);
 }
 
@@ -409,9 +429,38 @@ const features = [
 
 .landing-footer {
   text-align: center;
-  padding: 18px 20px 26px;
+  padding: 28px 20px 24px;
   border-top: 1px solid var(--k-color-border);
   color: var(--k-color-text-secondary);
+}
+
+.footer-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.footer-links a {
+  color: var(--k-color-text-secondary);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.footer-links a:hover {
+  color: var(--k-color-primary);
+}
+
+.footer-sep {
+  color: var(--k-color-border);
+  margin: 0 4px;
+}
+
+.footer-copy {
+  font-size: 12px;
 }
 
 .preview-wrap {

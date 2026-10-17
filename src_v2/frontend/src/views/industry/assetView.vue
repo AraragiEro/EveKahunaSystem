@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
-import { Setting, SuccessFilled, CircleCloseFilled, Plus, CloseBold, Delete, Refresh, VideoPlay } from '@element-plus/icons-vue'
+import { Setting, SuccessFilled, CircleCloseFilled, Plus, CloseBold, Delete, Refresh, VideoPlay, QuestionFilled } from '@element-plus/icons-vue'
 import { http } from '@/http'
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '@/stores/auth'
@@ -27,7 +27,8 @@ type Mission = {
   step_name?: string
   is_indeterminate?: boolean
   user_name?: string  // 任务创建者（管理员可见）
-  is_abnormal?: boolean  // 主体已不存在，仅支持删除
+  is_abnormal?: boolean  // 主体已不存在或token已失效
+  abnormal_reason?: string  // 异常原因详情
 }
 
 const missions = ref<Mission[]>([])
@@ -615,6 +616,9 @@ onUnmounted(() => {
           <template #default="{ row }">
             <span>{{ row.subject_name }}</span>
             <el-tag v-if="row.is_abnormal" type="danger" size="small" style="margin-left: 6px;">异常</el-tag>
+            <el-tooltip v-if="row.is_abnormal && row.abnormal_reason" :content="row.abnormal_reason" placement="top">
+              <el-icon style="color: #f56c6c; margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column v-if="isAdmin" label="创建者" prop="user_name" width="120" />
@@ -625,7 +629,9 @@ onUnmounted(() => {
         </el-table-column>
         <el-table-column label="拉取状态" prop="pull_status" width="250px">
           <template #default="{ row }">
-            <div v-if="row.is_abnormal" style="color: #f56c6c; font-size: 12px;">主体已不存在，无法拉取</div>
+            <div v-if="row.is_abnormal" style="color: #f56c6c; font-size: 12px;">
+              {{ row.abnormal_reason || '主体已不存在，无法拉取' }}
+            </div>
             <div v-else>
               <el-progress :percentage="row.is_indeterminate ? 50 : (row.pull_status ?? 0)"
                 :indeterminate="row.is_indeterminate === true" :striped="!row.is_indeterminate"
@@ -640,7 +646,7 @@ onUnmounted(() => {
           <template #default="{ row }">
             <!-- 立刻拉取：异常任务禁用 -->
             <el-tooltip
-              :content="row.is_abnormal ? '主体已不存在，无法拉取' : (canPullNow(row) ? '可以立刻拉取' : (isPulling(row) ? '正在拉取中...' : formatRemainingTime(getRemainingSeconds(row.last_pull_time))))"
+              :content="row.is_abnormal ? (row.abnormal_reason || '主体已不存在，无法拉取') : (canPullNow(row) ? '可以立刻拉取' : (isPulling(row) ? '正在拉取中...' : formatRemainingTime(getRemainingSeconds(row.last_pull_time))))"
               placement="top">
               <el-button size="small" type="primary" plain :disabled="row.is_abnormal" @click="handlePullMission(row)">
                 <el-icon style="margin-right:4px">

@@ -8,6 +8,7 @@ import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 // 配置 dayjs
 dayjs.extend(relativeTime)
@@ -145,8 +146,8 @@ const getContentSnippet = (content: string | undefined, maxLength: number = 100)
 const renderMarkdown = (content: string | undefined): string => {
   if (!content) return ''
   try {
-    // marked 12.0.0 版本中 marked() 是同步的，返回 string
-    return marked(content, { breaks: true }) as string
+    const rawHtml = marked(content, { breaks: true }) as string
+    return DOMPurify.sanitize(rawHtml)
   } catch (err) {
     console.error('Markdown render error:', err)
     return content

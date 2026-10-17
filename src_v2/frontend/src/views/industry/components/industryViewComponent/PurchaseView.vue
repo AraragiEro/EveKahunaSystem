@@ -9,14 +9,14 @@ const props = defineProps<{
     selectedPlan: string | null
 }>()
 
-// 递归过滤树结构，只保留 real_quantity > 0 的节点
+// 递归过滤树结构，只保留 real_quantity> 0 的节点
 const filterTreeByRealQuantity = (nodes: any[]): any[] => {
     return nodes.map((node: any) => {
         // 如果有 children，递归过滤子节点
-        if (node.children && Array.isArray(node.children) && node.children.length > 0) {
+        if (node.children && Array.isArray(node.children) && node.children.length> 0) {
             const filteredChildren = filterTreeByRealQuantity(node.children)
             // 如果过滤后还有子节点，保留该节点（但只保留过滤后的子节点）
-            if (filteredChildren.length > 0) {
+            if (filteredChildren.length> 0) {
                 return {
                     ...node,
                     children: filteredChildren
@@ -24,7 +24,7 @@ const filterTreeByRealQuantity = (nodes: any[]): any[] => {
             }
         }
         // 检查节点本身的 real_quantity（可能是叶子节点，或者顶层节点本身也有 real_quantity）
-        if (node.real_quantity !== undefined && node.real_quantity > 0) {
+        if (node.real_quantity !== undefined && node.real_quantity> 0) {
             return node
         }
         // 不满足条件，返回 null（后续会被过滤掉）
@@ -32,7 +32,7 @@ const filterTreeByRealQuantity = (nodes: any[]): any[] => {
     }).filter((node: any) => node !== null) // 过滤掉 null 值
 }
 
-// 采购视图过滤后的数据（只显示 real_quantity > 0 的行，保持树结构）
+// 采购视图过滤后的数据（只显示 real_quantity> 0 的行，保持树结构）
 const filteredPurchaseTableView = computed(() => {
     return filterTreeByRealQuantity(props.materialData)
 })
@@ -41,11 +41,11 @@ const calculateTotalPrice = (nodes: any[]): number => {
     let total = 0
     nodes.forEach((node: any) => {
         // 如果有 children，递归处理子节点
-        if (node.children && Array.isArray(node.children) && node.children.length > 0) {
+        if (node.children && Array.isArray(node.children) && node.children.length> 0) {
             total += calculateTotalPrice(node.children)
         }
         // 如果是叶子节点或有 real_quantity 的节点，计算价格
-        if (node.real_quantity !== undefined && node.real_quantity > 0) {
+        if (node.real_quantity !== undefined && node.real_quantity> 0) {
             const sellPrice = Number(node.sell_price) || 0
             const realQuantity = Number(node.real_quantity) || 0
             total += sellPrice * realQuantity
@@ -64,11 +64,11 @@ const calculateTotalBuyPrice = (nodes: any[]): number => {
     let total = 0
     nodes.forEach((node: any) => {
         // 如果有 children，递归处理子节点
-        if (node.children && Array.isArray(node.children) && node.children.length > 0) {
+        if (node.children && Array.isArray(node.children) && node.children.length> 0) {
             total += calculateTotalBuyPrice(node.children)
         }
         // 如果是叶子节点或有 real_quantity 的节点，计算价格
-        if (node.real_quantity !== undefined && node.real_quantity > 0) {
+        if (node.real_quantity !== undefined && node.real_quantity> 0) {
             const buyPrice = Number(node.buy_price) || 0
             const realQuantity = Number(node.real_quantity) || 0
             total += buyPrice * realQuantity
@@ -81,6 +81,23 @@ const jitaBuyTotalPrice = computed(() => {
     return total_price
 })
 
+// 按类别汇总：key=row_id, value={ sellTotal, buyTotal, sweepCost }
+const categoryTotalsMap = computed(() => {
+    const map = new Map<string, { sellTotal: number, buyTotal: number, sweepCost: number }>()
+    filteredPurchaseTableView.value.forEach((category: any) => {
+        if (category.row_id && category.children) {
+            const sellTotal = calculateTotalPrice(category.children)
+            const buyTotal = calculateTotalBuyPrice(category.children)
+            map.set(category.row_id, {
+                sellTotal,
+                buyTotal,
+                sweepCost: sellTotal - buyTotal
+            })
+        }
+    })
+    return map
+})
+
 
 
 // 递归提取树结构中的物品名和缺失数量
@@ -89,11 +106,11 @@ const extractPurchaseData = (nodes: any[]): Array<{ type_name: string, real_quan
     
     nodes.forEach((node: any) => {
         // 如果有 children，递归处理子节点
-        if (node.children && Array.isArray(node.children) && node.children.length > 0) {
+        if (node.children && Array.isArray(node.children) && node.children.length> 0) {
             result.push(...extractPurchaseData(node.children))
         }
         // 如果是叶子节点且有 real_quantity，添加到结果中
-        if (node.type_name && node.real_quantity !== undefined && node.real_quantity > 0) {
+        if (node.type_name && node.real_quantity !== undefined && node.real_quantity> 0) {
             result.push({
                 type_name: node.type_name,
                 real_quantity: node.real_quantity
@@ -165,6 +182,29 @@ const copyPurchaseList = async () => {
     }
 }
 
+// 复制指定类别的采购清单
+const copyCategoryList = async (categoryNode: any) => {
+    try {
+        const categoryName = categoryNode.layer_id || '未知类别'
+        const purchaseData = extractPurchaseData(categoryNode.children || [])
+
+        if (purchaseData.length === 0) {
+            ElMessage.warning(`${categoryName} 没有可复制的数据`)
+            return
+        }
+
+        const text = purchaseData
+            .map(item => `${item.type_name}\t${item.real_quantity}`)
+            .join('\n')
+
+        await navigator.clipboard.writeText(text)
+        ElMessage.success(`已复制 ${categoryName} 的 ${purchaseData.length} 条采购清单到剪贴板`)
+    } catch (error) {
+        console.error('复制失败:', error)
+        ElMessage.error('复制失败，请重试')
+    }
+}
+
 </script>
 
 <template>
@@ -177,10 +217,8 @@ const copyPurchaseList = async () => {
             expand-on-click-node="false"
             default-expand-all
             border
-            max-height="75vh"
-            show-overflow-tooltip
-            style="font-size: 16px;"
-        >
+            max-height="75vh" style="font-size: 16px;"
+       >
             <el-table-column label="类型" prop="layer_id" width="120">
                 <template #header>
                     <el-button size="small" @click="copyPurchaseList">
@@ -189,13 +227,27 @@ const copyPurchaseList = async () => {
                     </el-button>
                 </template>
                 <template #default="{ row }">
+                <div style="display: flex; align-items: center; gap: 4px;">
                     <img 
                         v-if="row?.type_id"
                         :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" 
                         alt="类型" 
                         width="40" 
                         height="40" 
+                        loading="lazy"
                     />
+                    <span v-if="row.children && row.children.length > 0">{{ row.layer_id }}</span>
+                    <el-button
+                        v-if="row.children && row.children.length > 0"
+                        size="small"
+                        type="primary"
+                        link
+                        @click.stop="copyCategoryList(row)"
+                        :title="`复制 ${row.layer_id || '该类别'} 采购清单`"
+                    >
+                        <el-icon><CopyDocument /></el-icon>
+                    </el-button>
+                </div>
                 </template>
             </el-table-column>
             <el-table-column label="物品名en" prop="type_name" width="200">
@@ -204,7 +256,7 @@ const copyPurchaseList = async () => {
                         class="copyable-cell" 
                         @click="copyCellContent(row.type_name, '物品名en')"
                         :title="`点击复制: ${row.type_name || ''}`"
-                    >
+                   >
                         {{ row.type_name }}
                     </div>
                 </template>
@@ -215,7 +267,7 @@ const copyPurchaseList = async () => {
                         class="copyable-cell" 
                         @click="copyCellContent(row.tpye_name_zh, '物品名zh')"
                         :title="`点击复制: ${row.tpye_name_zh || ''}`"
-                    >
+                   >
                         {{ row.tpye_name_zh }}
                     </div>
                 </template>
@@ -224,20 +276,20 @@ const copyPurchaseList = async () => {
                 label="缺失"
                 prop="real_quantity"
                 width="150"
-            >
+           >
                 <template #default="{ row }">
                     <div 
                         class="copyable-cell" 
                         @click="copyCellContent(row.real_quantity, '缺失')"
                         :title="`点击复制: ${formatAccounting(row.real_quantity)}`"
-                    >
+                   >
                         {{ formatAccounting(row.real_quantity) }}
                     </div>
                 </template>
             </el-table-column>
             <el-table-column label="JITA 出单" width="150">
                 <template #default="{ row }">
-                    <div v-if="row.real_quantity > 0">
+                    <div v-if="row.real_quantity> 0">
                         {{ formatAccounting(row.sell_price) }}
                     </div>
                 </template>
@@ -247,14 +299,17 @@ const copyPurchaseList = async () => {
                     JITA 出单 总价 {{ formatAccounting(jitaSellTotalPrice) }}
                 </template>
                 <template #default="{ row }">
-                    <div v-if="row.real_quantity > 0">
+                    <div v-if="row.children && row.children.length > 0">
+                        {{ formatAccounting(categoryTotalsMap.get(row.row_id)?.sellTotal ?? 0) }}
+                    </div>
+                    <div v-else-if="row.real_quantity > 0">
                         {{ formatAccounting(row.sell_price * row.real_quantity) }}
                     </div>
                 </template>
             </el-table-column>
             <el-table-column label="JITA 收单" width="150">
                 <template #default="{ row }">
-                    <div v-if="row.real_quantity > 0">
+                    <div v-if="row.real_quantity> 0">
                         {{ formatAccounting(row.buy_price) }}
                     </div>
                 </template>
@@ -264,7 +319,10 @@ const copyPurchaseList = async () => {
                     JITA 收单 总价 {{ formatAccounting(jitaBuyTotalPrice) }}
                 </template>
                 <template #default="{ row }">
-                    <div v-if="row.real_quantity > 0">
+                    <div v-if="row.children && row.children.length > 0">
+                        {{ formatAccounting(categoryTotalsMap.get(row.row_id)?.buyTotal ?? 0) }}
+                    </div>
+                    <div v-else-if="row.real_quantity > 0">
                         {{ formatAccounting(row.buy_price * row.real_quantity) }}
                     </div>
                 </template>
@@ -274,7 +332,10 @@ const copyPurchaseList = async () => {
                     扫单成本增加 总价 {{ formatAccounting(jitaSellTotalPrice - jitaBuyTotalPrice) }}
                 </template>
                 <template #default="{ row }">
-                    <div v-if="row.real_quantity > 0">
+                    <div v-if="row.children && row.children.length > 0">
+                        {{ formatAccounting(categoryTotalsMap.get(row.row_id)?.sweepCost ?? 0) }}
+                    </div>
+                    <div v-else-if="row.real_quantity > 0">
                         {{ formatAccounting(row.sell_price * row.real_quantity - row.buy_price * row.real_quantity) }}
                     </div>
                 </template>

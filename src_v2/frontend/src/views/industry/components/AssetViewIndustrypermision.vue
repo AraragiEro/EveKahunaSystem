@@ -271,11 +271,11 @@ const handleSyncPermissionToPlanConfig = async () => {
         const deleted = result.deleted || 0
 
         let message = '同步完成'
-        if (created > 0 || updated > 0 || deleted > 0) {
+        if (created> 0 || updated> 0 || deleted> 0) {
             const parts: string[] = []
-            if (created > 0) parts.push(`创建 ${created} 个`)
-            if (updated > 0) parts.push(`更新 ${updated} 个`)
-            if (deleted > 0) parts.push(`删除 ${deleted} 个`)
+            if (created> 0) parts.push(`创建 ${created} 个`)
+            if (updated> 0) parts.push(`更新 ${updated} 个`)
+            if (deleted> 0) parts.push(`删除 ${deleted} 个`)
             message = `同步完成：${parts.join('，')}配置`
         } else {
             message = '同步完成：无需更改'
@@ -379,8 +379,7 @@ onMounted(async () => {
             <el-button type="primary" @click="handleSearchContainer">刷新容器许可</el-button>
             <el-button type="primary" @click="handleSyncPermissionToPlanConfig"
                 :loading="syncPermissionToPlanConfigLoading">同步许可到计划配置</el-button>
-            <el-table :data="userContainerPermission" border v-loading="userContainerPermissionLoading"
-                show-overflow-tooltip>
+            <el-table :data="userContainerPermission" border v-loading="userContainerPermissionLoading">
                 <el-table-column label="资产类型" prop="owner_type" />
                 <el-table-column label="所有者" prop="owner_name" width="200" />
                 <el-table-column label="容器ID" prop="asset_container_id" />

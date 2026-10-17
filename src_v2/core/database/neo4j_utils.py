@@ -574,6 +574,36 @@ class Neo4jAssetUtils:
             assets = [dict(record["a"]) async for record in result]
             return assets
 
+    @staticmethod
+    async def get_assets_by_owner_ids(owner_ids: List[int], ndm=None) -> List[Dict]:
+        """按 owner_id 列表查询全部资产节点。
+
+        Args:
+            owner_ids: 资产所有者ID列表
+
+        Returns:
+            List[Dict]: 资产 dict 列表（每个元素为 Asset 节点的属性字典）
+
+        对应 utils_home.py:711 的查询：
+        MATCH (a:Asset) WHERE a.owner_id IN $owner_ids RETURN a。
+        """
+        if not owner_ids:
+            return []
+
+        query = """
+        MATCH (a:Asset)
+        WHERE a.owner_id IN $owner_ids
+        RETURN a
+        """
+        if ndm:
+            m = ndm
+        else:
+            m = get_neo4j_manager()
+        async with m.get_session() as session:
+            result = await session.run(query, {"owner_ids": owner_ids})
+            assets = [dict(record["a"]) async for record in result]
+            return assets
+
 
 class Neo4jIndustryUtils:
     """工业制造相关的 CRUD 操作"""
@@ -1444,6 +1474,40 @@ class Neo4jIndustryUtils:
                             (node_type_id, child_type_id, rel_props))
 
             return nodes_dict, relationships_list
+
+    @staticmethod
+    async def get_type_nodes_by_type_ids(type_ids: List[int], ndm=None) -> List[Dict]:
+        """批量查询 Type 节点。
+
+        Args:
+            type_ids: 物品类型ID列表
+
+        Returns:
+            List[Dict]: Type 节点 dict 列表
+
+        对应 api_industry.py:225 的查询：
+        MATCH (t:Type) WHERE t.type_id IN $type_ids RETURN t。
+        """
+        if not type_ids:
+            return []
+
+        query = """
+        MATCH (t:Type)
+        WHERE t.type_id IN $type_ids
+        RETURN t
+        """
+        if ndm:
+            m = ndm
+        else:
+            m = get_neo4j_manager()
+        async with m.get_session() as session:
+            result = await session.run(query, {"type_ids": type_ids})
+            nodes = []
+            async for record in result:
+                node_obj = record.get("t")
+                if node_obj:
+                    nodes.append(dict(node_obj))
+            return nodes
 
     @staticmethod
     async def get_relations(

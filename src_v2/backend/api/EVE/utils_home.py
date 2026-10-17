@@ -4,12 +4,15 @@ Home API 工具函数模块
 """
 
 import asyncio
+import json
 import traceback
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from src_v2.core.database.connect_manager import get_redis_manager as rdm
 from src_v2.core.database.kahuna_database_utils_v2 import (
+    EveCharacterOrdersStatsDBUtils,
+    EveCharacterOrdersStatsDetailDBUtils,
     EveIndustryPlanConfigFlowConfigDBUtils,
     EveIndustryPlanConfigFlowDBUtils,
     EvePublicCharacterInfoDBUtils,
@@ -23,6 +26,7 @@ from src_v2.model.EVE.character.character_manager import CharacterManager
 from src_v2.model.EVE.eveesi import eveesi
 from src_v2.model.EVE.industry.blueprint import BPManager as BPM
 from src_v2.model.EVE.industry.industry_manager import IndustryManager
+from src_v2.model.EVE.industry.industry_utils import get_user_all_container_permission
 from src_v2.model.EVE.market.market_manager import MarketManager
 from src_v2.model.EVE.sde import SdeUtils
 
@@ -41,6 +45,8 @@ async def get_wallet_value(
         字典，键为角色名称，值为钱包余额
     """
     wallet_value = {}
+    import time as _t
+    _t0 = _t.monotonic()
     try:
         character_manager = CharacterManager()
         characters = await character_manager.get_user_all_characters(user_id)
@@ -75,8 +81,11 @@ async def get_wallet_value(
         )
         for wallet_balance, character_name in wallet_balances:
             wallet_value[character_name] = wallet_balance
+        _elapsed = _t.monotonic() - _t0
+        logger.info(f"[wallet_value] user={user_id} 完成 — {len(wallet_value)} 角色 (耗时 {_elapsed:.2f}s)")
     except Exception:
-        logger.error("获取钱包价值失败: %s", traceback.format_exc())
+        _elapsed = _t.monotonic() - _t0
+        logger.error(f"[wallet_value] user={user_id} 失败 (耗时 {_elapsed:.2f}s): {traceback.format_exc()}")
 
     return wallet_value
 
@@ -95,6 +104,8 @@ async def get_order_value(
         字典，键为角色名称，值为订单总价值
     """
     order_value = {}
+    import time as _t
+    _t0 = _t.monotonic()
     try:
         character_manager = CharacterManager()
         characters = await character_manager.get_user_all_characters(user_id)
@@ -134,8 +145,11 @@ async def get_order_value(
         )
         for order_total, character_name in order_values:
             order_value[character_name] = order_total
+        _elapsed = _t.monotonic() - _t0
+        logger.info(f"[order_value] user={user_id} 完成 — {len(order_value)} 角色 (耗时 {_elapsed:.2f}s)")
     except Exception:
-        logger.error("获取订单价值失败: %s", traceback.format_exc())
+        _elapsed = _t.monotonic() - _t0
+        logger.error(f"[order_value] user={user_id} 失败 (耗时 {_elapsed:.2f}s): {traceback.format_exc()}")
 
     return order_value
 
@@ -438,6 +452,7 @@ async def get_corporation_jobs(user_id: str) -> List[dict]:
         if not director_character_ids:
             return corp_jobs
 
+        logger.info(f"用户 {user_id} 主角色 {main_character.character_name} 所在公司 {main_character.corporation_id} 的总监角色ID列表: {director_character_ids}")
         # 获取总监角色对象
         for director_character_id in director_character_ids:
             director = await CharacterManager().get_character_by_character_id(
@@ -530,6 +545,8 @@ async def calculate_running_process_value(user_id: str) -> dict:
     Returns:
         包含公司jobs价值、角色jobs价值和总价值的字典
     """
+    import time as _t
+    _t0 = _t.monotonic()
     try:
         # 获取所有计划的载入库存配置
         load_asset_confs = await get_all_plans_load_asset_confs(user_id)
@@ -579,8 +596,16 @@ async def calculate_running_process_value(user_id: str) -> dict:
         # 计算公司jobs价值
         corp_jobs_value = 0.0
         for job in corp_jobs:
+            if not isinstance(job, dict):
+                logger.warning(f"公司jobs中存在非dict项: type={type(job)}, value={job}")
+                continue
             output_location_id = job.get("output_location_id")
             if output_location_id not in target_container_ids:
+                continue
+
+            # 只识别制造和反应
+            activity_id = job.get("activity_id")
+            if activity_id not in (1, 9, 11):
                 continue
 
             product_type_id = job.get("product_type_id")
@@ -610,8 +635,16 @@ async def calculate_running_process_value(user_id: str) -> dict:
         # 计算角色jobs价值
         character_jobs_value = 0.0
         for job in character_jobs:
+            if not isinstance(job, dict):
+                logger.warning(f"角色jobs中存在非dict项: type={type(job)}, value={job}")
+                continue
             output_location_id = job.get("output_location_id")
             if output_location_id not in target_container_ids:
+                continue
+
+            # 只识别制造和反应
+            activity_id = job.get("activity_id")
+            if activity_id not in (1, 9, 11):
                 continue
 
             product_type_id = job.get("product_type_id")
@@ -640,6 +673,8 @@ async def calculate_running_process_value(user_id: str) -> dict:
 
         total_value = corp_jobs_value + character_jobs_value
 
+        _elapsed = _t.monotonic() - _t0
+        logger.info(f"[running_process] user={user_id} 完成 — corp={corp_jobs_value:,.0f} char={character_jobs_value:,.0f} (耗时 {_elapsed:.2f}s)")
         return {
             "corp_jobs_value": corp_jobs_value,
             "character_jobs_value": character_jobs_value,
@@ -647,7 +682,8 @@ async def calculate_running_process_value(user_id: str) -> dict:
         }
 
     except Exception as e:
-        logger.error(f"计算运行中流程价值失败: {traceback.format_exc()}")
+        _elapsed = _t.monotonic() - _t0
+        logger.error(f"[running_process] user={user_id} 失败 (耗时 {_elapsed:.2f}s): {traceback.format_exc()}")
         return {"corp_jobs_value": 0.0, "character_jobs_value": 0.0, "total_value": 0.0}
 
 
@@ -665,17 +701,9 @@ async def get_all_assets_by_owner_ids(owner_ids: List[int]) -> List[dict]:
         return []
 
     try:
-        from src_v2.core.database.connect_manager import get_neo4j_manager
-
-        query = """
-        MATCH (a:Asset)
-        WHERE a.owner_id IN $owner_ids
-        RETURN a
-        """
-        async with get_neo4j_manager().get_session() as session:
-            result = await session.run(query, {"owner_ids": owner_ids})
-            assets = [dict(record["a"]) async for record in result]
-            return assets
+        # 从 Neo4j 查询资产（封装模块内实现）
+        assets = await NAU.get_assets_by_owner_ids(owner_ids)
+        return assets
     except Exception as e:
         logger.error(f"获取资产列表失败: {traceback.format_exc()}")
         return []
@@ -695,9 +723,11 @@ async def get_marked_asset_value(
     Returns:
         标记资产总价值
     """
+    import time as _t
+    _t0 = _t.monotonic()
     try:
         # 获取用户所有访问许可
-        container_permissions = await IndustryManager.get_user_all_container_permission(
+        container_permissions = await get_user_all_container_permission(
             user_id
         )
 
@@ -780,10 +810,13 @@ async def get_marked_asset_value(
             value = quantity * price
             total_value += value
 
+        _elapsed = _t.monotonic() - _t0
+        logger.info(f"[marked_asset] user={user_id} 完成 — 资产数={len(filtered_assets)} 价值={total_value:,.0f} (耗时 {_elapsed:.2f}s)")
         return total_value
 
     except Exception as e:
-        logger.error(f"获取标记资产价值失败: {traceback.format_exc()}")
+        _elapsed = _t.monotonic() - _t0
+        logger.error(f"[marked_asset] user={user_id} 失败 (耗时 {_elapsed:.2f}s): {traceback.format_exc()}")
         return 0.0
 
 
@@ -801,6 +834,8 @@ async def get_unmarked_asset_value(
     Returns:
         非标记资产总价值
     """
+    import time as _t
+    _t0 = _t.monotonic()
     try:
         # 获取用户所有资产拉取任务
         asset_manager = AssetManager()
@@ -809,6 +844,7 @@ async def get_unmarked_asset_value(
         missions = [m for m in missions if not m.get("is_abnormal")]
 
         if not missions:
+            logger.info(f"[unmarked_asset] user={user_id} 无资产拉取任务，返回0")
             return 0.0
 
         # 如果提供了筛选条件，只使用筛选任务列表中的 subject_id
@@ -852,7 +888,7 @@ async def get_unmarked_asset_value(
             return 0.0
 
         # 获取标记资产（用于排除）
-        container_permissions = await IndustryManager.get_user_all_container_permission(
+        container_permissions = await get_user_all_container_permission(
             user_id
         )
 
@@ -868,9 +904,13 @@ async def get_unmarked_asset_value(
                     container_owner_list.append([container_id, owner_id, location_flag])
 
             if container_owner_list:
+                logger.debug(f"[unmarked_asset] 开始 Neo4j 查询标记资产，containers={len(container_owner_list)}")
+                _neo_start = _t.monotonic()
                 marked_assets = await NAU.get_asset_in_container_owner_list(
                     container_owner_list
                 )
+                _neo_elapsed = _t.monotonic() - _neo_start
+                logger.debug(f"[unmarked_asset] Neo4j 查询完成，耗时 {_neo_elapsed:.2f}s，结果数={len(marked_assets)}")
                 # 使用 (item_id, owner_id) 作为唯一标识
                 for asset in marked_assets:
                     item_id = asset.get("item_id")
@@ -923,10 +963,13 @@ async def get_unmarked_asset_value(
             value = quantity * price
             total_value += value
 
+        _elapsed = _t.monotonic() - _t0
+        logger.info(f"[unmarked_asset] user={user_id} 完成 — 资产数={len(filtered_assets)} 价值={total_value:,.0f} (耗时 {_elapsed:.2f}s)")
         return total_value
 
     except Exception as e:
-        logger.error(f"获取非标记资产价值失败: {traceback.format_exc()}")
+        _elapsed = _t.monotonic() - _t0
+        logger.error(f"[unmarked_asset] user={user_id} 异常 (耗时 {_elapsed:.2f}s): {traceback.format_exc()}")
         return 0.0
 
 
@@ -1090,7 +1133,7 @@ def calculate_job_progress(start_date: str, end_date: str) -> float:
         return 0.0
 
 
-async def get_running_jobs_details(user_id: str) -> dict:
+async def get_running_jobs_details(user_id: str, skip_container_filter: bool = False) -> dict:
     """
     获取运行中任务详情
 
@@ -1102,18 +1145,19 @@ async def get_running_jobs_details(user_id: str) -> dict:
     """
     try:
         # 获取所有计划的载入库存配置
-        load_asset_confs = await get_all_plans_load_asset_confs(user_id)
-
-        # 提取所有 asset_container_id 作为目标库存列表
         target_container_ids = set()
-        for conf in load_asset_confs:
-            asset_container_id = conf.get("asset_container_id")
-            if asset_container_id:
-                target_container_ids.add(asset_container_id)
+        if not skip_container_filter:
+            load_asset_confs = await get_all_plans_load_asset_confs(user_id)
 
-        if not target_container_ids:
-            # 如果没有配置的库存，返回空列表
-            return {"detail_list": [], "summary_list": [], "character_summary_list": []}
+            # 提取所有 asset_container_id 作为目标库存列表
+            for conf in load_asset_confs:
+                asset_container_id = conf.get("asset_container_id")
+                if asset_container_id:
+                    target_container_ids.add(asset_container_id)
+
+            if not target_container_ids:
+                # 如果没有配置的库存，返回空列表
+                return {"detail_list": [], "summary_list": [], "character_summary_list": []}
 
         # 获取所有jobs
         corp_jobs = await get_corporation_jobs(user_id)
@@ -1159,7 +1203,7 @@ async def get_running_jobs_details(user_id: str) -> dict:
         # 处理公司jobs
         for job in corp_jobs:
             output_location_id = job.get("output_location_id")
-            if output_location_id not in target_container_ids:
+            if not skip_container_filter and output_location_id not in target_container_ids:
                 continue
 
             # 只识别制造（activity_id=1）和反应（activity_id=11）
@@ -1236,7 +1280,7 @@ async def get_running_jobs_details(user_id: str) -> dict:
         # 处理个人jobs
         for job in character_jobs:
             output_location_id = job.get("output_location_id")
-            if output_location_id not in target_container_ids:
+            if not skip_container_filter and output_location_id not in target_container_ids:
                 continue
 
             # 只识别制造（activity_id=1）和反应（activity_id=11）
@@ -1377,3 +1421,243 @@ async def get_running_jobs_details(user_id: str) -> dict:
     except Exception as e:
         logger.error(f"获取运行中任务详情失败: {traceback.format_exc()}")
         return {"detail_list": [], "summary_list": [], "character_summary_list": []}
+
+
+def _get_period_start(dt: datetime, period_type: str) -> date:
+    if period_type == "day":
+        return dt.date()
+    elif period_type == "week":
+        return (dt - timedelta(days=dt.weekday())).date()
+    elif period_type == "month":
+        return dt.replace(day=1).date()
+    raise ValueError(f"Unknown period_type: {period_type}")
+
+
+async def refresh_orders_stats(user_name: str):
+    character_manager = CharacterManager()
+    characters = await character_manager.get_user_all_characters(user_name)
+    if not characters:
+        return
+
+    all_orders = []
+
+    async def fetch_character_orders(char_db):
+        try:
+            character = Character.from_db_obj(char_db)
+            results = await asyncio.gather(
+                eveesi.characters_character_orders(character.ac_token, character.character_id),
+                eveesi.characters_character_orders_history(character.ac_token, character.character_id, log=False),
+            )
+            current_orders = results[0] or []
+            history_orders_flat = []
+            for page in results[1] or []:
+                if isinstance(page, list):
+                    history_orders_flat.extend(page)
+            return current_orders, history_orders_flat
+        except Exception:
+            logger.warning(f"获取角色 {char_db.character_name} 订单失败: {traceback.format_exc()}")
+            return [], []
+
+    tasks = [fetch_character_orders(c) for c in characters]
+    char_results = await asyncio.gather(*tasks)
+
+    for current_orders, history_orders in char_results:
+        for order in history_orders:
+            order["_source"] = "history"
+            all_orders.append(order)
+        for order in current_orders:
+            order["_source"] = "current"
+            all_orders.append(order)
+
+    if not all_orders:
+        return
+
+    aggregated = {}
+    detail_aggregated = {}
+    for order in all_orders:
+        issued_str = order.get("issued")
+        if not issued_str:
+            continue
+        if isinstance(issued_str, str):
+            issued_dt = datetime.fromisoformat(issued_str.replace("Z", "+00:00"))
+        else:
+            issued_dt = issued_str
+        if issued_dt.tzinfo is not None:
+            issued_dt = issued_dt.replace(tzinfo=None)
+
+        is_buy = order.get("is_buy_order", False)
+        price = order.get("price", 0) or 0
+        vol_total = order.get("volume_total", 0) or 0
+        vol_remain = order.get("volume_remain", 0) or 0
+        type_id = order.get("type_id", 0)
+
+        filled = vol_total - vol_remain
+        isk = price * filled
+
+        if filled <= 0 or isk <= 0:
+            continue
+
+        for pt in ("day", "week", "month"):
+            ps = _get_period_start(issued_dt, pt)
+            key = (pt, ps, is_buy)
+            if key not in aggregated:
+                aggregated[key] = {"count": 0, "vol": 0, "isk": 0.0}
+            aggregated[key]["count"] += 1
+            aggregated[key]["vol"] += filled
+            aggregated[key]["isk"] += isk
+
+            dk = (pt, ps, type_id, is_buy)
+            if dk not in detail_aggregated:
+                detail_aggregated[dk] = {"count": 0, "vol": 0, "isk": 0.0}
+            detail_aggregated[dk]["count"] += 1
+            detail_aggregated[dk]["vol"] += filled
+            detail_aggregated[dk]["isk"] += isk
+
+    for (pt, ps, is_buy), stats in aggregated.items():
+        existing = set()
+        if is_buy:
+            buy_count, buy_vol, buy_isk = stats["count"], stats["vol"], stats["isk"]
+            sell_count, sell_vol, sell_isk = 0, 0, 0.0
+        else:
+            buy_count, buy_vol, buy_isk = 0, 0, 0.0
+            sell_count, sell_vol, sell_isk = stats["count"], stats["vol"], stats["isk"]
+
+        existing.add((pt, ps))
+        await EveCharacterOrdersStatsDBUtils.upsert_orders_stats(
+            user_name, pt, ps, buy_count, sell_count, buy_vol, sell_vol, buy_isk, sell_isk
+        )
+
+    for (pt, ps, type_id, is_buy), stats in detail_aggregated.items():
+        await EveCharacterOrdersStatsDetailDBUtils.upsert_detail(
+            user_name, pt, ps, type_id, is_buy, stats["count"], stats["vol"], stats["isk"]
+        )
+
+    logger.info(f"用户 {user_name} 订单统计已刷新，共 {len(aggregated)} 条周期记录, {len(detail_aggregated)} 条明细记录")
+
+
+async def get_orders_stats_data(user_name: str, period_type: str, periods: int) -> dict:
+    character_manager = CharacterManager()
+    characters = await character_manager.get_user_all_characters(user_name)
+
+    async def fetch_current(char_db):
+        buy_count = 0
+        sell_count = 0
+        buy_vol = 0
+        sell_vol = 0
+        buy_isk = 0.0
+        sell_isk = 0.0
+        try:
+            character = Character.from_db_obj(char_db)
+            orders = await eveesi.characters_character_orders(character.ac_token, character.character_id)
+            if not orders:
+                return buy_count, sell_count, buy_vol, sell_vol, buy_isk, sell_isk
+            for order in orders:
+                is_buy = order.get("is_buy_order", False)
+                price = order.get("price", 0) or 0
+                vol_total = order.get("volume_total", 0) or 0
+                vol_remain = order.get("volume_remain", 0) or 0
+                filled = vol_total - vol_remain
+                isk = price * filled
+                if is_buy:
+                    buy_count += 1
+                    buy_vol += filled
+                    buy_isk += isk
+                else:
+                    sell_count += 1
+                    sell_vol += filled
+                    sell_isk += isk
+        except Exception:
+            pass
+        return buy_count, sell_count, buy_vol, sell_vol, buy_isk, sell_isk
+
+    char_results = await asyncio.gather(*[fetch_current(c) for c in characters])
+    current_buy_count = sum(r[0] for r in char_results)
+    current_sell_count = sum(r[1] for r in char_results)
+    current_buy_vol = sum(r[2] for r in char_results)
+    current_sell_vol = sum(r[3] for r in char_results)
+    current_buy_isk = sum(r[4] for r in char_results)
+    current_sell_isk = sum(r[5] for r in char_results)
+
+    db_records = await EveCharacterOrdersStatsDBUtils.get_orders_stats(
+        user_name, period_type, periods
+    )
+
+    history = []
+    for r in reversed(db_records):
+        history.append({
+            "period_type": r.period_type,
+            "period_start": r.period_start.isoformat(),
+            "buy_order_count": r.buy_order_count,
+            "sell_order_count": r.sell_order_count,
+            "buy_volume": r.buy_volume,
+            "sell_volume": r.sell_volume,
+            "buy_total_isk": r.buy_total_isk,
+            "sell_total_isk": r.sell_total_isk,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        })
+
+    return {
+        "current": {
+            "buy_count": current_buy_count,
+            "sell_count": current_sell_count,
+            "buy_vol": current_buy_vol,
+            "sell_vol": current_sell_vol,
+            "buy_isk": current_buy_isk,
+            "sell_isk": current_sell_isk,
+        },
+        "history": history,
+    }
+
+
+async def aggregate_ops_stats() -> dict:
+    """
+    聚合仪表盘运营统计数据（定时器或缓存 miss 时调用）
+    - 基础计数直接从 DB 查询
+    - 运行中价值优先读 Redis overview_data 缓存，缓存 miss 时实时计算
+    - 资产价值仅从 Redis 缓存读取（实时计算开销过大）
+    """
+    from src_v2.core.database.kahuna_database_utils_v2 import EveIndustryPlanDBUtils, UserDBUtils, VipStateDBUtils
+    from src_v2.model.EVE.home.overview_history_timer import OverviewHistoryTimer
+
+    try:
+        total_users = await UserDBUtils.count_all()
+        total_vips = await VipStateDBUtils.count_vip_users()
+        total_plans = await EveIndustryPlanDBUtils.count_all()
+    except Exception:
+        logger.error("聚合基础计数失败")
+        total_users = total_vips = total_plans = 0
+
+    total_asset_value = 0.0
+    total_running_value = 0.0
+
+    try:
+        timer = OverviewHistoryTimer()
+        vip_users = await timer._get_vip_users()
+
+        redis = rdm().r
+        for user_id in vip_users:
+            try:
+                cached = await redis.get(f"overview_data:{user_id}")
+                if cached:
+                    data = json.loads(cached)
+                    total_asset_value += float(data.get("markedAssetValue", 0) or 0)
+                    total_asset_value += float(data.get("unmarkedAssetValue", 0) or 0)
+                    running = data.get("runningProcessValue", {})
+                    if isinstance(running, dict):
+                        total_running_value += float(running.get("total_value", 0) or 0)
+                    else:
+                        total_running_value += float(running or 0)
+                # 缓存 miss：跳过该用户，不触发 ESI 调用
+                # overview_data 由 dashboardOverview API 和 OverviewHistoryTimer 负责填充
+            except Exception:
+                continue
+    except Exception:
+        logger.error("聚合资产/运行中价值失败")
+
+    return {
+        "total_users": total_users,
+        "total_vips": total_vips,
+        "total_plans": total_plans,
+        "total_asset_value": round(total_asset_value, 2),
+        "total_running_value": round(total_running_value, 2),
+    }

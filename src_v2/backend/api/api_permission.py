@@ -15,8 +15,15 @@ from src_v2.core.database.kahuna_database_utils_v2 import (
     UserRolesDBUtils,
 )
 from src_v2.core.log import logger
+from src_v2.core.permission.grant_guard import (
+    GrantDenied,
+    assert_admin_operator,
+    audit_grant,
+    is_self_admin_grant,
+)
 from src_v2.core.permission.permission_manager import permission_manager
 from src_v2.core.utils import KahunaException
+from src_v2.backend.api import response_helper
 
 api_permission_bp = Blueprint(
     'api_permission', __name__, url_prefix='/api/permission')
@@ -232,11 +239,11 @@ async def get_all_roles():
         return {"status": 200, "data": roles}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取所有角色失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取所有角色失败"}), 500
+        return response_helper.server_error("获取所有角色失败")
 
 
 @api_permission_bp.route("/roles", methods=["POST"])
@@ -294,7 +301,7 @@ async def create_role():
         role_description = data.get("roleDescription")
 
         if not role_name:
-            return jsonify({"status": 400, "message": "角色名称不能为空"}), 400
+            return response_helper.bad_request("角色名称不能为空")
 
         role_obj = await permission_manager.create_role(
             role_name=role_name,
@@ -311,11 +318,11 @@ async def create_role():
         }
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"创建角色失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "创建角色失败"}), 500
+        return response_helper.server_error("创建角色失败")
 
 
 @api_permission_bp.route("/roles", methods=["DELETE"])
@@ -368,18 +375,18 @@ async def delete_role():
         include_children = data.get("includeChildren", False)
 
         if not role_name:
-            return jsonify({"status": 400, "message": "角色名称不能为空"}), 400
+            return response_helper.bad_request("角色名称不能为空")
 
         await permission_manager.delete_role(role_name, include_children=include_children)
 
         return {"status": 200, "message": "角色删除成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"删除角色失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "删除角色失败"}), 500
+        return response_helper.server_error("删除角色失败")
 
 
 # ==================== Permission Management ====================
@@ -429,11 +436,11 @@ async def get_all_permissions():
         return {"status": 200, "data": permissions}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取所有权限失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取所有权限失败"}), 500
+        return response_helper.server_error("获取所有权限失败")
 
 
 @api_permission_bp.route("/permissions", methods=["POST"])
@@ -491,7 +498,7 @@ async def create_permission():
         permission_description = data.get("permissionDescription")
 
         if not permission_name:
-            return jsonify({"status": 400, "message": "权限名称不能为空"}), 400
+            return response_helper.bad_request("权限名称不能为空")
 
         permission_obj = await permission_manager.create_permission(
             permission_name=permission_name,
@@ -508,11 +515,11 @@ async def create_permission():
         })
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"创建权限失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "创建权限失败"}), 500
+        return response_helper.server_error("创建权限失败")
 
 
 @api_permission_bp.route("/permissions/<permission_name>/usage", methods=["GET"])
@@ -556,11 +563,11 @@ async def get_permission_usage(permission_name: str):
         return {"status": 200, "data": usage_info}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取权限使用情况失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取权限使用情况失败"}), 500
+        return response_helper.server_error("获取权限使用情况失败")
 
 
 @api_permission_bp.route("/permissions", methods=["DELETE"])
@@ -613,18 +620,18 @@ async def delete_permission():
         force = data.get("force", False)
 
         if not permission_name:
-            return jsonify({"status": 400, "message": "权限名称不能为空"}), 400
+            return response_helper.bad_request("权限名称不能为空")
 
         await permission_manager.delete_permission(permission_name, force=force)
 
         return {"status": 200, "message": "权限删除成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"删除权限失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "删除权限失败"}), 500
+        return response_helper.server_error("删除权限失败")
 
 
 # ==================== Role Hierarchy Management ====================
@@ -678,11 +685,11 @@ async def get_role_hierarchy(role_name: str):
         })
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取角色层级关系失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取角色层级关系失败"}), 500
+        return response_helper.server_error("获取角色层级关系失败")
 
 
 @api_permission_bp.route("/roles/hierarchy", methods=["POST"])
@@ -735,10 +742,10 @@ async def add_role_hierarchy():
         child_role_name = data.get("childRoleName")
 
         if not parent_role_name or not child_role_name:
-            return jsonify({"status": 400, "message": "父角色和子角色名称不能为空"}), 400
+            return response_helper.bad_request("父角色和子角色名称不能为空")
 
         if parent_role_name == child_role_name:
-            return jsonify({"status": 400, "message": "父角色和子角色不能相同"}), 400
+            return response_helper.bad_request("父角色和子角色不能相同")
 
         from src_v2.core.database.model import RoleHierarchy as M_RoleHierarchy
         hierarchy_obj = M_RoleHierarchy(
@@ -750,11 +757,11 @@ async def add_role_hierarchy():
         return {"status": 200, "message": "角色层级关系添加成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"添加角色层级关系失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "添加角色层级关系失败"}), 500
+        return response_helper.server_error("添加角色层级关系失败")
 
 
 @api_permission_bp.route("/roles/hierarchy", methods=["DELETE"])
@@ -809,18 +816,18 @@ async def delete_role_hierarchy():
         hierarchy_pairs = data.get("hierarchyPairs", [])
 
         if not hierarchy_pairs:
-            return jsonify({"status": 400, "message": "层级关系列表不能为空"}), 400
+            return response_helper.bad_request("层级关系列表不能为空")
 
         await permission_manager.delete_role_hierarchys(hierarchy_pairs)
 
         return {"status": 200, "message": "角色层级关系删除成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"删除角色层级关系失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "删除角色层级关系失败"}), 500
+        return response_helper.server_error("删除角色层级关系失败")
 
 
 # ==================== User Role Management ====================
@@ -863,11 +870,11 @@ async def get_user_roles(user_name: str):
         return {"status": 200, "data": roles}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取用户角色失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取用户角色失败"}), 500
+        return response_helper.server_error("获取用户角色失败")
 
 
 @api_permission_bp.route("/users/roles", methods=["POST"])
@@ -920,18 +927,47 @@ async def add_role_to_user():
         role_name = data.get("roleName")
 
         if not user_name or not role_name:
-            return jsonify({"status": 400, "message": "用户名和角色名称不能为空"}), 400
+            return response_helper.bad_request("用户名和角色名称不能为空")
+
+        operator_id = g.current_user["user_id"]
+
+        # 纵深防御：admin:write 粒度过粗，写操作额外要求操作者本身具备 admin 角色
+        try:
+            await assert_admin_operator(operator_id)
+        except GrantDenied as e:
+            logger.warning(
+                f"拒绝越权添加用户角色: operator={operator_id} target={user_name}"
+                f" role={role_name} reason={e}"
+            )
+            return response_helper.forbidden(str(e))
+
+        # 纵深防御：即使是管理员也拒绝自我授予 admin，避免重复自授/提权链
+        if is_self_admin_grant(operator_id, user_name, role_name):
+            logger.warning(
+                f"拒绝自我授予管理员角色: operator={operator_id} target={user_name}"
+            )
+            return response_helper.forbidden("不能给自己授予管理员角色")
 
         await permission_manager.add_role_to_user(user_name, role_name)
+
+        audit_grant(operator_id, "add-role-to-user", user_name, role_name)
+
+        # 该用户权限视图已变化，撤销其 refresh token 强制重新登录
+        # （refresh_token_store 由并行子任务提供，懒导入 + 保护，缺失时安全降级）
+        try:
+            from src_v2.core.user.refresh_token_store import revoke_all_for_user
+            await revoke_all_for_user(user_name)
+        except Exception as exc:
+            logger.warning(f"撤销用户 {user_name} 的 refresh token 失败: {exc}")
 
         return {"status": 200, "message": "用户角色添加成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"添加用户角色失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "添加用户角色失败"}), 500
+        return response_helper.server_error("添加用户角色失败")
 
 
 @api_permission_bp.route("/users/roles", methods=["DELETE"])
@@ -984,18 +1020,40 @@ async def remove_role_from_user():
         role_name = data.get("roleName")
 
         if not user_name or not role_name:
-            return jsonify({"status": 400, "message": "用户名和角色名称不能为空"}), 400
+            return response_helper.bad_request("用户名和角色名称不能为空")
+
+        operator_id = g.current_user["user_id"]
+
+        # 纵深防御：admin:write 粒度过粗，写操作额外要求操作者本身具备 admin 角色
+        try:
+            await assert_admin_operator(operator_id)
+        except GrantDenied as e:
+            logger.warning(
+                f"拒绝越权移除用户角色: operator={operator_id} target={user_name}"
+                f" role={role_name} reason={e}"
+            )
+            return response_helper.forbidden(str(e))
 
         await permission_manager.remove_role_from_user(user_name, role_name)
+
+        audit_grant(operator_id, "remove-role-from-user", user_name, role_name)
+
+        # 该用户权限视图已变化，撤销其 refresh token 强制重新登录
+        # （refresh_token_store 由并行子任务提供，懒导入 + 保护，缺失时安全降级）
+        try:
+            from src_v2.core.user.refresh_token_store import revoke_all_for_user
+            await revoke_all_for_user(user_name)
+        except Exception as exc:
+            logger.warning(f"撤销用户 {user_name} 的 refresh token 失败: {exc}")
 
         return {"status": 200, "message": "用户角色移除成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"移除用户角色失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "移除用户角色失败"}), 500
+        return response_helper.server_error("移除用户角色失败")
 
 
 @api_permission_bp.route("/users", methods=["GET"])
@@ -1043,11 +1101,11 @@ async def get_all_users():
         return {"status": 200, "data": users}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取所有用户失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取所有用户失败"}), 500
+        return response_helper.server_error("获取所有用户失败")
 
 
 # ==================== Role Permission Management ====================
@@ -1090,11 +1148,11 @@ async def get_role_permissions(role_name: str):
         return {"status": 200, "data": permissions}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取角色权限失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取角色权限失败"}), 500
+        return response_helper.server_error("获取角色权限失败")
 
 
 @api_permission_bp.route("/roles/permissions", methods=["POST"])
@@ -1147,18 +1205,36 @@ async def add_permission_to_role():
         permission_name = data.get("permissionName")
 
         if not role_name or not permission_name:
-            return jsonify({"status": 400, "message": "角色名称和权限名称不能为空"}), 400
+            return response_helper.bad_request("角色名称和权限名称不能为空")
+
+        operator_id = g.current_user["user_id"]
+
+        # 纵深防御：admin:write 粒度过粗，写操作额外要求操作者本身具备 admin 角色
+        try:
+            await assert_admin_operator(operator_id)
+        except GrantDenied as e:
+            logger.warning(
+                f"拒绝越权添加角色权限: operator={operator_id} target={role_name}"
+                f" permission={permission_name} reason={e}"
+            )
+            return response_helper.forbidden(str(e))
 
         await permission_manager.add_permissions_to_role(role_name, permission_name)
+
+        audit_grant(operator_id, "add-permission-to-role", role_name, permission_name)
+        # 角色权限影响该角色下所有用户，这里只提示需重新登录（本批不逐个撤销 token）
+        logger.warning(
+            f"角色 {role_name} 的权限集已变更，拥有该角色的用户需重新登录以刷新权限视图"
+        )
 
         return {"status": 200, "message": "角色权限添加成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"添加角色权限失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "添加角色权限失败"}), 500
+        return response_helper.server_error("添加角色权限失败")
 
 
 @api_permission_bp.route("/roles/permissions", methods=["DELETE"])
@@ -1211,15 +1287,33 @@ async def remove_permission_from_role():
         permission_name = data.get("permissionName")
 
         if not role_name or not permission_name:
-            return jsonify({"status": 400, "message": "角色名称和权限名称不能为空"}), 400
+            return response_helper.bad_request("角色名称和权限名称不能为空")
+
+        operator_id = g.current_user["user_id"]
+
+        # 纵深防御：admin:write 粒度过粗，写操作额外要求操作者本身具备 admin 角色
+        try:
+            await assert_admin_operator(operator_id)
+        except GrantDenied as e:
+            logger.warning(
+                f"拒绝越权移除角色权限: operator={operator_id} target={role_name}"
+                f" permission={permission_name} reason={e}"
+            )
+            return response_helper.forbidden(str(e))
 
         await permission_manager.remove_permissions_from_role(role_name, permission_name)
+
+        audit_grant(operator_id, "remove-permission-from-role", role_name, permission_name)
+        # 角色权限影响该角色下所有用户，这里只提示需重新登录（本批不逐个撤销 token）
+        logger.warning(
+            f"角色 {role_name} 的权限集已变更，拥有该角色的用户需重新登录以刷新权限视图"
+        )
 
         return {"status": 200, "message": "角色权限移除成功"}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"移除角色权限失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "移除角色权限失败"}), 500
+        return response_helper.server_error("移除角色权限失败")

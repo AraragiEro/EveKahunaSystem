@@ -31,6 +31,12 @@ function loadAdsenseScript() {
 loadAdsenseScript()
 
 const app = createApp(App)
+
+// 全局 Vue 错误处理器：捕获未处理的渲染错误
+app.config.errorHandler = (err, instance, info) => {
+  console.error('[Vue Error]', err, info)
+}
+
 const pinia = createPinia()
 
 app.use(pinia)

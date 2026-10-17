@@ -2,8 +2,10 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import dayjs from 'dayjs'
 import mermaid from 'mermaid'
+import { useAnnouncements } from '@/composables/useAnnouncements'
 
 type RawMeta = Record<string, string>
 
@@ -25,52 +27,6 @@ const router = useRouter()
 const announcementBodyRef = ref<HTMLElement | null>(null)
 let mermaidInitialized = false
 
-const markdownModules = import.meta.glob('/src/announcements/**/*.md', {
-  eager: true,
-  query: '?raw',
-  import: 'default',
-}) as Record<string, string>
-
-const removeQuotes = (value: string): string => value.replace(/^["']|["']$/g, '').trim()
-
-const parseFrontMatter = (rawText: string): { meta: RawMeta; content: string } => {
-  const matched = rawText.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
-  if (!matched) {
-    return { meta: {}, content: rawText.trim() }
-  }
-
-  const [, metaBlock, content] = matched
-  const meta: RawMeta = {}
-
-  for (const line of metaBlock.split(/\r?\n/)) {
-    const rawLine = line.trim()
-    if (!rawLine || rawLine.startsWith('#')) {
-      continue
-    }
-
-    const separatorIndex = rawLine.indexOf(':')
-    if (separatorIndex === -1) {
-      continue
-    }
-
-    const key = rawLine.slice(0, separatorIndex).trim()
-    const value = rawLine.slice(separatorIndex + 1).trim()
-    meta[key] = removeQuotes(value)
-  }
-
-  return { meta, content: content.trim() }
-}
-
-const parseTags = (value?: string): string[] => {
-  if (!value) {
-    return []
-  }
-  return value
-    .split(',')
-    .map((item) => removeQuotes(item))
-    .filter(Boolean)
-}
-
 const formatDate = (value?: string): string => {
   if (!value) {
     return ''
@@ -79,42 +35,23 @@ const formatDate = (value?: string): string => {
   return date.isValid() ? date.format('YYYY-MM-DD HH:mm') : value
 }
 
+const { announcements: rawAnnouncements } = useAnnouncements()
+
 const announcements = computed<AnnouncementItem[]>(() => {
-  const entries: AnnouncementItem[] = []
-
-  for (const [filePath, rawText] of Object.entries(markdownModules)) {
-    const { meta, content } = parseFrontMatter(rawText)
-    const normalizedPath = filePath.replace(/\\/g, '/')
-    const slug = normalizedPath
-      .replace(/^.*\/announcements\//, '')
-      .replace(/\.md$/, '')
-      .replace(/\//g, '-')
-
-    const title = meta.title || slug
-    const publishedAt = meta.published_at || meta.publishedAt || ''
-    const updatedAt = meta.updated_at || meta.updatedAt || ''
-    const author = meta.author || ''
-    const summary = meta.summary || ''
-    const tags = parseTags(meta.tags)
-
-    entries.push({
+  return rawAnnouncements.value.map((a) => {
+    const slug = a.filename.replace(/\.md$/, '')
+    return {
       slug,
-      title,
-      publishedAt,
-      updatedAt,
-      author,
-      summary,
-      tags,
-      meta,
-      content,
-      html: marked(content, { breaks: true }) as string,
-    })
-  }
-
-  return entries.sort((a, b) => {
-    const aTime = dayjs(a.publishedAt).valueOf()
-    const bTime = dayjs(b.publishedAt).valueOf()
-    return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime)
+      title: a.title,
+      publishedAt: a.published_at,
+      updatedAt: a.updated_at || '',
+      author: a.author || '',
+      summary: a.summary || '',
+      tags: a.tags || [],
+      meta: {} as RawMeta,
+      content: a.content,
+      html: DOMPurify.sanitize(marked(a.content, { breaks: true }) as string),
+    }
   })
 })
 
@@ -146,7 +83,7 @@ const ensureMermaidInitialized = () => {
   }
   mermaid.initialize({
     startOnLoad: false,
-    securityLevel: 'loose',
+    securityLevel: 'strict',
   })
   mermaidInitialized = true
 }

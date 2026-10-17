@@ -36,6 +36,18 @@ const userDetailDateRange = ref<[Date, Date]>([
 const userDetailChartRef = ref<HTMLElement>()
 let userDetailChartInstance: echarts.ECharts | null = null
 
+// 窗口 resize 处理 (RAF throttle, 合并所有图表)
+let resizeRAF: number | null = null
+const handleResize = () => {
+  if (resizeRAF !== null) return
+  resizeRAF = requestAnimationFrame(() => {
+    hourlyChartInstance?.resize()
+    durationChartInstance?.resize()
+    userDetailChartInstance?.resize()
+    resizeRAF = null
+  })
+}
+
 // 日期快捷选项
 const dateShortcuts = [
   {
@@ -639,9 +651,7 @@ const initUserDetailChart = async () => {
   await nextTick()
   if (userDetailChartRef.value && !userDetailChartInstance) {
     userDetailChartInstance = echarts.init(userDetailChartRef.value)
-    window.addEventListener('resize', () => {
-      userDetailChartInstance?.resize()
-    })
+    window.addEventListener('resize', handleResize)
   }
 }
 
@@ -685,9 +695,7 @@ const initHourlyChart = async () => {
   await nextTick()
   if (hourlyChartRef.value && !hourlyChartInstance) {
     hourlyChartInstance = echarts.init(hourlyChartRef.value)
-    window.addEventListener('resize', () => {
-      hourlyChartInstance?.resize()
-    })
+    window.addEventListener('resize', handleResize)
   }
   await fetchHourlyStatistics()
 }
@@ -697,9 +705,7 @@ const initDurationChart = async () => {
   await nextTick()
   if (durationChartRef.value && !durationChartInstance) {
     durationChartInstance = echarts.init(durationChartRef.value)
-    window.addEventListener('resize', () => {
-      durationChartInstance?.resize()
-    })
+    window.addEventListener('resize', handleResize)
   }
   await fetchDurationStatistics()
 }
@@ -758,10 +764,12 @@ onUnmounted(() => {
     durationChartInstance.dispose()
     durationChartInstance = null
   }
-  window.removeEventListener('resize', () => {
-    hourlyChartInstance?.resize()
-    durationChartInstance?.resize()
-  })
+  if (userDetailChartInstance) {
+    userDetailChartInstance.dispose()
+    userDetailChartInstance = null
+  }
+  if (resizeRAF !== null) cancelAnimationFrame(resizeRAF)
+  window.removeEventListener('resize', handleResize)
 })
 </script>
 

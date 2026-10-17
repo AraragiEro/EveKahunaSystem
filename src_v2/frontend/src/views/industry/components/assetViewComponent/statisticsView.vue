@@ -135,7 +135,14 @@ const containerStats = computed<ContainerStat[]>(() => {
             const value = asset.price * asset.quantity
             stat.totalQuantity += asset.quantity
             stat.totalValue += value
-            stat.assets.push({ ...asset })
+
+            // 合并在同名容器中出现的同种资产，避免展开后出现重复卡片
+            const existingAsset = stat.assets.find(a => a.type_id === asset.type_id)
+            if (existingAsset) {
+                existingAsset.quantity += asset.quantity
+            } else {
+                stat.assets.push({ ...asset })
+            }
         })
     })
     
@@ -144,6 +151,8 @@ const containerStats = computed<ContainerStat[]>(() => {
     
     stats.forEach(stat => {
         stat.percentage = total > 0 ? (stat.totalValue / total) * 100 : 0
+        // 展开的资产卡片按占比从大到小排列（同一容器内占比 = 价值 / 容器总价值，等价于按价值降序）
+        stat.assets.sort((a, b) => (b.price * b.quantity) - (a.price * a.quantity))
     })
     
     // 按总价值降序排列
@@ -199,7 +208,7 @@ const typeStats = computed<TypeStat[]>(() => {
     
     stats.forEach(stat => {
         stat.percentage = total > 0 ? (stat.totalValue / total) * 100 : 0
-        // 对资产按价值降序排列
+        // 展开的资产卡片按占比从大到小排列（同一分类内占比 = 价值 / 分类总价值，等价于按价值降序）
         stat.assets.sort((a, b) => (b.price * b.quantity) - (a.price * a.quantity))
     })
     
@@ -485,10 +494,15 @@ const observeContainer = () => {
     return null
 }
 
-// 窗口大小调整处理函数
+// 窗口大小调整处理函数 (RAF throttle)
+let resizeRAF: number | null = null
 const handleResize = () => {
+  if (resizeRAF !== null) return
+  resizeRAF = requestAnimationFrame(() => {
     containerChartInstance?.resize()
     typeChartInstance?.resize()
+    resizeRAF = null
+  })
 }
 
 // ResizeObserver 实例
@@ -529,6 +543,7 @@ onUnmounted(() => {
         typeChartInstance = null
     }
     
+    if (resizeRAF !== null) cancelAnimationFrame(resizeRAF)
     window.removeEventListener('resize', handleResize)
 
     cleanupThemeWatcher?.()
@@ -539,10 +554,7 @@ onUnmounted(() => {
 
 <template>
     <div v-loading="loading" class="statistics-view-content">
-        <div v-if="!loading && (!assetView || Object.keys(assetView).length === 0)" class="empty-state">
-            <el-empty description="暂无数据" />
-        </div>
-        <div v-else class="statistics-view-container">
+        <div class="statistics-view-container">
             <!-- 工具栏 -->
             <div class="toolbar">
                 <div class="toolbar-left">
@@ -577,9 +589,12 @@ onUnmounted(() => {
                     </el-button>
                 </div>
             </div>
-
-            <!-- 总价值卡片 -->
-            <el-card class="total-value-card" shadow="hover">
+            <div v-if="!loading && (!assetView || Object.keys(assetView).length === 0)" class="empty-state">
+                <el-empty description="暂无数据" />
+            </div>
+            <template v-else>
+                <!-- 总价值卡片 -->
+                <el-card class="total-value-card" shadow="hover">
                 <div class="total-value-content">
                     <div class="total-value-label">资产总价值</div>
                     <el-statistic 
@@ -600,8 +615,9 @@ onUnmounted(() => {
                     <div ref="typeChartRef" class="chart-container"></div>
                 </el-card>
             </div>
-        </div>
+        </template>
     </div>
+</div>
 
     <!-- 容器详情弹窗 -->
     <el-dialog 
@@ -642,6 +658,11 @@ onUnmounted(() => {
                         class="inner-card"
                         shadow="never"
                     >
+                        <!-- 占比背景进度：浅绿色按该资产在容器中的占比填充 -->
+                        <div 
+                            class="asset-percent-fill" 
+                            :style="{ width: getAssetPercentageInContainer(asset, stat).toFixed(2) + '%' }"
+                        ></div>
                         <div class="asset-card-content">
                             <el-avatar 
                                 :size="48" 
@@ -713,6 +734,11 @@ onUnmounted(() => {
                         class="inner-card"
                         shadow="never"
                     >
+                        <!-- 占比背景进度：浅绿色按该资产在分类中的占比填充 -->
+                        <div 
+                            class="asset-percent-fill" 
+                            :style="{ width: getAssetPercentageInType(asset, stat).toFixed(2) + '%' }"
+                        ></div>
                         <div class="asset-card-content">
                             <el-avatar 
                                 :size="48" 
@@ -953,15 +979,33 @@ onUnmounted(() => {
 }
 
 .inner-card {
+    position: relative;
+    overflow: hidden;
     border-radius: 6px;
     border: 1px solid #e4e7ed;
 }
 
 .inner-card :deep(.el-card__body) {
+    position: relative;
     padding: 12px;
 }
 
+/* 占比背景进度：浅绿色按百分比从左侧填充 */
+.asset-percent-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 0;
+    pointer-events: none;
+    border-radius: 6px 0 0 6px;
+    background-color: color-mix(in srgb, var(--k-color-success) 22%, transparent);
+    transition: width 0.3s ease;
+}
+
 .asset-card-content {
+    position: relative;
+    z-index: 1;
     display: flex;
     align-items: center;
     gap: 12px;

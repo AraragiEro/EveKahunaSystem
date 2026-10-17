@@ -1,4 +1,5 @@
 import asyncio
+import random
 
 from src_v2.core.database.connect_manager import get_redis_manager
 from src_v2.model.EVE.market.market_manager import MarketManager
@@ -44,6 +45,9 @@ class MarketOrderRefreshTimer(metaclass=SingletonMeta):
         每30分钟检查一次 Redis 标志，如果检测不到标志则执行任务。
         """
         logger.info("Jita 订单刷新定时器已启动，每30分钟检查一次 Redis 标志")
+        
+        jitter = random.uniform(0, self.CHECK_INTERVAL_SECONDS * 0.3)
+        await asyncio.sleep(jitter)
         
         while self._running:
             try:

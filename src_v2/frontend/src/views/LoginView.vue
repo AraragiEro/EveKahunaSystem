@@ -80,12 +80,13 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Lock, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 
 const loginFormRef = ref<FormInstance>()
@@ -153,11 +154,9 @@ const handleLogin = async () => {
 
     ElMessage.success('登录成功')
     await nextTick()
-    if (authStore.user?.roles.includes('vip_alpha') || authStore.user?.roles.includes('vip_omega')) {
-      router.push('/home')
-    } else {
-      router.push('/todolist')
-    }
+    
+    // 登录成功，统一跳转仪表盘
+    router.push('/dashboard')
   } catch (error) {
     console.error('登录失败:', error)
   }
@@ -205,10 +204,16 @@ const handleDialogClose = () => {
 }
 
 onMounted(async () => {
-  if (authStore.token) {
+  if (authStore.isAuthenticated) {
     const isAuthValid = await authStore.checkAuth()
     if (isAuthValid) {
-      router.push('/home')
+      // 优先使用 redirect 参数跳转（如果有）
+      const redirectPath = route.query.redirect as string
+      if (redirectPath) {
+        router.push(redirectPath)
+      } else {
+        router.push('/dashboard')
+      }
       return
     }
   }

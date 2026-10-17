@@ -280,7 +280,7 @@ const calculateReplenishQuantity = (asset: AssetItem): number => {
     return replenishQuantity
 }
 
-// 生成采购清单文本：格式为"中文名 英文名 数量"
+// 生成采购清单文本：格式为"中文名 数量"
 const generatePurchaseList = (assets: AssetItem[]): string => {
     const lines: string[] = []
     
@@ -289,8 +289,7 @@ const generatePurchaseList = (assets: AssetItem[]): string => {
         // 只包含需要补充的物品（数量 > 0）
         if (replenishQuantity > 0) {
             const chineseName = asset.type_name_zh || asset.type_name
-            const englishName = asset.type_name
-            lines.push(`${chineseName} ${englishName} ${replenishQuantity}`)
+            lines.push(`${chineseName} ${replenishQuantity}`)
         }
     })
     
@@ -307,8 +306,7 @@ const copySingleItemPurchaseList = async (asset: AssetItem) => {
     }
     
     const chineseName = asset.type_name_zh || asset.type_name
-    const englishName = asset.type_name
-    const text = `${chineseName} ${englishName} ${replenishQuantity}`
+    const text = `${chineseName} ${replenishQuantity}`
     
     try {
         await navigator.clipboard.writeText(text)
@@ -340,10 +338,7 @@ const copyAllPurchaseList = async () => {
 
 <template>
     <div v-loading="loading" class="watch-view-content">
-        <div v-if="!loading && assetView.length === 0" class="empty-state">
-            <el-empty description="暂无数据" />
-        </div>
-        <div v-else class="watch-view-container">
+        <div class="watch-view-container">
             <!-- 顶部操作区域 -->
             <div class="action-bar">
                 <div class="action-bar-left">
@@ -405,9 +400,11 @@ const copyAllPurchaseList = async () => {
                     </el-button>
                 </div>
             </div>
-        
+            <div v-if="!loading && assetView.length === 0" class="empty-state">
+                <el-empty description="暂无数据" />
+            </div>
             <!-- 资产网格 -->
-            <div class="asset-grid">
+            <div v-else class="asset-grid">
                 <el-card 
                     v-for="asset in AssetViewSort" 
                     :key="asset.type_id" 

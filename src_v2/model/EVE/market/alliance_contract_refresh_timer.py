@@ -1,4 +1,5 @@
 import asyncio
+import random
 from datetime import datetime, timedelta, timezone
 
 from src_v2.core.database.connect_manager import get_redis_manager as rdm
@@ -117,6 +118,9 @@ class AllianceContractRefreshTimer(metaclass=SingletonMeta):
         如果标志存在，跳过执行。
         """
         logger.info("联盟合同刷新定时器已启动，每5分钟检查一次 Redis 标志")
+
+        jitter = random.uniform(0, self.CHECK_INTERVAL_SECONDS * 0.3)
+        await asyncio.sleep(jitter)
 
         while self._running:
             try:

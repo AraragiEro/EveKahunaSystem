@@ -68,13 +68,14 @@ const props = withDefaults(defineProps<{
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 32px;
   margin-bottom: 32px;
+  align-items: start;
 }
 
 .pricing-card {
   border-radius: 16px;
   transition: all 0.3s ease;
   overflow: hidden;
-  background: white;
+  background: var(--k-color-surface);
   border: 2px solid transparent;
   position: relative;
 }
@@ -108,13 +109,13 @@ const props = withDefaults(defineProps<{
   padding: 32px 24px;
   text-align: center;
   border-top: 4px solid;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.85));
+  background: var(--k-color-surface);
 }
 
 .pricing-name {
   font-size: 24px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--k-color-text);
   margin: 0 0 16px 0;
 }
 
@@ -129,13 +130,13 @@ const props = withDefaults(defineProps<{
 .price-amount {
   font-size: 42px;
   font-weight: 700;
-  color: #2c3e50;
+  color: var(--k-color-text);
   line-height: 1;
 }
 
 .price-unit {
   font-size: 16px;
-  color: #64748b;
+  color: var(--k-color-text-secondary);
   font-weight: 500;
 }
 
@@ -153,9 +154,18 @@ const props = withDefaults(defineProps<{
 
 .pricing-note {
   font-size: 12px;
-  color: #909399;
+  color: var(--k-color-text-secondary);
   margin-top: 12px;
   line-height: 1.5;
+}
+
+/* 深色模式下卡片背景 */
+[data-theme='dark'] .pricing-card {
+  background: var(--k-color-surface);
+}
+
+[data-theme='dark'] .pricing-card .el-card__body {
+  background: var(--k-color-surface);
 }
 
 .pricing-features {
@@ -173,10 +183,10 @@ const props = withDefaults(defineProps<{
 .feature-category {
   font-size: 16px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--k-color-text);
   margin: 0 0 12px 0;
   padding-bottom: 8px;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--k-color-border);
 }
 
 .feature-list {
@@ -187,7 +197,7 @@ const props = withDefaults(defineProps<{
 
 .feature-item {
   font-size: 14px;
-  color: #64748b;
+  color: var(--k-color-text-secondary);
   line-height: 1.8;
   padding: 6px 0;
   padding-left: 20px;

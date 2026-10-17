@@ -7,7 +7,7 @@ from src_v2.core.utils import tqdm_manager
 
 @esi_request
 async def industry_systems(log=True):
-    data, _, _ =  await get_request_async(f"https://esi.evetech.net/latest/industry/systems/", log=log)
+    data, *_ =  await get_request_async(f"https://esi.evetech.net/latest/industry/systems/", log=log)
     return data
 
 
@@ -21,7 +21,7 @@ async def corporations_corporation_id_industry_jobs(
         access_token, corporation_id: int, page: int=1, include_completed: bool = False, max_retries=3, log=True
 ):
     access_token = await parse_token(access_token)
-    data, pages, _ = await get_request_async(
+    data, pages, *_ = await get_request_async(
         f"https://esi.evetech.net/corporations/{corporation_id}/industry/jobs/",
             headers={"Authorization": f"Bearer {access_token}"},
             params={
@@ -41,7 +41,8 @@ async def corporations_corporation_id_industry_jobs(
         tasks.append(asyncio.create_task(corporations_corporation_id_industry_jobs(access_token, corporation_id, p, include_completed, max_retries, log)))
     page_results = await asyncio.gather(*tasks)
     for data_page in page_results:
-        data.append(data_page)
+        if data_page is not None:
+            data.append(data_page)
     await tqdm_manager.complete_mission(f'corporations_corporation_id_industry_jobs_{corporation_id}')
 
     return data
@@ -62,7 +63,7 @@ async def characters_character_id_industry_jobs(access_token, character_id: int,
     Returns:
         Industry jobs placed by a character
     """
-    data, _, _ = await get_request_async(f"https://esi.evetech.net/characters/{character_id}/industry/jobs/", headers={
+    data, *_ = await get_request_async(f"https://esi.evetech.net/characters/{character_id}/industry/jobs/", headers={
         "Authorization": f"Bearer {await parse_token(access_token)}"
     }, params={
         "include_completed": 1 if include_completed else 0

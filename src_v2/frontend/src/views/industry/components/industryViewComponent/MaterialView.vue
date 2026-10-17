@@ -25,7 +25,7 @@ const formatAccounting = (value: number | string | null | undefined): string => 
 
 // 行样式函数
 const LackRowClassName = (data: { row: any, rowIndex: number }) => {
-    return data.row.real_quantity > 0 ? 'lack-row' : 'full'
+    return data.row.real_quantity> 0 ? 'lack-row' : 'full'
 }
 
 // 复制单元格内容
@@ -81,23 +81,22 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
         expand-on-click-node="false"
         default-expand-all
         border
-        max-height="75vh"
-        show-overflow-tooltip
-        :row-class-name="LackRowClassName"
+        max-height="75vh" :row-class-name="LackRowClassName"
         style="font-size: 16px;"
-    >
+   >
         <el-table-column label="类型" prop="layer_id" width="110">
         </el-table-column>
         <el-table-column label="图标" prop="type_id" width="70">
             <template #default="{ row }">
-                <img 
-                    v-if="row?.type_id"
-                    :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" 
-                    alt="类型" 
-                    width="40" 
-                    height="40"
-                    style="border-radius: 4px;" 
-                />
+            <img 
+                v-if="row?.type_id"
+                :src="`https://imageserver.eveonline.com/types/${row.type_id}/icon`" 
+                alt="类型" 
+                width="40" 
+                height="40"
+                style="border-radius: 4px;" 
+                loading="lazy"
+            />
             </template>
         </el-table-column>
         <el-table-column label="物品id" prop="type_id" width="90"/>
@@ -107,7 +106,7 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                     class="copyable-cell" 
                     @click="copyCellContent(row.type_name, '物品名en')"
                     :title="`点击复制: ${row.type_name || ''}`"
-                >
+               >
                     {{ row.type_name }}
                 </div>
             </template>
@@ -118,7 +117,7 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                     class="copyable-cell" 
                     @click="copyCellContent(row.tpye_name_zh, '物品名zh')"
                     :title="`点击复制: ${row.tpye_name_zh || ''}`"
-                >
+               >
                     {{ row.tpye_name_zh }}
                 </div>
             </template>

@@ -8,14 +8,14 @@ import asyncio
 
 from .character import Character
 from ..eveesi import eveesi
-from ..eveesi.eveutils import parse_iso_datetime
+from src_v2.core.utils.datetime_utils import parse_aware_utc_datetime
 
 # import logger
 from src_v2.core.log import logger
 from src_v2.core.database.connect_manager import get_redis_manager as rdm
 
 #import Exception
-from src_v2.core.utils import KahunaException, SingletonMeta
+from src_v2.core.utils import KahunaException, PermissionDeniedException, SingletonMeta
 from ..eveesi.oauth import refresh_token
 
 from src_v2.core.database.kahuna_database_utils_v2 import EveAuthedCharacterDBUtils
@@ -51,7 +51,7 @@ class CharacterManager(metaclass=SingletonMeta):
                 alliance_id=corporation['alliance_id'] if 'alliance_id' in corporation else None,
                 ceo_id=corporation['ceo_id'],
                 creator_id=corporation['creator_id'],
-                date_founded=parse_iso_datetime(corporation['date_founded']).replace(tzinfo=None) if 'date_founded' in corporation else None,
+                date_founded=parse_aware_utc_datetime(corporation['date_founded']).replace(tzinfo=None) if 'date_founded' in corporation else None,
                 description=corporation['description'] if 'description' in corporation else None,
                 faction_id=corporation['faction_id'] if 'faction_id' in corporation else None,
                 home_station_id=corporation['home_station_id'] if 'home_station_id' in corporation else None,
@@ -77,7 +77,7 @@ class CharacterManager(metaclass=SingletonMeta):
         refresh_token = token_data["refresh_token"]
         expires_at = token_data["expires_at"]
 
-        character_verify_data = await eveesi.verify_token(ac_token)
+        character_verify_data = await eveesi.verify_eve_oauth_token(ac_token)
         if not character_verify_data or 'CharacterID' not in character_verify_data:
             logger.error('No character info found')
             logger.error(character_verify_data)
@@ -87,11 +87,11 @@ class CharacterManager(metaclass=SingletonMeta):
         character_data = await eveesi.characters_character(character_id)
         corp_id = character_data['corporation_id']
         character_name = character_verify_data['CharacterName']
-        birthday = (parse_iso_datetime(character_data['birthday'])
+        birthday = (parse_aware_utc_datetime(character_data['birthday'])
                     .astimezone(timezone(timedelta(hours=+8), 'Shanghai'))
                     .replace(tzinfo=None))
         corporation_id = character_data['corporation_id']
-        expires_time = (parse_iso_datetime(character_verify_data["ExpiresOn"])
+        expires_time = (parse_aware_utc_datetime(character_verify_data["ExpiresOn"])
                         .astimezone(timezone(timedelta(hours=+8), 'Shanghai'))
                         .replace(tzinfo=None))
 
@@ -125,9 +125,12 @@ class CharacterManager(metaclass=SingletonMeta):
         return characters_of_user_list
 
     async def delete_character_by_character_name(self, character_name: str, owner_user_name: str):
-        character_db_obj = await EveAuthedCharacterDBUtils.select_character_by_character_name(character_name)
+        # 归属校验：只能删除“自己绑定的角色”，防止越权删除他人角色
+        character_db_obj = await EveAuthedCharacterDBUtils.select_character_by_character_name_and_owner(
+            character_name, owner_user_name
+        )
         if not character_db_obj:
-            raise KahunaException("角色不存在")
+            raise PermissionDeniedException("角色不存在或不属于当前用户")
         await EveAuthedCharacterDBUtils.delete_obj(character_db_obj)
 
     async def delete_all_alias_characters_of_main_character(self, main_character_id: int):
@@ -185,7 +188,7 @@ class CharacterManager(metaclass=SingletonMeta):
             character_db_obj = await EvePublicCharacterInfoDBUtils.select_public_character_info_by_character_id(character_info['character_id'])
             if character_db_obj:
                 character_db_obj.alliance_id = character_info['alliance_id'] if 'alliance_id' in character_info else None
-                character_db_obj.birthday = parse_iso_datetime(character_info['birthday']).replace(tzinfo=None)
+                character_db_obj.birthday = parse_aware_utc_datetime(character_info['birthday']).replace(tzinfo=None)
                 character_db_obj.bloodline_id = character_info['bloodline_id']
                 character_db_obj.corporation_id = character_info['corporation_id']
                 character_db_obj.description = character_info['description'] if 'description' in character_info else None
@@ -200,7 +203,7 @@ class CharacterManager(metaclass=SingletonMeta):
                 await EvePublicCharacterInfoDBUtils.merge(M_EvePublicCharacterInfo(
                     character_id=character_info['character_id'],
                     alliance_id=character_info['alliance_id'] if 'alliance_id' in character_info else None,
-                    birthday=parse_iso_datetime(character_info['birthday']).replace(tzinfo=None),
+                    birthday=parse_aware_utc_datetime(character_info['birthday']).replace(tzinfo=None),
                     bloodline_id=character_info['bloodline_id'],
                     corporation_id=character_info['corporation_id'],
                     description=character_info['description'] if 'description' in character_info else None,
@@ -221,7 +224,7 @@ class CharacterManager(metaclass=SingletonMeta):
             character_db_obj = M_EvePublicCharacterInfo(
                 character_id=character_id,
                 alliance_id=character_info['alliance_id'] if 'alliance_id' in character_info else None,
-                birthday=parse_iso_datetime(character_info['birthday']).replace(tzinfo=None),
+                birthday=parse_aware_utc_datetime(character_info['birthday']).replace(tzinfo=None),
                 bloodline_id=character_info['bloodline_id'],
                 corporation_id=character_info['corporation_id'],
                 description=character_info['description'] if 'description' in character_info else None,

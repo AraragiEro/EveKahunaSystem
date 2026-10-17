@@ -45,24 +45,29 @@ def register_industry_tools(mcp: FastMCP):
             return {"status": 500, "message": f"调用失败: {str(e)}"}
 
     @mcp.tool()
-    async def get_company_medica_vouchers() -> dict:
+    async def get_company_medica_vouchers(
+        qq: Annotated[
+            int,
+            Field(description="当前用户的 QQ 号码（先调用 kahunasystem_get_my_qq 获取真实 QQ 号）"),
+        ],
+    ) -> dict:
         """
-        获取公司医疗抵扣额度
+        获取公司医疗抵扣额度（只返回该 QQ 对应的记录，即用户本人的额度）
 
         Returns:
             {
                 "status": 200,
                 "data": [
-                    ["用户名", "额度"],
-                    ["CrazySheep7", "1,500,000,000"]
-                ]
+                    ["角色名", "额度", "QQ号"]
+                ],
+                "count": 1
             }
         """
-        logger.info("MCP Tool: get_company_medica_vouchers()")
+        logger.info(f"MCP Tool: get_company_medica_vouchers(qq={qq})")
 
         try:
             async with QuartBackendClient() as client:
-                result = await client.get_company_medica_vouchers()
+                result = await client.get_company_medica_vouchers(qq)
 
             logger.info(
                 f"MCP Tool: get_company_medica_vouchers 完成，status={result.get('status', 'unknown')}"

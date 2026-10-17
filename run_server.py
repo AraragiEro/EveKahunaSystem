@@ -11,8 +11,10 @@ from src_v2.backend.app import get_app, serve_vue
 from src_v2.core.permission.permission_manager import permission_manager
 from src_v2.core.user.user_manager import UserManager
 from src_v2.core.config.config import config
+from src_v2.core.config.security_check import enforce_startup_security, inspect_admin_config
 from werkzeug.security import generate_password_hash
 from src_v2.core.log import logger
+from src_v2.core.database.startup_cleanup import run_startup_cleanup
 
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
@@ -101,6 +103,11 @@ def setup_signal_handlers():
 async def main():
     args = parse_args()
 
+    # 启动期安全配置检查（安全审计 #12）
+    # 签名密钥为空 / 仍是模板占位符 → 直接中断启动；
+    # 长度不足 32 位只告警，保证本地 --dev 的开发密钥仍能启动。
+    enforce_startup_security(prod=args.prod)
+
     hypercorn_config = Config()
     hypercorn_config.bind = [f"{args.host}:{args.port}"]
 
@@ -144,40 +151,63 @@ async def main():
     await init_esi_manager()
 
     # 检查并创建默认管理员账号
+    # 安全审计 #11：不再提供 kahuna/kahuna 之类的兜底口令；配置缺失或口令过弱时跳过建号
     try:
         create_admin = config.getboolean('ADMIN', 'create_admin', fallback=False)
+        # fallback 一律为空串，避免模板缺项时静默使用默认弱口令
+        admin_user = (config.get('ADMIN', 'admin_user', fallback='') or '').strip()
+        admin_passwd = config.get('ADMIN', 'admin_passwd', fallback='') or ''
+
         if create_admin:
-            admin_user = config.get('ADMIN', 'admin_user', fallback='kahuna')
-            admin_passwd = config.get('ADMIN', 'admin_passwd', fallback='kahuna')
-            
             logger.info(f"检查管理员账号创建配置: CREATE_ADMIN={create_admin}, ADMIN_USER={admin_user}")
-            
-            # 检查用户是否已存在
-            user_manager = UserManager()
-            existing_user = await user_manager.get_user(admin_user)
-            
-            if existing_user:
-                logger.info(f"管理员账号 '{admin_user}' 已存在，跳过创建")
+
+            admin_ok, admin_reason = inspect_admin_config(create_admin, admin_user, admin_passwd)
+            if not admin_ok:
+                # 配置不完整或口令过弱：明确报错并跳过创建，但不中断启动
+                logger.error(f"ADMIN 配置不完整或口令过弱，已跳过管理员账号创建: {admin_reason}")
+                logger.warning(
+                    "请在配置文件的 [ADMIN] 段显式填写 admin_user 与 admin_passwd，"
+                    "口令需 ≥12 位且不得使用 kahuna/kahuna、admin/admin、password、123456 等默认弱口令"
+                )
             else:
-                # 创建管理员账号
-                logger.info(f"开始创建管理员账号: {admin_user}")
-                passwd_hash = generate_password_hash(admin_passwd)
-                await user_manager.create_user(admin_user, passwd_hash)
-                logger.info(f"管理员账号 '{admin_user}' 创建成功")
-                
-                # 赋予 admin 角色
-                try:
-                    await permission_manager.add_role_to_user(admin_user, 'admin')
-                    logger.info(f"已为管理员账号 '{admin_user}' 赋予 admin 角色")
-                except ValueError as e:
-                    # 如果角色已存在或其他错误，记录日志但不中断启动
-                    logger.warning(f"为管理员账号 '{admin_user}' 赋予 admin 角色时出错: {e}")
+                # 检查用户是否已存在
+                user_manager = UserManager()
+                existing_user = await user_manager.get_user(admin_user)
+
+                if existing_user:
+                    logger.info(f"管理员账号 '{admin_user}' 已存在，跳过创建")
+                else:
+                    # 创建管理员账号
+                    logger.info(f"开始创建管理员账号: {admin_user}")
+                    passwd_hash = generate_password_hash(admin_passwd)
+                    await user_manager.create_user(admin_user, passwd_hash)
+                    logger.info(f"管理员账号 '{admin_user}' 创建成功")
+
+                    # 赋予 admin 角色
+                    try:
+                        await permission_manager.add_role_to_user(admin_user, 'admin')
+                        logger.info(f"已为管理员账号 '{admin_user}' 赋予 admin 角色")
+                    except ValueError as e:
+                        # 如果角色已存在或其他错误，记录日志但不中断启动
+                        logger.warning(f"为管理员账号 '{admin_user}' 赋予 admin 角色时出错: {e}")
         else:
             logger.info("CREATE_ADMIN 配置为 false，跳过管理员账号创建")
     except Exception as e:
         logger.error(f"创建管理员账号时发生错误: {e}", exc_info=True)
         # 不中断启动流程，只记录错误
 
+    # 清理残留的 Redis 计算状态（服务器重启后清除残留的排队/运行状态）
+    logger.info("开始清理残留的Redis计算状态...")
+    await run_startup_cleanup(skip_if_reloader=hypercorn_config.use_reloader)
+    logger.info("Redis启动清理完成")
+
+    # 启动 TQ 状态后台刷新（本地内存缓存，替代 Redis 依赖）
+    try:
+        from src_v2.model.EVE.eveesi.tq_status import start_tq_status_refresh
+        start_tq_status_refresh()
+        logger.info("TQ 状态管理器已启动")
+    except Exception as e:
+        logger.error(f"启动 TQ 状态管理器失败: {e}")
 
     # 仅在版本为企业版且模块存在时注册
     from src_v2.core.edition import is_enterprise
@@ -199,13 +229,16 @@ async def main():
     except Exception as e:
         logger.error(f"启动 Jita 订单刷新定时器时发生错误: {e}", exc_info=True)
 
-    # 启动jita基础成本刷新定时器
-    try:
-        from src_v2.enterprise.model.market_view_cost_refresh_timer import MarketViewCostRefreshTimer
-        MarketViewCostRefreshTimer().start()
-        logger.info("Jita 基础成本刷新定时器已启动")
-    except Exception as e:
-        logger.error(f"启动 Jita 基础成本刷新定时器时发生错误: {e}", exc_info=True)
+    # 启动jita基础成本刷新定时器（企业版功能；社区版无该模块时静默跳过）
+    if is_enterprise():
+        try:
+            from src_v2.enterprise.model.market_view_cost_refresh_timer import MarketViewCostRefreshTimer
+            MarketViewCostRefreshTimer().start()
+            logger.info("Jita 基础成本刷新定时器已启动")
+        except ImportError as e:
+            logger.warning(f"企业版 model 模块不存在，跳过 Jita 基础成本刷新定时器: {e}")
+        except Exception as e:
+            logger.error(f"启动 Jita 基础成本刷新定时器时发生错误: {e}", exc_info=True)
 
     # 启动Overview历史数据自动保存定时器
     try:
@@ -214,6 +247,14 @@ async def main():
         logger.info("Overview历史数据自动保存定时器已启动")
     except Exception as e:
         logger.error(f"启动 Overview历史数据自动保存定时器时发生错误: {e}", exc_info=True)
+
+    # 启动订单统计刷新定时器
+    try:
+        from src_v2.model.EVE.home.orders_stats_refresh_timer import OrdersStatsRefreshTimer
+        OrdersStatsRefreshTimer().start()
+        logger.info("订单统计刷新定时器已启动")
+    except Exception as e:
+        logger.error(f"启动订单统计刷新定时器时发生错误: {e}", exc_info=True)
 
     # 启动 Public Character 信息刷新定时器
     try:
@@ -230,6 +271,48 @@ async def main():
         logger.info("联盟合同刷新定时器已启动")
     except Exception as e:
         logger.error(f"启动联盟合同刷新定时器时发生错误: {e}", exc_info=True)
+
+    # 启动Dashboard运营数据快照定时器
+    try:
+        from src_v2.model.EVE.home.dashboard_ops_timer import DashboardOpsSnapshotTimer
+        DashboardOpsSnapshotTimer().start()
+        logger.info("Dashboard运营数据快照定时器已启动")
+    except Exception as e:
+        logger.error(f"启动Dashboard运营数据快照定时器时发生错误: {e}", exc_info=True)
+
+    # 启动LP价值快照定时器
+    try:
+        from src_v2.model.EVE.lp_store.lp_snapshot_refresh_timer import LpSnapshotRefreshTimer
+        LpSnapshotRefreshTimer().start()
+        logger.info("LP价值快照定时器已启动（每日12:00 UTC）")
+
+        # 首次启动时异步执行一次快照（通过 Redis 标志判断是否已执行，30s 后开始）
+        async def _run_initial_lp_snapshot():
+            await asyncio.sleep(30)
+            try:
+                from src_v2.core.database.connect_manager import get_redis_manager as rdm
+                if await rdm().r.exists("lp_snapshot_executed_today"):
+                    logger.info("LP 快照今日已执行，跳过")
+                    return
+                from src_v2.model.EVE.lp_store.lp_snapshot_manager import LpSnapshotManager
+                manager = LpSnapshotManager()
+                count = await manager.take_snapshot()
+                await rdm().r.setex("lp_snapshot_executed_today", 86400, "1")
+                logger.info(f"首次 LP 快照完成，写入 {count} 个军团记录")
+            except Exception as e:
+                logger.error(f"首次 LP 快照执行失败: {e}")
+
+        asyncio.create_task(_run_initial_lp_snapshot())
+    except Exception as e:
+        logger.error(f"启动LP价值快照定时器时发生错误: {e}", exc_info=True)
+
+    # 启动星系系数定时刷新器（每小时10分）
+    try:
+        from src_v2.model.EVE.industry.system_cost_refresh_timer import SystemCostRefreshTimer
+        SystemCostRefreshTimer().start()
+        logger.info("星系系数定时刷新器已启动（每小时10分）")
+    except Exception as e:
+        logger.error(f"启动星系系数定时刷新器时发生错误: {e}", exc_info=True)
 
     # 初始化 Quart App
     app = get_app()

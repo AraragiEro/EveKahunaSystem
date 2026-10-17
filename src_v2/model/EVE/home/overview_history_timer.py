@@ -4,6 +4,7 @@ Overview历史数据自动保存定时任务
 """
 import asyncio
 import json
+import random
 import traceback
 from datetime import datetime, timedelta, timezone
 from typing import List
@@ -244,6 +245,10 @@ class OverviewHistoryTimer(metaclass=SingletonMeta):
         每天凌晨5点（+8时区）执行一次自动保存任务
         """
         logger.info("Overview历史数据自动保存定时器已启动")
+
+        jitter = random.uniform(0, self.CHECK_INTERVAL_SECONDS * 0.3)
+        await asyncio.sleep(jitter)
+
         last_execution_date = None
 
         while self._running:

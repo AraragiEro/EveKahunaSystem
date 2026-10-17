@@ -84,7 +84,8 @@ const configTypeMap = ref<{ [key: string]: string }>({
   "MaterialTagConf": "原材料标记",
   "DefaultBlueprintConf": "缺省蓝图参数",
   "LoadAssetConf": "载入库存",
-  "MaxJobSplitCountConf": "最大作业拆分控制"
+    "MaxJobSplitCountConf": "最大作业拆分控制",
+    "TaxConfig": "税收"
 })
 
 const handleDeleteConfigFlowConfig = async (item: PlanConfigObject) => {
@@ -124,6 +125,8 @@ const formatConfigValue = (type: string, value: any) => {
     const keywordGroups = parsedValue.keyword_groups || []
     const keywords = keywordGroups.map((kg: any) => `${kg.keyword}(${kg.keyword_type})`).join(', ') || 'N/A'
     return `作业类型: ${keywords}, 判断类型: ${parsedValue.judge_type}, 最大数量: ${parsedValue.max_count}, 最大时间: ${parsedValue.max_time_day}天${parsedValue.max_time_date}`
+  } else if (type === 'TaxConfig') {
+    return `目标类别: ${parsedValue.target_category || 'N/A'}, 税率: ${parsedValue.tax_rate ?? 0}%`
   }
 
   return JSON.stringify(parsedValue)
@@ -135,7 +138,8 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
   "MaterialTagConf": "#f7d095",
   "DefaultBlueprintConf": "#ffbaba",
   "LoadAssetConf": "#ffe3e3",
-  "MaxJobSplitCountConf": "#cacdd3"
+    "MaxJobSplitCountConf": "#cacdd3",
+    "TaxConfig": "#f0a58f"
 })
 
 </script>
@@ -484,6 +488,12 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
   background: color-mix(in srgb, #8b5cf6 18%, var(--k-color-surface-soft)) !important;
   border-color: color-mix(in srgb, #8b5cf6 42%, var(--k-color-border)) !important;
   color: color-mix(in srgb, #8b5cf6 78%, var(--k-color-text)) !important;
+}
+
+:deep(.config-type-tag-TaxConfig) {
+  background: color-mix(in srgb, #f97316 18%, var(--k-color-surface-soft)) !important;
+  border-color: color-mix(in srgb, #f97316 42%, var(--k-color-border)) !important;
+  color: color-mix(in srgb, #f97316 78%, var(--k-color-text)) !important;
 }
 
 .action-cell :deep(.el-button) {

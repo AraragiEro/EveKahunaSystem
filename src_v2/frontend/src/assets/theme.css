@@ -526,6 +526,16 @@ a {
   background: var(--k-color-surface-soft) !important;
 }
 
+/* Fix: override Element Plus default TR backgrounds that use CSS variables
+   (those variables get overridden by element-plus/dist/index.css which loads after theme.css) */
+.el-table tr {
+  background-color: var(--k-color-surface) !important;
+}
+
+.el-table thead tr {
+  background-color: var(--k-color-surface-soft) !important;
+}
+
 .el-pagination,
 .el-pagination button,
 .el-pagination .el-pager li {
@@ -705,4 +715,17 @@ html.dark .el-table .el-table__body .el-table__row.lack-row th,
 .el-drawer [style*='border: 1px solid #e4e7ed'],
 .el-drawer [style*='border:1px solid #e4e7ed'] {
   border-color: var(--k-color-border) !important;
+}
+
+/* 表格单元格超出省略（替代 el-table show-overflow-tooltip 的无条件悬浮提示） */
+.el-table .el-table__body-wrapper .el-table__cell .cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 表头允许换行 */
+.el-table .el-table__header-wrapper .el-table__cell .cell {
+  white-space: normal;
+  word-break: break-word;
 }

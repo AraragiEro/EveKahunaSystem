@@ -22,6 +22,11 @@ from .market_groups_model import MarketGroups, process_market_groups_row
 from .map_solar_systems_model import MapSolarSystems, process_map_solar_systems_row
 from .map_regions_model import MapRegions, process_map_regions_row
 from .type_materials_model import TypeMaterials, process_type_materials_row
+from .planet_schematics_model import (
+    PlanetSchematics, PlanetSchematicTypes,
+    process_planet_schematics_row
+)
+from .npc_corporations_model import NpcCorporations, process_npc_corporations_row
 
 __all__ = [
     'SDEBuilder',
@@ -54,5 +59,10 @@ __all__ = [
     'process_map_regions_row',
     'TypeMaterials',
     'process_type_materials_row',
+    'PlanetSchematics',
+    'PlanetSchematicTypes',
+    'process_planet_schematics_row',
+    'NpcCorporations',
+    'process_npc_corporations_row',
 ]
 

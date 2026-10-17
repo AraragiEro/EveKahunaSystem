@@ -26,6 +26,7 @@ from .default_config import (  # 默认预设plan config list
     DEFAULT_MAX_JOB_SPLIT_COUNT_CONFIG,
     DEFAULT_STRUCTURE_ASSIGN_CONFIG,
     DEFAULT_STRUCTURE_RIG_CONFIG,
+    VALID_TAX_CATEGORIES,
 )
 
 VIRTUAL_STRUCTURE_DICT = {
@@ -84,6 +85,37 @@ async def _migrate_structure_assign_conf_structure_id(config, config_value_dict)
     return False
 
 
+def validate_tax_config(config_value) -> bool:
+    """验证 TaxConfig 配置值
+
+    Args:
+        config_value: TaxConfig 配置值字典
+
+    Returns:
+        bool: 验证通过返回 True
+
+    Raises:
+        KahunaException: 验证失败时抛出
+    """
+    if not isinstance(config_value, dict):
+        raise KahunaException("配置值必须是字典类型")
+
+    if "target_category" not in config_value:
+        raise KahunaException("缺少 target_category 字段")
+    if config_value["target_category"] not in VALID_TAX_CATEGORIES:
+        raise KahunaException(
+            f"无效的目标分类: {config_value['target_category']}")
+
+    if "tax_rate" not in config_value:
+        raise KahunaException("缺少 tax_rate 字段")
+    if not isinstance(config_value["tax_rate"], (int, float)):
+        raise KahunaException("税率必须是数字")
+    if not (0.0 <= config_value["tax_rate"] <= 100.0):
+        raise KahunaException("税率必须在 0-100 之间")
+
+    return True
+
+
 async def create_config_flow_config(user_id: str, data):
     """创建配置流配置
 
@@ -116,6 +148,8 @@ async def create_config_flow_config(user_id: str, data):
         raise KahunaException("DefaultBlueprintConf 的 keyword_groups 不能为空")
     if data['config_type'] == 'LoadAssetConf' and not data['config_value'].get('tag', None):
         raise KahunaException("LoadAssetConf 的 container_tag 不能为空")
+    if data['config_type'] == 'TaxConfig':
+        validate_tax_config(data['config_value'])
 
     config_obj = EveIndustryPlanConfigFlowConfigDBUtils.get_obj()
     config_obj.id = None  # 确保ID为None，让数据库自动生成

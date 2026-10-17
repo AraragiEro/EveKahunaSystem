@@ -9,6 +9,7 @@ from src_v2.backend.api.permission_required import permission_required
 from src_v2.core.log import logger
 from src_v2.core.utils import KahunaException
 from src_v2.core.permission.permission_manager import permission_manager
+from src_v2.backend.api import response_helper
 
 api_invite_code_bp = Blueprint('api_invite_code', __name__, url_prefix='/api/invite-code')
 
@@ -140,7 +141,7 @@ async def generate_invite_code():
         used_count_max = data.get('usedCountMax', 1)
         
         if not isinstance(used_count_max, int) or used_count_max <= 0:
-            return jsonify({"status": 400, "message": "使用次数上限必须为正整数"}), 400
+            return response_helper.bad_request("使用次数上限必须为正整数")
         
         invite_code = await permission_manager.generate_invite_code(
             creator_user_name=creator_user_name,
@@ -157,11 +158,11 @@ async def generate_invite_code():
         })
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"生成邀请码失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "生成邀请码失败"}), 500
+        return response_helper.server_error("生成邀请码失败")
 
 
 @api_invite_code_bp.route("", methods=["GET"])
@@ -244,11 +245,11 @@ async def get_invite_code_list():
         return {"status": 200, "data": formatted_codes}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取邀请码列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取邀请码列表失败"}), 500
+        return response_helper.server_error("获取邀请码列表失败")
 
 
 @api_invite_code_bp.route("/<invite_code>/users", methods=["GET"])
@@ -313,11 +314,11 @@ async def get_invite_code_users(invite_code: str):
         return {"status": 200, "data": formatted_users}
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取邀请码用户列表失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取邀请码用户列表失败"}), 500
+        return response_helper.server_error("获取邀请码用户列表失败")
 
 
 @api_invite_code_bp.route("/validate", methods=["POST"])
@@ -338,7 +339,7 @@ async def validate_invite_code():
     Responses:
         200: 邀请码有效且可用
             - status: 状态码 (200)
-            - data: 邀请码信息，包含有效性、可用性、创建日期等 (object)
+            - data: 仅包含 valid / available（不返回邀请码元数据）(object)
         400: 邀请码无效或已使用完
             - status: 状态码 (400)
             - message: 错误信息 (string)
@@ -356,8 +357,7 @@ async def validate_invite_code():
             "status": 200,
             "data": {
                 "valid": true,
-                "available": true,
-                "createDate": "2024-01-01T00:00:00"
+                "available": true
             }
         }
     """
@@ -366,27 +366,30 @@ async def validate_invite_code():
         invite_code = data.get('inviteCode')
         
         if not invite_code:
-            return jsonify({"status": 400, "message": "邀请码不能为空"}), 400
+            return response_helper.bad_request("邀请码不能为空")
         
         result = await permission_manager.validate_invite_code(invite_code)
         
         if not result.get('valid'):
-            return jsonify({"status": 400, "message": "邀请码不存在"}), 400
+            return response_helper.bad_request("邀请码不存在")
         
         if not result.get('available'):
-            return jsonify({"status": 400, "message": "邀请码已使用完"}), 400
+            return response_helper.bad_request("邀请码已使用完")
         
-        # 格式化日期
-        if result.get('create_date'):
-            result['createDate'] = result['create_date'].isoformat() if hasattr(result['create_date'], 'isoformat') else str(result['create_date'])
-            del result['create_date']
-        
-        return {"status": 200, "data": result}
+        # 匿名接口只返回最小必要信息：不暴露 invite_code / 创建者 / 使用次数等元数据，
+        # 避免被用来枚举邀请码、统计使用情况或探测创建者
+        return {
+            "status": 200,
+            "data": {
+                "valid": bool(result.get('valid')),
+                "available": bool(result.get('available'))
+            }
+        }
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"校验邀请码失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "校验邀请码失败"}), 500
+        return response_helper.server_error("校验邀请码失败")
 

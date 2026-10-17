@@ -12,6 +12,7 @@ import MaterialView from './components/industryViewComponent/MaterialView.vue'
 import FlowView from './components/industryViewComponent/FlowView.vue'
 import LogisticsView from './components/industryViewComponent/LogisticsView.vue'
 import CompressedAsteroidView from './components/industryViewComponent/compressedAsteroidView.vue'
+import BlueprintRequirementsView from './components/industryViewComponent/BlueprintRequirementsView.vue'
 import { useAuthStore } from '@/stores/auth'
 import LZString from 'lz-string'
 import WorkflowShareDialog from '@/components/WorkflowShareDialog.vue'
@@ -269,15 +270,20 @@ const PlanCalculateWorkFlowTableView = ref<any[]>([])
 const PlanCalculateRunningJobTableView = ref<any[]>([])
 const PlanCalculateEIVCostTableView = ref<any[]>([])
 const PlanCalculateLogisticsTableView = ref<any[]>([])
+const PlanCalculateBpReqTableView = ref<any[]>([])
+
+// 计算周期ID（用于实施标记功能）
+const currentCalculationId = ref<number | null>(null)
 
 // 计算状态管理
 const isCalculating = ref<boolean>(false)
-const calculationStatus = ref<string>('idle') // idle, pending, running, completed, failed
+const calculationStatus = ref<string>('idle') // idle, pending, waiting, running, completed, failed
 const calculationProgress = ref<number>(0) // 总进度
 const currentStepName = ref<string>('') // 当前步骤名称
 const currentStepProgress = ref<number>(0) // 当前步骤进度
 const currentStepProgressIndeterminate = ref<boolean>(false) // 当前步骤进度是否不确定
 const calculationError = ref<string | null>(null)
+const queuePosition = ref<number>(0) // 排队位置
 
 // 定时器
 let statusPollingInterval: number | null = null
@@ -396,6 +402,7 @@ const getPlanCalculateResultTableViewStart = async () => {
         currentStepName.value = ''
         currentStepProgress.value = 0
         calculationError.value = null
+        queuePosition.value = 0
         
         // 启动状态轮询
         startStatusPolling()
@@ -479,6 +486,11 @@ const getPlanCalculateResultTableViewStatus = async (showCompletedMessage: boole
             stopStatusPolling()
             ElMessage.error(calculationError.value || '计算失败')
         }
+        // 如果状态为排队中，更新排队位置
+        else if (statusData.status === 'waiting') {
+            queuePosition.value = statusData.queue_position || 0
+            isCalculating.value = true
+        }
         // 如果状态为完成，自动获取结果
         else if (statusData.status === 'completed') {
             isCalculating.value = false
@@ -543,6 +555,7 @@ const getPlanCalculateResultTableViewResult = async (showMessage: boolean = true
         PlanCalculateRunningJobTableView.value = []
         PlanCalculateEIVCostTableView.value = []
         PlanCalculateLogisticsTableView.value = []
+        PlanCalculateBpReqTableView.value = []
         const resultData = data.data || {}
         // 使用 nextTick 确保 DOM 更新完成后再赋值，避免数据错位
         await nextTick()
@@ -552,6 +565,7 @@ const getPlanCalculateResultTableViewResult = async (showMessage: boolean = true
         PlanCalculateRunningJobTableView.value = resultData.running_job_tableview_data || []
         PlanCalculateEIVCostTableView.value = resultData.eiv_cost_dict || []
         PlanCalculateLogisticsTableView.value = resultData.logistic_dict || []
+        PlanCalculateBpReqTableView.value = resultData.missing_blueprint_workflow || []
         // 保存到本地
         saveToLocal(selectedPlan.value, resultData.flow_output, "flow")
         saveToLocal(selectedPlan.value, resultData.material_output, "material")
@@ -559,7 +573,10 @@ const getPlanCalculateResultTableViewResult = async (showMessage: boolean = true
         saveToLocal(selectedPlan.value, resultData.running_job_tableview_data, "running_job")
         saveToLocal(selectedPlan.value, resultData.eiv_cost_dict, "eiv_cost")
         saveToLocal(selectedPlan.value, resultData.logistic_dict, "logistic")
+        saveToLocal(selectedPlan.value, resultData.missing_blueprint_workflow || [], "bp_req")
         calculationStatus.value = 'completed'
+        // 设置当前计算周期ID（优先使用后端返回的ID，否则使用时间戳）
+        currentCalculationId.value = resultData.calculation_id ?? Date.now()
         // 只有在需要时才显示成功消息（轮询检测到完成时显示，页面重新加载时不显示）
         if (showMessage) {
             ElMessage.success("计算成功")
@@ -614,6 +631,7 @@ watch(selectedPlan, (newPlan) => {
         const localDataWorkFlow = loadFromLocal(newPlan, "work_flow")
         const localDataEIVCost = loadFromLocal(newPlan, "eiv_cost")
         const localDataRunningJob = loadFromLocal(newPlan, "running_job")
+        const localDataBpReq = loadFromLocal(newPlan, "bp_req")
         if (localDataFlow) {
             PlanCalculateResultTableView.value = localDataFlow
         } else {
@@ -639,6 +657,11 @@ watch(selectedPlan, (newPlan) => {
         } else {
             PlanCalculateRunningJobTableView.value = []
         }
+        if (localDataBpReq) {
+            PlanCalculateBpReqTableView.value = localDataBpReq
+        } else {
+            PlanCalculateBpReqTableView.value = []
+        }
         // 检查是否有正在进行的计算
         checkCalculationStatus()
     } else {
@@ -659,8 +682,8 @@ const checkCalculationStatus = async () => {
     try {
         // 页面重新加载时检查状态，不显示完成消息（避免重复提示）
         await getPlanCalculateResultTableViewStatus(false)
-        // 如果状态为pending或running，启动轮询
-        if (calculationStatus.value === 'pending' || calculationStatus.value === 'running') {
+        // 如果状态为pending、waiting或running，启动轮询
+        if (calculationStatus.value === 'pending' || calculationStatus.value === 'waiting' || calculationStatus.value === 'running') {
             isCalculating.value = true
             startStatusPolling()
         }
@@ -681,6 +704,7 @@ onMounted(async () => {
         const localDataEIVCost = loadFromLocal(selectedPlan.value, "eiv_cost")
         const localDataRunningJob = loadFromLocal(selectedPlan.value, "running_job")
         const localDataLogistics = loadFromLocal(selectedPlan.value, "logistic")
+        const localDataBpReq = loadFromLocal(selectedPlan.value, "bp_req")
         if (localData) {
             PlanCalculateResultTableView.value = localData
         }
@@ -698,6 +722,9 @@ onMounted(async () => {
         }
         if (localDataLogistics) {
             PlanCalculateLogisticsTableView.value = localDataLogistics
+        }
+        if (localDataBpReq) {
+            PlanCalculateBpReqTableView.value = localDataBpReq
         }
         // 检查是否有正在进行的计算
         checkCalculationStatus()
@@ -743,13 +770,13 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
                     <div class="control-item">
                         <el-button 
                             type="primary" 
-                            :icon="calculationStatus === 'running' ? Loading : Refresh"
-                            :loading="calculationStatus === 'running' || calculationStatus === 'pending'"
+                            :icon="(calculationStatus === 'running' || calculationStatus === 'pending' || calculationStatus === 'waiting') ? Loading : Refresh"
+                            :loading="calculationStatus === 'running' || calculationStatus === 'pending' || calculationStatus === 'waiting'"
                             @click="getPlanCalculateResultTableViewStart"
-                            :disabled="!selectedPlan || calculationStatus === 'running' || calculationStatus === 'pending'"
+                            :disabled="!selectedPlan || calculationStatus === 'running' || calculationStatus === 'pending' || calculationStatus === 'waiting'"
                             style="width: 100%"
                         >
-                            {{ calculationStatus === 'running' || calculationStatus === 'pending' ? '计算中...' : '立刻计算' }}
+                            {{ (calculationStatus === 'running' || calculationStatus === 'pending' || calculationStatus === 'waiting') ? '计算中...' : '立刻计算' }}
                         </el-button>
                     </div>
                 </el-col>
@@ -781,6 +808,7 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
                                 <span class="progress-text">
                                     <template v-if="calculationStatus === 'idle'">未开始</template>
                                     <template v-else-if="calculationStatus === 'pending'">等待中...</template>
+                                    <template v-else-if="calculationStatus === 'waiting'">排队中 (第 {{ queuePosition + 1 }} 位)</template>
                                     <template v-else-if="calculationStatus === 'running'">{{ calculationProgress }}%</template>
                                     <template v-else-if="calculationStatus === 'completed'">计算完成</template>
                                     <template v-else-if="calculationStatus === 'failed'">计算失败</template>
@@ -859,6 +887,7 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
                     ref="workFlowViewRef"
                     :work-flow-data="PlanCalculateWorkFlowTableView"
                     :selected-plan="selectedPlan"
+                    :calculation-id="currentCalculationId"
                     @share="handleShareWorkflow"
                     @manage-claims="handleManageClaims"
                 />
@@ -892,6 +921,13 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
             <el-tab-pane label="化矿求解视图" :disabled="!haveAlphaRole">
                 <CompressedAsteroidView 
                     :material-data="PlanCalculateMaterialTableView"
+                    :selected-plan="selectedPlan"
+                />
+            </el-tab-pane>
+
+            <el-tab-pane label="蓝图需求视图" :disabled="!haveAlphaRole">
+                <BlueprintRequirementsView
+                    :bp-req-data="PlanCalculateBpReqTableView"
                     :selected-plan="selectedPlan"
                 />
             </el-tab-pane>

@@ -15,7 +15,7 @@ async def get_material_type(type_id: int, sdm=None) -> str:
     category = await SdeUtils.get_category_by_id(type_id, pdm=sdm)
     # 根据 group 或 category 进行判断和分类
     if group == "Mineral":
-        return "矿石"
+        return "矿物"
     elif group == 'Ice Product':
         return "冰矿产物"
     elif group == "Fuel Block":

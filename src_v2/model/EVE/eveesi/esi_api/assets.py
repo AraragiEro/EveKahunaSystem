@@ -26,7 +26,7 @@ async def corporations_corporation_assets(access_token, corporation_id: int, pag
         ac_token = await access_token
     else:
         ac_token = access_token
-    data, pages, _ = await get_request_async(
+    data, pages, *_ = await get_request_async(
         f"https://esi.evetech.net/latest/corporations/{corporation_id}/assets/",
         headers={"Authorization": f"Bearer {ac_token}"}, params={"page": page}, log=log, max_retries=max_retries,
         no_retry_code=[OUT_PAGE_ERROR]
@@ -50,7 +50,8 @@ async def corporations_corporation_assets(access_token, corporation_id: int, pag
         tasks.append(asyncio.create_task(corporations_corporation_assets(ac_token, corporation_id, p, test, max_retries, log, status_key=status_key)))
     page_results = await asyncio.gather(*tasks)
     for data_page in page_results:
-        data.append(data_page)
+        if data_page is not None:
+            data.append(data_page)
     await tqdm_manager.complete_mission(f'corporations_corporation_assets_{corporation_id}')
 
     return data
@@ -66,7 +67,7 @@ async def characters_character_assets(access_token, character_id: int, page: int
         ac_token = await access_token
     else:
         ac_token = access_token
-    data, pages, _ = await get_request_async(
+    data, pages, *_ = await get_request_async(
         f"https://esi.evetech.net/latest/characters/{character_id}/assets/",
         headers={"Authorization": f"Bearer {ac_token}"}, params={"page": page}, log=log, max_retries=max_retries,
         no_retry_code=[OUT_PAGE_ERROR]

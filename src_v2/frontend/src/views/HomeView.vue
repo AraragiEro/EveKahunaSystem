@@ -6,6 +6,7 @@ import mainSidebar from '../components/sideBar/mainSidebar.vue'
 const segmentItems = ref<{ index: number; label: string; route: string }[]>([
   { index: 1, label: '总览', route: '/home/overview' },
   { index: 2, label: '历史', route: '/home/history' },
+  { index: 3, label: '订单统计', route: '/home/orderStats' },
 ])
 </script>
 

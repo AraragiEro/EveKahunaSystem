@@ -22,6 +22,17 @@ class KahunaException(Exception):
         super(KahunaException, self).__init__(message)
         self.message = message
 
+
+class EsiUnavailableError(KahunaException):
+    """EVE Online 服务器维护中，ESI 不可用"""
+    def __init__(self, message: str = "EVE Online 服务器维护中，部分功能暂时不可用"):
+        super().__init__(message)
+
+
+class PermissionDeniedException(KahunaException):
+    """越权访问：请求的资源不属于当前用户（API 层应返回 403）"""
+    pass
+
 def roundup(x, base):
     return base * math.ceil(x / base)
 

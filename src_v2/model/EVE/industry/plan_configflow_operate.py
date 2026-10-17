@@ -1,29 +1,28 @@
 import asyncio
-from copy import deepcopy
 import json
 import time
+from contextlib import asynccontextmanager
+from copy import deepcopy
 from math import ceil
-from src_v2.core.database.kahuna_database_utils_v2 import (
-    EveIndustryPlanConfigFlowDBUtils,
-    EveIndustryPlanConfigFlowConfigDBUtils
-)
-from src_v2.core.database.neo4j_utils import Neo4jAssetUtils as NAU
-from src_v2.model.EVE.industry.blueprint import BPManager as BPM
-from src_v2.model.EVE.sde import SdeUtils
-from src_v2.core.database.connect_manager import get_redis_manager as rdm
+
 from src_v2.core.database.connect_manager import get_neo4j_manager as ndm
 from src_v2.core.database.connect_manager import get_postgres_manager as pdm
-from src_v2.model.EVE.sde.sde_builder.database_manager import get_sde_database_manager as sdm
-
-from src_v2.core.utils import KahunaException
-
-from src_v2.model.EVE.character.character_manager import CharacterManager
-from src_v2.core.user.user_manager import UserManager
-from src_v2.core.database.kahuna_database_utils_v2 import EveIndustryPlanDBUtils
-from src_v2.model.EVE.eveesi import eveesi
-from src_v2.model.EVE.market.market_manager import MarketManager
-
+from src_v2.core.database.connect_manager import get_redis_manager as rdm
+from src_v2.core.database.kahuna_database_utils_v2 import (
+    EveIndustryPlanConfigFlowConfigDBUtils,
+    EveIndustryPlanConfigFlowDBUtils,
+    EveIndustryPlanDBUtils,
+)
+from src_v2.core.database.neo4j_utils import Neo4jAssetUtils as NAU
 from src_v2.core.log import logger
+from src_v2.core.user.user_manager import UserManager
+from src_v2.core.utils import KahunaException
+from src_v2.model.EVE.character.character_manager import CharacterManager
+from src_v2.model.EVE.eveesi import eveesi
+from src_v2.model.EVE.industry.blueprint import BPManager as BPM
+from src_v2.model.EVE.market.market_manager import MarketManager
+from src_v2.model.EVE.sde import SdeUtils
+from src_v2.model.EVE.sde.sde_builder.database_manager import get_sde_database_manager as sdm
 
 NULL_MANU_SEC_BONUS = 2.1
 NULL_REAC_SEC_BONUS = 1.1
@@ -85,6 +84,26 @@ class OpLockManager:
         self.refresh_market_price_lock = asyncio.Lock()
         self.structure_info_refresh_lock = asyncio.Lock()
 
+    @asynccontextmanager
+    async def acquire_with_timeout(self, lock: asyncio.Lock, timeout: float = 10.0, name: str = ""):
+        """获取锁，超时后跳过操作而非死等"""
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=timeout)
+            acquired = True
+        except asyncio.TimeoutError:
+            acquired = False
+            if name:
+                logger.warning(f"锁获取超时 ({timeout}s): {name}，跳过操作")
+
+        try:
+            if acquired:
+                yield
+            else:
+                yield  # 锁未获取，调用方应自行判断是否跳过
+        finally:
+            if acquired:
+                lock.release()
+
 
 op_lock_manager = OpLockManager()
 
@@ -92,6 +111,7 @@ op_lock_manager = OpLockManager()
 class ConfigFlowOperateCenter():
     def __init__(self, user_name: str, plan_name: str, plan_settings: dict, sub_process=False, dm=None):
         # 同步初始化基本属性
+        self._sub_process = sub_process  # 子进程标记：跳过不可靠的 Neo4j 调用
         self.total_progress_key = ""
         self.current_progress_key = ""
         self.user_name = user_name
@@ -104,6 +124,7 @@ class ConfigFlowOperateCenter():
         self.load_asset_confs = []
         self.config_flow = []
         self.max_job_split_count_confs = []
+        self.tax_confs = []
         self.cache = {}
         self._running_jobs_update = False
         self._running_jobs = []
@@ -198,6 +219,8 @@ class ConfigFlowOperateCenter():
                 self.load_asset_confs.append(config.config_value)
             elif config.config_type == 'MaxJobSplitCountConf':
                 self.max_job_split_count_confs.append(config.config_value)
+            elif config.config_type == 'TaxConfig':
+                self.tax_confs.append(config.config_value)
             else:
                 raise KahunaException(f"配置类型{config.config_type}不存在")
 
@@ -244,6 +267,7 @@ class ConfigFlowOperateCenter():
                     break
                 except Exception as e:
                     logger.warning(f"获取总监角色 {director_character_id} 的token失败: {str(e)}")
+                    director = None
                     continue
 
             running_job_list = []
@@ -258,8 +282,10 @@ class ConfigFlowOperateCenter():
             # 获取公司运行中的job
             if director:
                 corp_jobs = await eveesi.corporations_corporation_id_industry_jobs(director.ac_token, director.corporation_id)
-                for job in corp_jobs:
-                    running_job_list.extend(job)
+                if corp_jobs:
+                    for job in corp_jobs:
+                        if job:
+                            running_job_list.extend(job)
 
             self._running_jobs = running_job_list
             self._running_jobs_update = True
@@ -425,6 +451,7 @@ class ConfigFlowOperateCenter():
                     break
                 except Exception as e:
                     logger.warning(f"获取总监角色 {director_character_id} 的token失败: {str(e)}")
+                    director = None
                     continue
 
             bp_assets = {}
@@ -465,6 +492,8 @@ class ConfigFlowOperateCenter():
                 else:
                     assets = json.loads(assets_json)
                 for page in assets:
+                    if not page:
+                        continue
                     for bp in page:
                         if bp['location_id'] not in container_id_list:
                             continue
@@ -478,6 +507,23 @@ class ConfigFlowOperateCenter():
                                 "bpo": []
                             }
                         bp_assets[bp['type_id']][bp_type].append(bp)
+
+            # 排除正在工作中的蓝图：ESI 蓝图端点会返回已安装到工作中的蓝图，
+            # 这些蓝图不应作为可用资产参与分配计算
+            if not self._running_jobs_update:
+                await self.get_running_job_list()
+            running_bp_ids = {
+                job['blueprint_id']
+                for job in self._running_jobs
+                if job.get('blueprint_id') and job.get('status') in ('active', 'paused', 'ready')
+            }
+            if running_bp_ids:
+                for type_id in bp_assets:
+                    for bp_type in ('bpc', 'bpo'):
+                        bp_assets[type_id][bp_type] = [
+                            bp for bp in bp_assets[type_id][bp_type]
+                            if bp['item_id'] not in running_bp_ids
+                        ]
 
             self._bp_asset = bp_assets
             self._bp_prepare = True
@@ -589,6 +635,11 @@ class ConfigFlowOperateCenter():
         return bp_quantity, bp_jobs
 
     async def refresh_structure_info(self):
+        # 子进程中 Neo4j 异步驱动 session() 不可靠，跳过 Neo4j 查询
+        if self._sub_process:
+            self._structure_info = {}
+            self.type_assign_structure_info_cache_status = True
+            return
         async with op_lock_manager.structure_info_refresh_lock:
             if self.type_assign_structure_info_cache_status:
                 return
@@ -675,6 +726,9 @@ class ConfigFlowOperateCenter():
 
                 # 刷新后再次检查
                 if structure_name not in self._structure_info:
+                    # 子进程 Neo4j 不可靠，跳过结构效率加成，使用默认值
+                    if self._sub_process:
+                        return (1.0, 1.0)
                     logger.error(
                         f"结构 '{structure_name}' 未找到。self._structure_info: {self._structure_info}")
                     raise KahunaException(
@@ -941,41 +995,50 @@ class ConfigFlowOperateCenter():
         return system_cost
 
     async def refresh_market_price(self):
+        # 快速路径：无锁检查缓存是否已有效（绝大多数调用走此路径）
+        if await self.rdm.r.get(f"market_price_cache:status") == "ok":
+            self._market_price_status = True
+            return
+
+        # 双重检查锁定：确保只有一个协程执行实际刷新
         async with op_lock_manager.refresh_market_price_lock:
+            # 获取锁后再次检查（可能被前一个持有者刷新了）
             if await self.rdm.r.get(f"market_price_cache:status") == "ok":
+                self._market_price_status = True
                 return
 
-        results = await eveesi.markets_prices(log=True)
-        # results = [{'adjusted_price': 36.93619227019693, 'average_price': 33.77, 'type_id': 18}, ...]
-        for data in results:
-            if 'adjusted_price' not in data:
-                data['adjusted_price'] = 0.0
-            if 'average_price' not in data:
-                data['average_price'] = 0.0
+            results = await eveesi.markets_prices(log=True)
+            # results = [{'adjusted_price': 36.93619227019693, 'average_price': 33.77, 'type_id': 18}, ...]
+            for data in results:
+                if 'adjusted_price' not in data:
+                    data['adjusted_price'] = 0.0
+                if 'average_price' not in data:
+                    data['average_price'] = 0.0
 
-            await self.rdm.r.hset(f"market_price_cache:{data['type_id']}", mapping=data)
+                await self.rdm.r.hset(f"market_price_cache:{data['type_id']}", mapping=data)
 
-        # 获取到明天0点的时间间隔，单位分钟
-        now = time.time()
-        # 获取当前时间的struct_time
-        now_struct = time.localtime(now)
-        # 构造明天0点的struct_time
-        tomorrow_zero_struct = time.struct_time((
-            now_struct.tm_year,
-            now_struct.tm_mon,
-            now_struct.tm_mday + 1,
-            0, 0, 0,
-            now_struct.tm_wday,
-            now_struct.tm_yday,
-            now_struct.tm_isdst,
-        ))
-        # 转换为时间戳
-        tomorrow_zero_ts = time.mktime(tomorrow_zero_struct)
-        ex_seconds = int(tomorrow_zero_ts - now)
-        # 确保过期时间至少为1秒
-        if ex_seconds <= 0:
-            ex_seconds = 86400  # 如果计算错误，默认24小时（1天）
-        await self.rdm.r.set(f"market_price_cache:status", "ok", ex=ex_seconds)
+            # 获取到明天0点的时间间隔，单位分钟
+            now = time.time()
+            # 获取当前时间的struct_time
+            now_struct = time.localtime(now)
+            # 构造明天0点的struct_time
+            tomorrow_zero_struct = time.struct_time((
+                now_struct.tm_year,
+                now_struct.tm_mon,
+                now_struct.tm_mday + 1,
+                0, 0, 0,
+                now_struct.tm_wday,
+                now_struct.tm_yday,
+                now_struct.tm_isdst,
+            ))
+            # 转换为时间戳
+            tomorrow_zero_ts = time.mktime(tomorrow_zero_struct)
+            ex_seconds = int(tomorrow_zero_ts - now)
+            # 确保过期时间至少为1秒
+            if ex_seconds <= 0:
+                ex_seconds = 86400  # 如果计算错误，默认24小时（1天）
+            await self.rdm.r.set(f"market_price_cache:status", "ok", ex=ex_seconds)
+            self._market_price_status = True
 
     async def get_type_adjust_price(self, type_id: int):
         if not self._market_price_status and await self.rdm.r.get(f"market_price_cache:status") != "ok":
@@ -992,12 +1055,17 @@ class ConfigFlowOperateCenter():
         return type_adjust_price
 
     async def init_at_begin(self):
-        await self.refresh_market_price()
-        await self.refresh_structure_info()
+        # await self.refresh_market_price()
+        # await self.refresh_structure_info()
         # await MarketManager().update_jita_price(rdm=self.rdm)
         if self.plan_settings.get('considerate_bp_relation', False):
             await self.prepare_bp_asset()
+            logger.info(f"计划 {self.plan_name} prepare_bp_asset complete")
+
         if self.plan_settings.get('considerate_running_job', False):
             await self.prepare_running_asset()
+            logger.info(f"计划 {self.plan_name} prepare_running_asset complete")
+
         if self.plan_settings.get('considerate_asset', False):
             await self.prepare_asset()
+            logger.info(f"计划 {self.plan_name} prepare_asset complete")

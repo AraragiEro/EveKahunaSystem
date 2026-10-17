@@ -1067,11 +1067,16 @@ const switchRunningJobsView = (mode: 'detail' | 'summary' | 'character') => {
   runningJobsViewMode.value = mode
 }
 
-// 监听窗口大小变化
+// 监听窗口大小变化 (RAF throttle)
+let resizeRAF: number | null = null
 const handleResize = () => {
-  if (pieChartInstance) {
-    pieChartInstance.resize()
-  }
+  if (resizeRAF !== null) return
+  resizeRAF = requestAnimationFrame(() => {
+    if (pieChartInstance) {
+      pieChartInstance.resize()
+    }
+    resizeRAF = null
+  })
 }
 
 onMounted(async () => {
@@ -1097,6 +1102,7 @@ onUnmounted(() => {
     pieChartInstance.dispose()
     pieChartInstance = null
   }
+  if (resizeRAF !== null) cancelAnimationFrame(resizeRAF)
   window.removeEventListener('resize', handleResize)
 })
 
@@ -1535,7 +1541,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
               <el-table-column label="物品图标" width="80" align="center">
                 <template #default="{ row }">
                   <img :src="`https://imageserver.eveonline.com/types/${row.product_type_id}/icon`" alt="物品图标"
-                    width="40" height="40" style="border-radius: 4px;"
+                    width="40" height="40" style="border-radius: 4px;" loading="lazy"
                     @error="(e: any) => { e.target.style.display = 'none' }" />
                 </template>
               </el-table-column>
@@ -1593,7 +1599,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
               <el-table-column label="角色头像" width="100" align="center">
                 <template #default="{ row }">
                   <img :src="`https://imageserver.eveonline.com/Character/${row.character_id}_64.jpg`" alt="角色头像"
-                    width="64" height="64" style="border-radius: 8px; border: 2px solid #e4e7ed;"
+                    width="64" height="64" style="border-radius: 8px; border: 2px solid #e4e7ed;" loading="lazy"
                     @error="(e: any) => { e.target.style.display = 'none' }" />
                 </template>
               </el-table-column>
@@ -1680,7 +1686,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
                   <div class="summary-card-content">
                     <div class="summary-icon-container">
                       <img :src="`https://imageserver.eveonline.com/types/${item.product_type_id}/icon`" alt="物品图标"
-                        width="64" height="64" style="border-radius: 8px;"
+                        width="64" height="64" style="border-radius: 8px;" loading="lazy"
                         @error="(e: any) => { e.target.style.display = 'none' }" />
                     </div>
                     <div class="summary-info">

@@ -367,6 +367,97 @@ Password = "secret"
 
 **注意**：SDE数据库使用前需要初始化，请看下面的sde数据库更新工具。
 
+## 数据库迁移
+
+项目使用自动化数据库迁移系统，支持完整的生命周期管理：
+
+- **首次安装** - 自动创建所有表
+- **模型变更** - 自动检测并迁移
+- **版本历史** - 记录所有变更
+- **一键回滚** - 出现问题时恢复
+
+### 自动迁移
+
+应用启动时会自动检测并执行迁移：
+
+```python
+from src_v2.core import init_database
+
+# 正常启动，自动检测并执行迁移
+await init_database()
+```
+
+### CLI 工具
+
+```bash
+# 预览即将执行的变更（dry-run）
+python -m src_v2.core.database.migration_cli --dry-run
+
+# 执行迁移
+python -m src_v2.core.database.migration_cli
+
+# 查看迁移历史
+python -m src_v2.core.database.migration_cli --history
+
+# 回滚上次迁移
+python -m src_v2.core.database.migration_cli --rollback
+
+# 开发模式（自动确认所有变更）
+python -m src_v2.core.database.migration_cli --dev
+```
+
+### 环境变量
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `MIGRATION_DRY_RUN` | 仅预览不执行 | `false` |
+| `MIGRATION_AUTO_CONFIRM` | 自动确认中等风险变更 | `false` |
+| `POSTGRES_HOST` | PostgreSQL 主机 | `localhost` |
+| `POSTGRES_PORT` | PostgreSQL 端口 | `5432` |
+| `POSTGRES_DB` | 数据库名 | `kahunabot` |
+| `POSTGRES_USER` | 用户名 | `kahunabot` |
+| `POSTGRES_PASSWORD` | 密码 | `kahunabot` |
+
+### 迁移行为
+
+#### 🟢 自动执行（安全变更）
+- 新增表
+- 新增列
+
+#### 🟡 需确认（中等风险）
+- 删除列（会备份数据）
+- 修改列类型
+- 修改 NULL 约束
+
+#### 🔴 需人工处理（危险操作）
+- 删除表
+- 修改主键
+- 大规模数据迁移
+
+### 生产环境迁移建议
+
+1. **备份数据**
+   ```bash
+   pg_dump -h localhost -U kahunabot kahunabot > backup.sql
+   ```
+
+2. **Dry-run 预览**
+   ```bash
+   MIGRATION_DRY_RUN=true python -m src_v2.core.database.migration_cli
+   ```
+
+3. **执行迁移**
+   ```bash
+   python -m src_v2.core.database.migration_cli
+   ```
+
+4. **验证结果**
+   ```bash
+   python -m src_v2.core.database.migration_cli --history
+   ```
+
+更多详情请参考 [docs/database_migration.md](docs/database_migration.md)。
+
 ### 主要配置项
 
 #### [APP] - 应用基础配置
@@ -610,7 +701,7 @@ MCP (Model Context Protocol) 是一种开放协议，允许 AI 助手安全地�
 | ----------------------------------------- | -------------------------- |
 | `running_jobs_overview`                   | 获取正在进行的工业作业概览 |
 | `plan_missing_blueprint_workflow_summary` | 获取缺失蓝图的工业规划摘要 |
-| `get_company_medica_vouchers`             | 获取公司医疗券信息         |
+| `get_company_medica_vouchers`             | 获取公司医疗券信息（传入 qq，只返回本人记录） |
 
 ### 启动 MCP 服务
 
@@ -744,5 +835,147 @@ PostgreSQL / Redis / Neo4j
    ```
 
 3. **检查数据库连接**
-   - 确保 PostgreSQL、Redis、Neo4j 服务正常运行
-   - 验证配置文件 `config.toml` 中的连接信息
+    - 确保 PostgreSQL、Redis、Neo4j 服务正常运行
+    - 验证配置文件 `config.toml` 中的连接信息
+
+---
+
+## 测试
+
+项目已建立系统化测试工程，覆盖后端单元测试、DAO 集成测试、API 路由测试、业务逻辑集成测试、前端单元测试和 E2E 冒烟测试。
+
+### 测试统计
+
+| 层 | 框架 | 文件数 | 测试数 | 耗时 |
+|---|------|--------|--------|------|
+| 后端单元测试 | pytest | 4 | 57 | ~1s |
+| DAO 集成测试 | pytest + SQLite | 5 | 73 | ~2s |
+| API 路由测试 | pytest + Quart test client | 4 | 103 | ~6s |
+| 业务集成测试 | pytest | 1 | 24 | ~0.1s |
+| 前端单元测试 | Vitest | 4 | 75 | ~1.5s |
+| **合计** | | **18** | **332** | **~11s** |
+
+### 后端测试
+
+#### 安装测试依赖
+
+```bash
+# 使用 uv（推荐）
+uv sync --group test
+```
+
+#### 运行测试
+
+```bash
+# 运行所有测试
+uv run pytest tests/ -v
+
+# 运行特定层级
+uv run pytest tests/unit/ -v       # 单元测试
+uv run pytest tests/dao/ -v        # DAO 集成测试（SQLite 内存数据库）
+uv run pytest tests/api/ -v        # API 路由测试
+uv run pytest tests/integration/ -v # 业务逻辑集成测试
+
+# 按标记筛选
+uv run pytest -m unit -v
+uv run pytest -m dao -v
+uv run pytest -m api -v
+uv run pytest -m integration -v
+
+# 生成覆盖率报告
+uv run pytest tests/ --cov=src_v2 --cov-report=html
+```
+
+#### 集成测试（需要真实数据库）
+
+部分测试需要真实的 PostgreSQL 和 Redis 服务：
+
+```bash
+# 设置环境变量启用集成测试
+export POSTGRES_TEST_ENABLED=1
+export REDIS_TEST_ENABLED=1
+
+# 运行集成测试
+uv run pytest tests/ -m integration -v
+```
+
+在 CI 中自动启动服务容器（见 `.github/workflows/test.yml`）。
+
+### 前端测试
+
+#### 安装
+
+```bash
+cd src_v2/frontend
+npm install
+```
+
+#### 运行
+
+```bash
+# 运行所有测试
+npm test
+
+# 监听模式
+npm run test:watch
+
+# 生成覆盖率
+npm run test:coverage
+
+# E2E 测试（需要运行中的服务器）
+npm run test:e2e
+```
+
+### 测试架构
+
+```
+tests/
+├── conftest.py                 # 全局 fixture（Quart 客户端、DB mock、JWT headers）
+├── unit/                       # 单元测试 — 纯逻辑，无外部依赖
+│   ├── test_auth.py           # JWT 验证
+│   ├── test_utils/            # 工具函数（roundup、chunks、key builder）
+│   └── test_industry_utils/   # 加密/解密
+├── dao/                        # DAO 集成测试 — SQLite 内存数据库
+│   ├── conftest.py            # SQLite fixture
+│   ├── test_user_dao.py       # 用户 CRUD
+│   ├── test_permission_dao.py # 权限 RBAC
+│   ├── test_industry_plan_dao.py # 工业计划
+│   └── test_asset_dao.py     # 资产视图
+├── api/                        # API 路由测试 — Quart 测试客户端
+│   ├── test_auth_routes.py    # 登录/注册/鉴权
+│   ├── test_permission_routes.py # RBAC 权限链
+│   ├── test_public_routes.py  # 公开端点
+│   └── test_mcp_routes.py    # MCP 代理
+└── integration/                # 业务集成测试
+    └── test_esi_req_manager.py # ESI 令牌桶算法
+
+src_v2/frontend/src/
+├── composables/__tests__/     # 前端 Composable 测试
+│   ├── useMarketStorage.spec.ts
+│   └── useEdition.spec.ts
+├── stores/__tests__/          # Pinia Store 测试
+│   └── auth.spec.ts
+├── __tests__/                 # 工具函数测试
+│   └── http.spec.ts
+└── e2e/                       # Playwright E2E
+    └── smoke.spec.ts
+```
+
+### CI/CD
+
+推送代码到 `main` 或 `develop` 分支时，GitHub Actions 自动执行：
+
+1. **后端测试** — ruff lint → pytest（unit + dao + api + integration）→ 覆盖率上传
+2. **前端测试** — TypeScript 类型检查 → Vitest 测试
+3. **集成测试**（仅 main 分支）— 启动 PostgreSQL + Redis 服务容器 → 运行 integration 标记测试
+
+工作流文件：`.github/workflows/test.yml`
+
+### 测试规范
+
+- 新增功能需同步编写对应层级的测试
+- 后端纯逻辑覆盖率目标 > 85%
+- API 端点覆盖率目标 > 80%
+- 禁止使用 `as any`、`@ts-ignore` 绕过类型错误
+- 禁止在测试中调用真实外部 API（ESI、Google Sheets）
+- 修改数据库模型后需运行迁移并更新对应 DAO 测试

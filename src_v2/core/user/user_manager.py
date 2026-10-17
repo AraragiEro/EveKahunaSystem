@@ -32,7 +32,7 @@ from src_v2.core.log import logger
 from src_v2.model.EVE.character.character_manager import CharacterManager
 from src_v2.model.EVE.character.character import Character
 # import Exception
-from src_v2.core.utils import KahunaException, SingletonMeta, get_beijing_utctime
+from src_v2.core.utils import KahunaException, PermissionDeniedException, SingletonMeta, get_beijing_utctime
 from src_v2.core.permission.permission_manager import permission_manager
 
 ESI_CACHE = TTLCache(maxsize=100, ttl=300)
@@ -91,9 +91,12 @@ class UserManager(metaclass=SingletonMeta):
         return user_data.main_character_id
 
     async def set_main_character(self, user_name: str, main_character_name: str):
-        character_obj = await EveAuthedCharacterDBUtils.select_character_by_character_name(main_character_name)
+        # 归属校验：只能把“自己绑定的角色”设为主角色，防止越权占用他人角色及其 ESI token
+        character_obj = await EveAuthedCharacterDBUtils.select_character_by_character_name_and_owner(
+            main_character_name, user_name
+        )
         if not character_obj:
-            raise KahunaException("角色不存在")
+            raise PermissionDeniedException("角色不存在或不属于当前用户")
         main_character_id = character_obj.character_id
         user_data = await UserDataDBUtils.select_user_data_by_user_name(user_name)
         if not user_data:
@@ -131,11 +134,10 @@ class UserManager(metaclass=SingletonMeta):
             alias_character_list.append(alias_character)
         return alias_character_list
 
-    def user_exists(self, user_name: AnyStr) -> bool:
-        user_obj = UserDBUtils.select_user_by_user_name(user_name)
-        if not user_obj:
-            return False
-        return True
+    async def user_exists(self, user_name: AnyStr) -> bool:
+        """检查用户是否存在"""
+        user_obj = await UserDBUtils.select_user_by_user_name(user_name)
+        return user_obj is not None
 
     # VIP系统挂起
     # @classmethod

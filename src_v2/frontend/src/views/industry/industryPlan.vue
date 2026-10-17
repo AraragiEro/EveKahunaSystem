@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { ArrowRight, QuestionFilled, Close, Setting } from '@element-plus/icons-vue'
 import { http } from '@/http'
 import { VueDraggable } from 'vue-draggable-plus'
@@ -31,9 +31,9 @@ interface PlanProductTableData {
   "name": string
   "products": PlanProductTableData[]
   "active"?: boolean
+  "note"?: string
 }
 
-// 扁平化数据结构
 interface PlanRow {
   row_id: number
   type: 'group' | 'product'
@@ -45,6 +45,7 @@ interface PlanRow {
   type_name?: string
   type_name_zh?: string
   active?: boolean                 // product 是否启动
+  note?: string                    // 备注
   // group 属性
   name?: string                    // group 名称
 }
@@ -57,6 +58,7 @@ interface PlanSettings {
   full_split: boolean,
   considerate_bp_relation: boolean,
   full_use_bp_cp: boolean,
+  calculate_lp_blueprint_cost: boolean,
   work_type: string
 }
 
@@ -215,11 +217,13 @@ const getPlanTableData = async () => {
     }
 
     if (plan) {
-      // #region agent log
-      const apiGroups = (plan.products || []).filter((p: any) => p.type === 'group').map((g: any) => ({ name: g.name, productCount: (g.products || []).length, type_ids: (g.products || []).map((p: any) => p.type_id) }))
       const flat = flattenProducts(plan.products || [])
-      const flatProductCount = flat.filter(r => r.type === 'product').length
-      fetch('http://127.0.0.1:7242/ingest/7048bd83-86df-46f6-886b-1c2c54b42b3f', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'industryPlan.vue:getPlanTableData:afterFetch', message: 'API plan.products and flat', data: { planName: plan.plan_name, apiGroups, flatLen: flat.length, flatProductCount }, timestamp: Date.now(), hypothesisId: 'api' }) }).catch(() => {})
+      // #region agent log (仅开发环境启用)
+      if (import.meta.env.DEV) {
+        const apiGroups = (plan.products || []).filter((p: any) => p.type === 'group').map((g: any) => ({ name: g.name, productCount: (g.products || []).length, type_ids: (g.products || []).map((p: any) => p.type_id) }))
+        const flatProductCount = flat.filter(r => r.type === 'product').length
+        fetch('http://127.0.0.1:7242/ingest/7048bd83-86df-46f6-886b-1c2c54b42b3f', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'industryPlan.vue:getPlanTableData:afterFetch', message: 'API plan.products and flat', data: { planName: plan.plan_name, apiGroups, flatLen: flat.length, flatProductCount }, timestamp: Date.now(), hypothesisId: 'api' }) }).catch(() => {})
+      }
       // #endregion
       flatPlanProducts.value = flat
       currentPlanProducts.value = plan.products || []
@@ -231,6 +235,7 @@ const getPlanTableData = async () => {
         full_split: false,
         considerate_bp_relation: false,
         full_use_bp_cp: false,
+        calculate_lp_blueprint_cost: false,
         work_type: 'whole'
       }
       current_plan_settings.value.name = plan.plan_name
@@ -243,6 +248,13 @@ const getPlanTableData = async () => {
 
 // 新建计划弹窗相关
 const dialogVisible = ref(false)
+const planFormRef = ref<FormInstance>()
+const planFormRules: FormRules = {
+  name: [
+    { required: true, message: '计划名称不能为空', trigger: 'blur' },
+    { min: 1, message: '计划名称不能为空', trigger: 'blur' }
+  ]
+}
 const planForm = ref({
   name: '',
   considerate_asset: false,
@@ -250,6 +262,8 @@ const planForm = ref({
   split_to_jobs: false,
   full_split: false,
   considerate_bp_relation: false,
+  full_use_bp_cp: false,
+  calculate_lp_blueprint_cost: false,
   work_type: 'whole' // 'whole' 按整体考虑, 'in_order' 按顺序安排工作
 })
 
@@ -262,13 +276,19 @@ const openCreatePlanDialog = () => {
     split_to_jobs: false,
     full_split: false,
     considerate_bp_relation: false,
+    full_use_bp_cp: false,
+    calculate_lp_blueprint_cost: false,
     work_type: 'whole'
   }
   dialogVisible.value = true
+  nextTick(() => {
+    planFormRef.value?.resetFields()
+  })
 }
 
 const handleConfirm = async () => {
-  // TODO: 处理确认逻辑，提交表单数据
+  const valid = await planFormRef.value?.validate().catch(() => false)
+  if (!valid) return
   const res = await http.post('/EVE/industry/createPlan', {
     name: planForm.value.name,
     considerate_asset: planForm.value.considerate_asset,
@@ -507,6 +527,12 @@ const handleItemInfo = async () => {
 
 // 打开添加到自选市场清单对话框
 const handleAddToMarket = async () => {
+  // 防御性守卫：社区版没有 /enterprise/market 接口，直接拦截，不发请求
+  if (!isEnterprise) {
+    ElMessage.warning('该功能为企业版专属功能')
+    return
+  }
+
   if (!contextMenuRow.value?.type_id) {
     ElMessage.warning('无法获取物品信息')
     return
@@ -539,6 +565,12 @@ const handleAddToMarket = async () => {
 
 // 确认添加到自选市场清单
 const handleAddToMarketConfirm = async () => {
+  // 防御性守卫：社区版没有 /enterprise/market/update 接口，直接拦截，不发请求
+  if (!isEnterprise) {
+    ElMessage.warning('该功能为企业版专属功能')
+    return
+  }
+
   if (!selectedMarketId.value) {
     ElMessage.warning('请选择自选市场清单')
     return
@@ -803,7 +835,8 @@ function flattenProducts(nested: PlanProductTableData[]): PlanRow[] {
             type_name_zh: product.type_name_zh,
             group_id: item.name,
             order: order++,
-            active: product.active !== undefined ? product.active : true
+            active: product.active !== undefined ? product.active : true,
+            note: product.note
           })
         }
       }
@@ -817,7 +850,8 @@ function flattenProducts(nested: PlanProductTableData[]): PlanRow[] {
         type_name_zh: item.type_name_zh,
         group_id: null,
         order: order++,
-        active: item.active !== undefined ? item.active : true
+        active: item.active !== undefined ? item.active : true,
+        note: item.note
       })
     }
   }
@@ -841,7 +875,8 @@ function nestProducts(flat: PlanRow[]): PlanProductTableData[] {
     type_name_zh: row.type_name_zh || '',
     name: '',
     products: [],
-    active: row.active !== undefined ? row.active : true
+    active: row.active !== undefined ? row.active : true,
+    note: row.note
   })
 
   // 先收集有效分组名称
@@ -860,16 +895,17 @@ function nestProducts(flat: PlanRow[]): PlanProductTableData[] {
   }
 
   // 按 group_id 收集组内产品（与组行先后顺序无关）
+  // 防御：仅处理 type==='product' 的行，防止分组被误拖入产品列表后损坏数据结构
   for (let i = 0; i < flat.length; i++) {
     const row = flat[i]
     if (row.type !== 'product') continue
     if (row.row_id > 0 && seenProductRowIds.get(row.row_id) !== i) continue
+    // 二次防御：确保 group_id 有效且分组名确实存在
+    if (row.group_id == null || !validGroupNames.has(row.group_id)) continue
 
-    if (row.group_id != null && validGroupNames.has(row.group_id)) {
-      const list = groupedProducts.get(row.group_id) || []
-      list.push(toProductItem(row))
-      groupedProducts.set(row.group_id, list)
-    }
+    const list = groupedProducts.get(row.group_id) || []
+    list.push(toProductItem(row))
+    groupedProducts.set(row.group_id, list)
   }
 
   // 组与独立产品仍按扁平顺序输出，保证显示顺序稳定
@@ -951,6 +987,7 @@ const handlePlanChange = (value: string) => {
       full_split: false,
       considerate_bp_relation: false,
       full_use_bp_cp: false,
+      calculate_lp_blueprint_cost: false,
       work_type: 'whole'
     }
     current_plan_settings.value.name = plan.plan_name
@@ -971,9 +1008,11 @@ const saveCurrentPlan = async () => {
 
   // 将扁平结构转换为嵌套结构用于保存
   const nestedProducts = nestProducts(flatPlanProducts.value)
-  // #region agent log
-  const groupSummary = nestedProducts.filter((p: any) => p.type === 'group').map((g: any) => ({ name: g.name, productCount: (g.products || []).length, type_ids: (g.products || []).map((p: any) => p.type_id) }))
-  fetch('http://127.0.0.1:7242/ingest/7048bd83-86df-46f6-886b-1c2c54b42b3f', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'industryPlan.vue:saveCurrentPlan:beforeSend', message: 'nestedProducts to send', data: { groupSummary, flatLen: flatPlanProducts.value.length }, timestamp: Date.now(), hypothesisId: 'send' }) }).catch(() => {})
+  // #region agent log (仅开发环境启用)
+  if (import.meta.env.DEV) {
+    const groupSummary = nestedProducts.filter((p: any) => p.type === 'group').map((g: any) => ({ name: g.name, productCount: (g.products || []).length, type_ids: (g.products || []).map((p: any) => p.type_id) }))
+    fetch('http://127.0.0.1:7242/ingest/7048bd83-86df-46f6-886b-1c2c54b42b3f', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'industryPlan.vue:saveCurrentPlan:beforeSend', message: 'nestedProducts to send', data: { groupSummary, flatLen: flatPlanProducts.value.length }, timestamp: Date.now(), hypothesisId: 'send' }) }).catch(() => {})
+  }
   // #endregion
 
   const requestData: any = {
@@ -1004,6 +1043,7 @@ const current_plan_settings = ref<PlanSettings>({
   full_split: false,
   considerate_bp_relation: false,
   full_use_bp_cp: false,
+  calculate_lp_blueprint_cost: false,
   work_type: 'whole'
 })
 const modifyPlanDialogVisible = ref(false)
@@ -1169,6 +1209,12 @@ const fetchSearchSuggestions = async (queryString: string, cb: (suggestions: Typ
 
 // 执行搜索
 const handleBatchSearch = async () => {
+  // 防御性守卫：社区版没有 /enterprise/market/search 接口，直接拦截，不发请求
+  if (!isEnterprise) {
+    ElMessage.warning('批量搜索为企业版专属功能')
+    return
+  }
+
   if (!searchKeyword.value.trim()) {
     ElMessage.warning('请输入搜索关键字')
     return
@@ -1346,7 +1392,7 @@ const handleBatchAddConfirm = async () => {
 // 删除计划
 const deletePlanDialogVisible = ref(false)
 const openDeletePlanDialog = () => {
-  if (!selectedPlan.value) {
+  if (selectedPlan.value === null || selectedPlan.value === undefined) {
     ElMessage.warning("请先选择要删除的计划")
     return
   }
@@ -1404,6 +1450,7 @@ const handleConfirmDeletePlan = async () => {
       full_split: false,
       considerate_bp_relation: false,
       full_use_bp_cp: false,
+      calculate_lp_blueprint_cost: false,
       work_type: 'whole'
     }
 
@@ -1709,8 +1756,8 @@ onUnmounted(() => {
                   批量添加
                 </el-button>
                 <el-radio-group v-model="cardStyleMode" size="small" style="margin-left: 8px;">
-                  <el-radio-button label="normal">普通</el-radio-button>
-                  <el-radio-button label="compact">紧凑</el-radio-button>
+                   <el-radio-button value="normal">普通</el-radio-button>
+                   <el-radio-button value="compact">紧凑</el-radio-button>
                 </el-radio-group>
               </div>
             </div>
@@ -1855,8 +1902,8 @@ onUnmounted(() => {
 
   <!-- 新建计划弹窗 -->
   <el-dialog v-model="dialogVisible" title="新建计划" width="500px" :close-on-click-modal="false">
-    <el-form :model="planForm" label-width="250px" label-position="left">
-      <el-form-item label="计划名称">
+    <el-form ref="planFormRef" :model="planForm" :rules="planFormRules" label-width="250px" label-position="left">
+      <el-form-item label="计划名称" prop="name">
         <el-input v-model="planForm.name" placeholder="请输入计划名称" />
       </el-form-item>
 
@@ -1904,18 +1951,22 @@ onUnmounted(() => {
         <el-switch v-model="current_plan_settings.full_use_bp_cp" :disabled="!haveAlphaRole" />
       </el-form-item>
 
+      <el-form-item label="计算LP蓝图成本">
+        <el-switch v-model="planForm.calculate_lp_blueprint_cost" />
+      </el-form-item>
+
       <el-form-item label="工作安排方式">
         <el-radio-group v-model="planForm.work_type">
-          <el-radio label="whole">按整体考虑</el-radio>
-          <el-radio label="in_order">按顺序安排工作</el-radio>
-        </el-radio-group>
-      </el-form-item>
-    </el-form>
-
-    <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="handleCancel">取消</el-button>
-        <el-button type="primary" @click="handleConfirm">确定</el-button>
+           <el-radio value="whole">按整体考虑</el-radio>
+           <el-radio value="in_order">按顺序安排工作</el-radio>
+         </el-radio-group>
+       </el-form-item>
+     </el-form>
+ 
+     <template #footer>
+       <span class="dialog-footer">
+         <el-button @click="handleCancel">取消</el-button>
+         <el-button type="primary" @click="handleConfirm">确定</el-button>
       </span>
     </template>
   </el-dialog>
@@ -1971,6 +2022,10 @@ onUnmounted(() => {
         <el-switch v-model="current_plan_settings.full_use_bp_cp" :disabled="!haveAlphaRole" />
       </el-form-item>
 
+      <el-form-item label="计算LP蓝图成本">
+        <el-switch v-model="current_plan_settings.calculate_lp_blueprint_cost" />
+      </el-form-item>
+
       <el-form-item label="工作安排方式">
         <template #label>
           <span>
@@ -1984,16 +2039,16 @@ onUnmounted(() => {
           </span>
         </template>
         <el-radio-group v-model="current_plan_settings.work_type">
-          <el-radio label="whole">按整体考虑</el-radio>
-          <el-radio label="in_order">按顺序安排工作</el-radio>
-        </el-radio-group>
-      </el-form-item>
-    </el-form>
-
-    <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="cancelModifyPlan">取消</el-button>
-        <el-button type="primary" @click="handleConfirmModifyPlan">确定</el-button>
+           <el-radio value="whole">按整体考虑</el-radio>
+           <el-radio value="in_order">按顺序安排工作</el-radio>
+         </el-radio-group>
+       </el-form-item>
+     </el-form>
+ 
+     <template #footer>
+       <span class="dialog-footer">
+         <el-button @click="cancelModifyPlan">取消</el-button>
+         <el-button type="primary" @click="handleConfirmModifyPlan">确定</el-button>
       </span>
     </template>
   </el-dialog>

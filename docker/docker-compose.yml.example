@@ -1,0 +1,86 @@
+# ============================================
+# KahunaBot Docker Compose 配置
+# ============================================
+# 仅包含后端服务和 MCP 中间件
+#
+# 使用方法:
+#   1. 从 config.toml.docker 复制并创建 config.toml
+#   2. 修改 config.toml 中的 EVE API 配置
+#   3. 在 Docker 目录运行: docker compose up -d
+#   4. 访问 http://localhost:9527
+#
+# 构建优化说明:
+#   - Dockerfile 使用多阶段构建，依赖层可缓存
+#   - 代码变更时无需重新安装 Python 依赖
+#   - 首次构建后，后续构建速度提升 80%+
+#
+# 高级缓存（可选）:
+#   如需启用 BuildKit 缓存导出，使用 docker-container driver:
+#     docker buildx create --use --name kahuna-builder
+#     docker compose build
+#
+# 注意:
+#   - 需要外部 PostgreSQL、Redis、Neo4j 数据库
+#   - 首次启动前请确保 config.toml 已正确配置
+
+services:
+  # ---------------------------------------------------------
+  # KahunaBot 主应用（包含后端 + MCP）
+  # ---------------------------------------------------------
+  kahunabot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      # 国内用户可取消下方注释以使用 npm 国内镜像源加速前端构建
+      # args:
+      #   NPM_REGISTRY: https://registry.npmmirror.com
+    container_name: kahunasystem
+    ports:
+      - "9527:9527"    # Web 服务
+      - "9274:9274"    # MCP 中间件
+    environment:
+      - PYTHONUNBUFFERED=1
+      # 应用签名密钥（安全审计 #12）：留空则回退到 config.toml 的 [APP] SECRET_KEY
+      # 生成：python -c "import secrets;print(secrets.token_urlsafe(32))"
+      - KAHUNA_SECRET_KEY=${KAHUNA_SECRET_KEY:-}
+      # MCP 内部 API 认证密钥（需与 config.toml [MCP] API_KEY 一致）
+      - QUART_API_KEY=${QUART_API_KEY:-}
+    volumes:
+      # 配置文件（只读）
+      - ../config.toml:/app/config.toml:ro
+      # 数据持久化
+      - ./app_data:/app/data
+      - ./app_logs:/app/logs
+      - ./app_downloads:/app/download_resource
+      - ./app_tmp:/app/tmp
+      # 可选：Google 凭证目录
+      - ../credentials:/app/credentials:ro
+    restart: unless-stopped
+    networks:
+      - kahuna-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9527/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+# ---------------------------------------------------------
+# 数据卷定义
+# ---------------------------------------------------------
+volumes:
+  app_data:
+    driver: local
+  app_logs:
+    driver: local
+  app_downloads:
+    driver: local
+  app_tmp:
+    driver: local
+
+# ---------------------------------------------------------
+# 网络定义
+# ---------------------------------------------------------
+networks:
+  kahuna-network:
+    driver: bridge

@@ -976,9 +976,28 @@ class PostgreDatabaseManager():
             if not base_classes:
                 from .model import all_model
                 base_classes = all_model
-            async with self.engine.begin() as conn:
-                for base_class in base_classes:
-                    await self.create_default_table(conn, base_class)
+            
+            # 使用新的自动迁移系统
+            try:
+                from .auto_migration import AutoMigrationManager
+                migration_manager = AutoMigrationManager(self)
+                
+                # 获取环境变量配置
+                dry_run = os.getenv('MIGRATION_DRY_RUN', 'false').lower() == 'true'
+                auto_confirm = os.getenv('MIGRATION_AUTO_CONFIRM', 'false').lower() == 'true'
+                
+                await migration_manager.lifecycle_manage(
+                    base_classes=base_classes,
+                    dry_run=dry_run,
+                    auto_confirm=auto_confirm,
+                    skip_dangerous=True
+                )
+            except Exception as e:
+                logger.error(f"自动迁移失败，回退到传统方式: {e}")
+                # 回退到传统方式
+                async with self.engine.begin() as conn:
+                    for base_class in base_classes:
+                        await self.create_default_table(conn, base_class)
 
         logger.info("PostgreSQL 数据库初始化完成")
 
@@ -1029,21 +1048,41 @@ class RedisDatabaseManager():
                 'REDIS', 'Host', fallback='localhost')
             port = int(os.getenv('REDIS_PORT', 0)) or config.getint(
                 'REDIS', 'Port', fallback=6379)
+            # 口令：优先环境变量 REDIS_PASSWORD，其次 config [REDIS] Password
+            password = os.getenv('REDIS_PASSWORD') or config.get(
+                'REDIS', 'Password', fallback='')
         except Exception as e:
             logger.error(f"读取 Redis 配置失败: {e}")
             host = 'localhost'
             port = 6379
+            password = os.getenv('REDIS_PASSWORD') or ''
+
+        # 空串按 None 处理：未启用口令时不向 redis 客户端传空口令
+        password = password or None
+
+        self._host = host
+        self._port = port
+        self._password = password
 
         self._redis = Redis(
             host=host,
             port=port,
-            decode_responses=True
+            password=password,
+            decode_responses=True,
+            max_connections=200,             # 1. 调整上限：根据并发量建议设在 50 ~ 200
+            socket_connect_timeout=3.0,      # 2. 建立连接超时：建议 2-3 秒，避免阻塞过久
+            socket_timeout=2.0,              # 3. 新增：读写命令超时，防止单个慢查询卡死连接
+            socket_keepalive=True,           # 保持 TCP 保活机制
+            health_check_interval=20,        # 4. 心跳检测：建议缩短至 20 秒，更快剔除死连接
+            retry_on_timeout=True,           # 5. 超时重试：建议开启，应对网络瞬时抖动
+            retry_on_error=[ConnectionError, TimeoutError],
         )
 
         # 删除forever:开头的key之外的数据
         # await self._redis.flushall()
 
-        logger.info(f"Redis 连接成功: {host}:{port}")
+        # 日志只打 host:port 与是否启用口令，绝不打印口令本身
+        logger.info(f"Redis 连接成功: {host}:{port} (AUTH: {'已启用' if password else '未启用'})")
 
     async def close(self):
         if self._redis:
@@ -1084,6 +1123,16 @@ class RedisDatabaseManager():
                 break
 
         return deleted_count
+
+    def get_esi_status_redis(self):
+        if not hasattr(self, '_esi_status_redis') or self._esi_status_redis is None:
+            self._esi_status_redis = Redis(
+                host=self._host, port=self._port,
+                # 与主连接使用同一口令（未启用口令时为 None）
+                password=getattr(self, '_password', None),
+                decode_responses=True, max_connections=20,
+                socket_connect_timeout=3, socket_keepalive=True)
+        return self._esi_status_redis
 
 
 class Neo4jDatabaseManager():

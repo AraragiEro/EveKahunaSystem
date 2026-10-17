@@ -69,6 +69,7 @@ const tableData = computed(() => {
         return []
     }
     return props.logisticsData.map(item => ({
+        lack_type_id: item.lack_type_id || 0,
         lack_type_name: item.lack_type_name || '',
         provide_quantity: item.provide_quantity || 0,
         provide_volume: item.provide_volume || 0,
@@ -310,9 +311,9 @@ const graphData = computed(() => {
     })
 
     // 计算体积范围，用于设置线宽
-    const volumes = Array.from(edgeMap.values()).map(e => e.volume).filter(v => v > 0)
-    const minVolume = volumes.length > 0 ? Math.min(...volumes) : 1
-    const maxVolume = volumes.length > 0 ? Math.max(...volumes) : 1
+    const volumes = Array.from(edgeMap.values()).map(e => e.volume).filter(v => v> 0)
+    const minVolume = volumes.length> 0 ? Math.min(...volumes) : 1
+    const maxVolume = volumes.length> 0 ? Math.max(...volumes) : 1
 
     // 构建节点数组
     const nodes = Array.from(systemMap.values()).map(system => ({
@@ -327,7 +328,7 @@ const graphData = computed(() => {
     // 构建边数组
     const links = Array.from(edgeMap.values()).map(edge => {
         // 根据体积计算线宽（1-10之间）
-        const lineWidth = volumes.length > 0 && maxVolume > minVolume
+        const lineWidth = volumes.length> 0 && maxVolume> minVolume
             ? 5 + (edge.volume - minVolume) / (maxVolume - minVolume) * 9
             : 10
 
@@ -449,11 +450,11 @@ const updateChart = async () => {
     if (graphContainerRef.value) {
         const container = graphContainerRef.value
 
-        if (container.offsetWidth > 0 && container.offsetHeight > 0) {
+        if (container.offsetWidth> 0 && container.offsetHeight> 0) {
             initChart()
         } else {
             setTimeout(() => {
-                if (container.offsetWidth > 0 && container.offsetHeight > 0) {
+                if (container.offsetWidth> 0 && container.offsetHeight> 0) {
                     initChart()
                 } else {
                     setTimeout(() => {
@@ -482,28 +483,38 @@ const observeContainer = () => {
     return null
 }
 
-// 窗口大小调整处理函数
+// 窗口大小调整处理函数 (RAF throttle)
+let resizeRAF: number | null = null
 const handleResize = () => {
-    if (chartInstance) {
-        chartInstance.resize()
-    }
+    if (resizeRAF !== null) return
+    resizeRAF = requestAnimationFrame(() => {
+        if (chartInstance) {
+            chartInstance.resize()
+        }
+        resizeRAF = null
+    })
 }
 
 // ResizeObserver 实例
 let containerObserver: ResizeObserver | null = null
 
 // 响应式布局相关
-const isLargeScreen = ref(window.innerWidth >= 1920)
+const isLargeScreen = ref(window.innerWidth>= 1920)
 const splitPosition = ref(50) // 分割线位置，百分比
 const isDragging = ref(false)
 const splitContainerRef = ref<HTMLElement>()
 
-// 监听窗口大小变化
+// 监听窗口大小变化 (RAF throttle for layout)
+let layoutResizeRAF: number | null = null
 const handleWindowResize = () => {
-    isLargeScreen.value = window.innerWidth >= 1920
-    if (chartInstance) {
-        chartInstance.resize()
-    }
+    if (layoutResizeRAF !== null) return
+    layoutResizeRAF = requestAnimationFrame(() => {
+        isLargeScreen.value = window.innerWidth >= 1920
+        if (chartInstance) {
+            chartInstance.resize()
+        }
+        layoutResizeRAF = null
+    })
 }
 
 // 拖拽分割线相关
@@ -565,7 +576,7 @@ watch(() => props.logisticsData, () => {
 }, { deep: true, immediate: false })
 
 watch(graphData, () => {
-    if (graphData.value && graphData.value.nodes.length > 0) {
+    if (graphData.value && graphData.value.nodes.length> 0) {
         updateChart()
     }
 }, { deep: true, immediate: false })
@@ -618,6 +629,8 @@ onUnmounted(() => {
         chartInstance = null
     }
     // 移除事件监听
+    if (resizeRAF !== null) cancelAnimationFrame(resizeRAF)
+    if (layoutResizeRAF !== null) cancelAnimationFrame(layoutResizeRAF)
     window.removeEventListener('resize', handleResize)
     window.removeEventListener('resize', handleWindowResize)
     cleanupThemeWatcher?.()
@@ -674,7 +687,13 @@ onUnmounted(() => {
                                 </el-button>
                             </div>
                             <el-table :data="filteredTableData" :key="`logistics-table-${selectedPlan || 'default'}`"
-                                border max-height="80vh" show-overflow-tooltip>
+                                border max-height="80vh">
+                                <el-table-column label="icon" width="70">
+                                    <template #default="{ row }">
+                                        <img :src="`https://imageserver.eveonline.com/types/${row.lack_type_id}/icon`"
+                                            alt="icon" width="40" height="40" style="object-fit: contain" loading="lazy" />
+                                    </template>
+                                </el-table-column>
                                 <el-table-column label="物品名称" prop="lack_type_name" width="150">
                                     <template #default="{ row }">
                                         <div class="copyable-cell" @click="copyCellContent(row.lack_type_name, '物品名称')"
@@ -771,7 +790,13 @@ onUnmounted(() => {
                                 </el-button>
                             </div>
                             <el-table :data="filteredTableData" :key="`logistics-table-${selectedPlan || 'default'}`"
-                                border max-height="600px" show-overflow-tooltip>
+                                border max-height="600px">
+                                <el-table-column label="icon" width="70">
+                                    <template #default="{ row }">
+                                        <img :src="`https://imageserver.eveonline.com/types/${row.lack_type_id}/icon`"
+                                            alt="icon" width="40" height="40" style="object-fit: contain" loading="lazy" />
+                                    </template>
+                                </el-table-column>
                                 <el-table-column label="物品名称" prop="lack_type_name" width="150">
                                     <template #default="{ row }">
                                         <div class="copyable-cell" @click="copyCellContent(row.lack_type_name, '物品名称')"

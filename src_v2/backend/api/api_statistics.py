@@ -10,6 +10,7 @@ from src_v2.backend.api.permission_required import role_required
 from src_v2.core.database.kahuna_database_utils_v2 import EveIndustryCalculateHistoryDBUtils
 from src_v2.core.log import logger
 from src_v2.core.utils import KahunaException
+from src_v2.backend.api import response_helper
 
 api_statistics_bp = Blueprint('api_statistics', __name__, url_prefix='/api/admin/statistics')
 
@@ -83,11 +84,11 @@ async def get_hourly_statistics():
         })
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取每小时统计失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取每小时统计失败"}), 500
+        return response_helper.server_error("获取每小时统计失败")
 
 @api_statistics_bp.route('/calculateHistory/duration', methods=['GET'])
 @auth_required
@@ -136,11 +137,11 @@ async def get_duration_statistics():
         })
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取完成时间区间统计失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取完成时间区间统计失败"}), 500
+        return response_helper.server_error("获取完成时间区间统计失败")
 
 
 @api_statistics_bp.route('/calculateHistory/userFrequency', methods=['GET'])
@@ -205,11 +206,11 @@ async def get_user_frequency_statistics():
         })
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取用户频率统计失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取用户频率统计失败"}), 500
+        return response_helper.server_error("获取用户频率统计失败")
 
 
 @api_statistics_bp.route('/calculateHistory/userDetail', methods=['GET'])
@@ -274,20 +275,20 @@ async def get_user_calculate_detail():
         
         # 参数验证
         if not user_name:
-            return jsonify({"status": 400, "message": "用户名不能为空"}), 400
+            return response_helper.bad_request("用户名不能为空")
         if not start_date_str or not end_date_str:
-            return jsonify({"status": 400, "message": "起始时间和结束时间不能为空"}), 400
+            return response_helper.bad_request("起始时间和结束时间不能为空")
         
         # 解析日期时间
         try:
             start_date = datetime.fromisoformat(start_date_str)
             end_date = datetime.fromisoformat(end_date_str)
         except ValueError:
-            return jsonify({"status": 400, "message": "时间格式错误，请使用ISO 8601格式 (YYYY-MM-DDTHH:MM:SS)"}), 400
+            return response_helper.bad_request("时间格式错误，请使用ISO 8601格式 (YYYY-MM-DDTHH:MM:SS)")
         
         # 验证时间范围
         if start_date > end_date:
-            return jsonify({"status": 400, "message": "起始时间不能晚于结束时间"}), 400
+            return response_helper.bad_request("起始时间不能晚于结束时间")
         
         records = await EveIndustryCalculateHistoryDBUtils.get_user_calculate_history_by_date_range(
             user_name=user_name,
@@ -301,9 +302,9 @@ async def get_user_calculate_detail():
         })
     except KahunaException as e:
         traceback.print_exc()
-        return jsonify({"status": 500, "message": str(e)}), 500
+        return response_helper.fail(str(e), 500)
     except Exception as e:
         traceback.print_exc()
         logger.error(f"获取用户计算详情失败: {traceback.format_exc()}")
-        return jsonify({"status": 500, "message": "获取用户计算详情失败"}), 500
+        return response_helper.server_error("获取用户计算详情失败")
 

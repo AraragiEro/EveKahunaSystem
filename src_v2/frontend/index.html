@@ -4,10 +4,95 @@
     <meta charset="UTF-8">
     <link rel="icon" href="/favicon.ico">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://pagead2.googlesyndication.com https://*.googlesyndication.com https://*.google.com; style-src 'self' 'unsafe-inline' https:; img-src 'self' https://imageserver.eveonline.com https://*.eveonline.com data: https:; font-src 'self' data:; connect-src 'self' https://esi.evetech.net https://login.eveonline.com; frame-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'">
     <title>Kahuna System</title>
+    <style>
+      /*
+       * 首屏骨架：在 JS bundle 下载并执行完成前显示，Vue 挂载时会整体替换 #app 内容。
+       * 目的：消除硬刷新时 1 秒以上的纯白屏（链路经美国 VPS 中转，HTML+JS 首字节较慢）。
+       * 约束：
+       *   1. 只放灰色占位块，禁止预填任何真实数据；
+       *   2. CSP 的 script-src 为 'self'，不能用内联 script 读 localStorage，
+       *      因此深色适配只能依赖 prefers-color-scheme；
+       *   3. 样式必须内联在此，不能等 element-plus 的 CSS。
+       */
+      .boot-skeleton {
+        position: fixed;
+        inset: 0;
+        padding: 18px 22px;
+        background-color: #f7f9fc;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .boot-skeleton__bar,
+      .boot-skeleton__card {
+        background-color: #e4ebf5;
+        border-radius: 10px;
+        animation: boot-skeleton-pulse 1.4s ease-in-out infinite;
+      }
+      .boot-skeleton__header {
+        height: 42px;
+        flex: 0 0 auto;
+      }
+      .boot-skeleton__header::after {
+        content: '';
+        display: block;
+        width: 180px;
+        height: 100%;
+        border-radius: 10px;
+        background-color: #e4ebf5;
+        animation: boot-skeleton-pulse 1.4s ease-in-out infinite;
+      }
+      .boot-skeleton__body {
+        flex: 1 1 auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        align-content: start;
+      }
+      .boot-skeleton__card {
+        height: 132px;
+      }
+      @keyframes boot-skeleton-pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.55;
+        }
+      }
+      @media (prefers-color-scheme: dark) {
+        .boot-skeleton {
+          background-color: #100f19;
+        }
+        .boot-skeleton__bar,
+        .boot-skeleton__card,
+        .boot-skeleton__header::after {
+          background-color: #222036;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-skeleton__bar,
+        .boot-skeleton__card,
+        .boot-skeleton__header::after {
+          animation: none;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="boot-skeleton" aria-hidden="true">
+        <div class="boot-skeleton__header"></div>
+        <div class="boot-skeleton__body">
+          <div class="boot-skeleton__card"></div>
+          <div class="boot-skeleton__card"></div>
+          <div class="boot-skeleton__card"></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

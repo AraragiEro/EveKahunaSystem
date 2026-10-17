@@ -7,6 +7,7 @@ Neo4j 数据模型使用示例
 # ==================== 1. 模型定义使用示例 ====================
 
 from src_v2.core.database.neo4j_models import Asset, Location, Character, Blueprint, Material, Product
+from src_v2.model.EVE.eve_constants import JITA_TRADE_HUB_STRUCTURE_ID
 
 # 创建 Asset 节点实例
 asset = Asset(
@@ -35,11 +36,11 @@ async def example_create_asset():
         quantity=100,
         location_flag="Hangar"
     )
-    
+
     # 创建资产并建立关系
     success = await Neo4jAssetUtils.create_asset_with_relationships(
         asset=asset,
-        location_id=60003760,
+        location_id=JITA_TRADE_HUB_STRUCTURE_ID,
         owner_id=987654321,
         owner_type="character"
     )
@@ -52,8 +53,8 @@ async def example_batch_create_assets():
         Asset(item_id=1001, type_id=12345, quantity=10),
         Asset(item_id=1002, type_id=12346, quantity=20),
     ]
-    
-    location_ids = [60003760, 60003760]
+
+    location_ids = [JITA_TRADE_HUB_STRUCTURE_ID, JITA_TRADE_HUB_STRUCTURE_ID]
     owner_ids = [987654321, 987654321]
     owner_types = ["character", "character"]
     

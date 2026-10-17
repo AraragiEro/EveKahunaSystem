@@ -34,10 +34,13 @@ CREDENTIALS = "credentials/google-service-account.json"
 MARKET_MONITOR_SPREADSHEET_ID = ""
 
 [ADMIN]
-# 是否创建默认管理员账号
+# 是否创建默认管理员账号（安全审计 #11：不再提供 kahuna/kahuna 之类的默认口令）
+# 如需创建：显式填写 admin_user / admin_passwd 并置 create_admin = true
+# 口令要求：≥12 位，且不得使用 kahuna/kahuna、admin/admin、password、123456 之类默认值；
+# 留空或弱口令时启动会拒绝创建管理员账号（仅记录日志，不中断服务启动）
 create_admin = false
-admin_user = "kahuna"
-admin_passwd = "kahuna"
+admin_user = ""
+admin_passwd = ""
 
 [POSTGREDB]
 # PostgreSQL 数据库配置
@@ -51,6 +54,8 @@ Password = ""
 # Redis 配置
 Host = ""
 Port = 6379
+# 生产建议设置强口令；也可用环境变量 REDIS_PASSWORD 覆盖本项（留空 = 无认证）
+Password = ""
 
 [NEO4J]
 # Neo4j 图数据库配置
@@ -98,6 +103,8 @@ Parse_Whitelist = [
     "mapSolarSystems",
     "mapRegions",
     "typeMaterials",
+    "planetSchematics",
+    "npcCorporations",
 ]
 # 是否启用自动更新检查
 Auto_Update = false
@@ -287,6 +294,17 @@ publicData = false
 # 角色头衔相关权限
 "esi-characters.read_titles.v1" = false
 
+
+# ============================================
+# MCP 中间件安全配置
+# ============================================
+[MCP]
+# MCP 内部 API 认证密钥（Quart 后端与 MCP 中间件通信使用）
+# 生产环境必须设置一个随机长字符串
+# 与 Docker 环境变量 QUART_API_KEY 保持一致
+# 留空则跳过 API Key 校验（仅开发环境）
+API_KEY = ""
+
 # 联盟联系人相关权限
 "esi-alliances.read_contacts.v1" = false
 
@@ -296,3 +314,13 @@ publicData = false
 # 公司FW统计相关权限
 "esi-corporations.read_fw_stats.v1" = false
 
+# ============================================
+# 服务间认证（供 MCP 中间件 / QQ 机器人等无法登录的服务调用）
+# ============================================
+[SERVICE]
+# 共享服务密钥：调用方在请求头 X-Internal-API-Key 中携带
+# 生成：python -c "import secrets; print(secrets.token_urlsafe(32))"
+# 留空 = 拒绝所有服务间请求（fail-closed，不会再退回无校验状态）
+API_KEY = ""
+# 灰度开关：enforce = 强制执行（默认）；warn = 仅记录告警不拦截（切换期使用）
+MODE = "enforce"

@@ -60,6 +60,15 @@
                     <div class="product-main">
                       <span class="product-drag-handle">☰</span>
                       <span class="product-name">{{ product.type_name_zh || product.type_name || '-' }}</span>
+                      <span v-if="product.note && editingNoteProduct !== product.key" class="product-note" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                        <el-tooltip class="product-note-tooltip" :content="product.note" placement="top" :show-after="500" effect="dark">
+                          <span class="note-text">{{ product.note }}</span>
+                        </el-tooltip>
+                      </span>
+                      <span v-if="editingNoteProduct !== product.key" class="note-edit-icon" @click.stop="startEditNote(product)">
+                        <el-icon><Edit /></el-icon>
+                      </span>
+                      <el-input v-if="editingNoteProduct === product.key" v-model="editingNoteValue" :maxlength="200" show-word-limit class="note-input" placeholder="备注..." @keyup.enter="saveNote(product)" @blur="saveNote(product)" @keyup.esc.prevent="cancelEditNote" />
                     </div>
                     <div class="product-controls">
                       <el-input-number
@@ -92,6 +101,15 @@
               <div class="product-main">
                 <span class="top-drag-handle">☰</span>
                 <span class="product-name">{{ item.type_name_zh || item.type_name || '-' }}</span>
+                <span v-if="item.note && editingNoteProduct !== item.key" class="product-note" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                  <el-tooltip class="product-note-tooltip" :content="item.note" placement="top" :show-after="500" effect="dark">
+                    <span class="note-text">{{ item.note }}</span>
+                  </el-tooltip>
+                </span>
+                <span v-if="editingNoteProduct !== item.key" class="note-edit-icon" @click.stop="startEditNote(item)">
+                  <el-icon><Edit /></el-icon>
+                </span>
+                <el-input v-if="editingNoteProduct === item.key" v-model="editingNoteValue" :maxlength="200" show-word-limit class="note-input" placeholder="备注..." @keyup.enter="saveNote(item)" @blur="saveNote(item)" @keyup.esc.prevent="cancelEditNote" />
               </div>
               <div class="product-controls">
                 <el-input-number
@@ -141,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { ArrowRight, Delete, Edit } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { VueDraggable } from 'vue-draggable-plus'
@@ -157,6 +175,7 @@ interface PlanRow {
   type_name_zh?: string
   name?: string
   active?: boolean
+  note?: string
 }
 
 interface LocalProductRow extends PlanRow {
@@ -195,6 +214,12 @@ const expandedGroups = ref<Set<string>>(new Set())
 const editGroupDialogVisible = ref(false)
 const editingGroup = ref<LocalGroupRow | null>(null)
 const newGroupName = ref('')
+
+const editingNoteProduct = ref<string | null>(null)
+const editingNoteValue = ref('')
+function startEditNote(p: LocalProductRow) { editingNoteProduct.value = p.key; editingNoteValue.value = p.note || ''; nextTick(() => { (document.querySelector('.note-input input') as HTMLInputElement)?.focus() }) }
+function saveNote(p: LocalProductRow) { const t = editingNoteValue.value.trim(); p.note = t || undefined; editingNoteProduct.value = null; editingNoteValue.value = ''; emitFlattened() }
+function cancelEditNote() { editingNoteProduct.value = null; editingNoteValue.value = '' }
 
 const productKey = (row: PlanRow, index: number) => `product-${row.row_id}-${index}-${Math.random().toString(36).slice(2, 8)}`
 const groupKey = (row: PlanRow, index: number) => `group-${row.row_id}-${index}-${Math.random().toString(36).slice(2, 8)}`
@@ -260,6 +285,26 @@ watch(
 )
 
 const emitFlattened = () => {
+  // ====== 修复拖拽损坏：将误入产品列表的分组恢复到顶层 ======
+  const lostGroups: LocalGroupRow[] = []
+  for (const item of topLevelItems.value) {
+    if (item.type !== 'group') continue
+    const validProducts: LocalProductRow[] = []
+    for (const p of item.products) {
+      if (p.type === 'group') {
+        lostGroups.push(p as unknown as LocalGroupRow)
+        console.warn(`[拖拽修复] 分组 "${(p as LocalGroupRow).name}" 被误拖入分组 "${item.name}"，已自动恢复到顶层`)
+      } else {
+        validProducts.push(p as unknown as LocalProductRow)
+      }
+    }
+    item.products = validProducts
+  }
+  for (const g of lostGroups) {
+    topLevelItems.value.push(g)
+  }
+  // ====== 修复完成 ======
+
   const flat: PlanRow[] = []
   let order = 0
 
@@ -273,6 +318,8 @@ const emitFlattened = () => {
         order: order++
       })
       item.products.forEach((product) => {
+        // 防止分组被误拖入另一个分组的产品列表后损坏数据结构
+        if (product.type !== 'product') return
         flat.push({
           row_id: product.row_id,
           type: 'product',
@@ -282,7 +329,8 @@ const emitFlattened = () => {
           type_name_zh: product.type_name_zh,
           group_id: item.name,
           active: product.active,
-          order: order++
+          order: order++,
+          note: product.note
         })
       })
       return
@@ -297,7 +345,8 @@ const emitFlattened = () => {
       type_name_zh: item.type_name_zh,
       group_id: null,
       active: item.active,
-      order: order++
+      order: order++,
+      note: item.note
     })
   })
 
@@ -311,7 +360,12 @@ const handleTopLevelMove = (evt: any) => {
 
 const handleGroupMove = (evt: any) => {
   const dragged = evt?.draggedContext?.element as TopLevelItem | LocalProductRow | undefined
-  return dragged?.type === 'product'
+  // 仅允许产品拖入分组；分组不可嵌套到另一个分组内
+  if (dragged?.type !== 'product') return false
+  // 额外校验：目标必须是产品列表（relatedContext.list 即 item.products 数组）
+  const relatedList = evt?.relatedContext?.list
+  if (relatedList && !Array.isArray(relatedList)) return false
+  return true
 }
 
 const toggleGroup = (groupName: string) => {
@@ -503,10 +557,18 @@ const handleCancelEditGroup = () => {
 
 .product-name {
   color: var(--k-color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  flex-shrink: 0;
 }
+
+.product-note { flex:1; margin-left:6px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.note-text { color:var(--k-color-text-secondary); font-size:.85em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:default }
+.note-edit-icon { display:inline-flex; align-items:center; margin-left:4px; opacity:0; transition:opacity .2s; cursor:pointer; color:var(--k-color-text-secondary); flex-shrink:0 }
+.note-edit-icon:hover { color:var(--k-color-primary) }
+.product-card:hover .note-edit-icon { opacity:1 }
+.note-input { flex:1; min-width:120px; max-width:280px }
+.compact .note-text { font-size:.78em }
+.compact .note-input { max-width:220px }
 
 .product-controls {
   display: flex;
