@@ -9,14 +9,14 @@
 # 默认值: "community"
 # 企业版需要额外的代码和功能支持
 Edition = "community"
-# API文档配置
-ENABLE_API_DOCS = false  # 是否启用API文档（Swagger UI）
-API_DOCS_PATH = "/api/docs"  # API文档UI路径
-API_OPENAPI_PATH = "/api/openapi.json"  # OpenAPI JSON路径
 
 [APP]
 # 图片渲染代理 (留空则不使用)
 PIC_RENDER_PROXY = ""
+# API文档配置
+ENABLE_API_DOCS = false  # 是否启用API文档（Swagger UI）
+API_DOCS_PATH = "/api/docs"  # API文档UI路径
+API_OPENAPI_PATH = "/api/openapi.json"  # OpenAPI JSON路径
 
 # 代理服务器地址
 PROXY = "127.0.0.1"
