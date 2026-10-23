@@ -112,12 +112,6 @@ const baseRoutes = [
           meta: { requiresAuth: true, roles: ['user'] }
         },
         {
-          path: 'industrySetting',
-          name: 'industrySetting',
-          component: () => import('../views/setting/industrySetting.vue'),
-          meta: { requiresAuth: true, roles: ['admin', 'user'] }
-        },
-        {
           path: 'accountSetting',
           name: 'accountSetting',
           component: () => import('../views/setting/accountSetting.vue'),
@@ -151,16 +145,6 @@ const baseRoutes = [
           path: 'flowDecomposition',
           name: 'flowDecomposition',
           component: () => import('../views/industry/flowDecomposition.vue'),
-        },
-        {
-          path: 'workflow',
-          name: 'workflow',
-          component: () => import('../views/industry/workflow.vue'),
-        },
-        {
-          path: 'testPage',
-          name: 'testPage',
-          component: () => import('../views/industry/testPage.vue'),
         },
       ],
     },
@@ -261,6 +245,15 @@ const baseRoutes = [
 
 // 条件添加企业版路由
 const routes: RouteRecordRaw[] = [...baseRoutes, ...resolveEnterpriseRoutes(APP_EDITION)]
+
+// 404 兜底：必须放在所有有效路由（含企业版）之后，
+// 否则 /:pathMatch(.*)* 会先于 /storage/:sid、/workflow/:token 等带参数路由命中。
+routes.push({
+  path: '/:pathMatch(.*)*',
+  name: 'notFound',
+  component: () => import('../views/NotFoundView.vue'),
+  meta: { requiresAuth: false },
+})
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),

@@ -60,16 +60,17 @@ const goHome = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  background: linear-gradient(135deg, var(--k-color-surface-soft) 0%, var(--k-color-surface-strong) 100%);
   padding: 20px;
 }
 
 .forbidden-content {
   text-align: center;
-  background: white;
+  background: var(--k-color-surface);
+  border: 1px solid var(--k-color-border);
   border-radius: 20px;
   padding: 60px 40px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--k-shadow-md);
   max-width: 500px;
   width: 100%;
 }
@@ -82,7 +83,7 @@ const goHome = () => {
 .forbidden-title {
   font-size: 72px;
   font-weight: 700;
-  color: #f56c6c;
+  color: var(--k-color-danger);
   margin: 0 0 16px 0;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
 }
@@ -90,13 +91,13 @@ const goHome = () => {
 .forbidden-subtitle {
   font-size: 28px;
   font-weight: 600;
-  color: #2c3e50;
+  color: var(--k-color-text);
   margin: 0 0 16px 0;
 }
 
 .forbidden-description {
   font-size: 16px;
-  color: #64748b;
+  color: var(--k-color-text-secondary);
   line-height: 1.6;
   margin: 0 0 32px 0;
   max-width: 400px;
@@ -119,13 +120,13 @@ const goHome = () => {
 }
 
 .forbidden-info {
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--k-color-border);
   padding-top: 24px;
 }
 
 .forbidden-info p {
   margin: 8px 0;
-  color: #94a3b8;
+  color: var(--k-color-text-tertiary);
   font-size: 14px;
 }
 
@@ -134,7 +135,7 @@ const goHome = () => {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: #64748b !important;
+  color: var(--k-color-text-secondary) !important;
 }
 
 @keyframes bounce {

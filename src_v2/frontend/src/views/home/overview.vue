@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import KTable from '@/components/k/KTable.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
+import KCard from '@/components/k/KCard.vue'
+import KStat from '@/components/k/KStat.vue'
+import KToolbar from '@/components/k/KToolbar.vue'
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
@@ -6,12 +11,14 @@ import { Refresh, Filter, Money, Wallet, ShoppingCart, Timer, Star, Box } from '
 import { ElMessage } from 'element-plus'
 import { http } from '@/http'
 import { handleApiResponse } from '@/utils/apiResponse'
+import { calculateTotalAssets, getNumericValue } from '@/utils/totalAssets'
 import { useTransition } from '@vueuse/core'
 import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
+import GridShell from '@/components/layout/GridShell.vue'
 
 // 数据接口
 interface OverviewData {
-  totalValue?: number          // 总价值（可选，历史记录可能没有）
+  totalValue?: number          // 总资产估值（可选，历史记录可能没有）
   walletValue: number | Record<string, number>  // 钱包总价值（可能是数字或对象）
   orderValue: number | Record<string, number>  // 订单总价值（可能是数字或对象）
   runningProcessValue: number  // 运行中流程价值
@@ -392,7 +399,7 @@ const getRemainingTimeStyle = (minutes: number | null): string => {
     return 'color: #e6a23c; font-weight: 500;'
   } else {
     // 大于1天，显示正常颜色
-    return 'color: #606266;'
+    return 'color: var(--k-color-text-secondary);'
   }
 }
 
@@ -424,16 +431,6 @@ const getChangeColorClass = (change: ChangeData): string => {
   return ''
 }
 
-// 辅助函数：将值转换为数字（处理对象或数字）
-const getNumericValue = (value: number | Record<string, number> | undefined): number => {
-  if (value === undefined || value === null) return 0
-  if (typeof value === 'number') return value
-  if (typeof value === 'object') {
-    return Object.values(value).reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0)
-  }
-  return 0
-}
-
 // 展示数据
 const displayData = computed(() => {
   if (!overviewData.value) {
@@ -449,7 +446,8 @@ const displayData = computed(() => {
 
   const walletValue = getNumericValue(overviewData.value.walletValue)
   const orderValue = getNumericValue(overviewData.value.orderValue)
-  const totalValue = walletValue + orderValue + overviewData.value.runningProcessValue + overviewData.value.markedAssetValue + overviewData.value.unmarkedAssetValue
+  // 5 项统一口径，见 utils/totalAssets
+  const totalValue = calculateTotalAssets(overviewData.value)
   return {
     totalValue: totalValue,
     walletValue: walletValue,
@@ -483,7 +481,7 @@ const lastNoteDisplayData = computed(() => {
 
   const walletValue = getNumericValue(selectedHistory.walletValue)
   const orderValue = getNumericValue(selectedHistory.orderValue)
-  const totalValue = walletValue + orderValue + selectedHistory.runningProcessValue + selectedHistory.markedAssetValue + selectedHistory.unmarkedAssetValue
+  const totalValue = calculateTotalAssets(selectedHistory)
   return {
     totalValue: totalValue,
     walletValue: walletValue,
@@ -1139,10 +1137,9 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 </script>
 
 <template>
-  <div class="overview-container" v-loading="loading" element-loading-text="正在刷新数据，请稍候..."
-    element-loading-background="rgba(255, 255, 255, 0.95)">
+  <div class="overview-container" v-loading="loading" element-loading-text="正在刷新数据，请稍候...">
     <!-- 工具栏 -->
-    <div class="toolbar">
+    <KToolbar bordered wrap>
       <el-button type="primary" :icon="Refresh" :loading="loading" @click="handleRefresh(true)">
         立刻刷新
       </el-button>
@@ -1161,155 +1158,142 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
       <el-button type="primary" :icon="Refresh" @click="handleAssetSearch">
         资产查找
       </el-button>
-      <div class="time-range-container">
-        <span class="time-range-label">时间范围：</span>
-        <el-radio-group v-model="selectedTimeRange" @change="saveTimeRangeToStorage(selectedTimeRange)">
-          <el-radio-button label="1d">一天</el-radio-button>
-          <el-radio-button label="7d">本周</el-radio-button>
-          <el-radio-button label="30d">本月</el-radio-button>
-        </el-radio-group>
-      </div>
-      <div class="switch-container">
-        <span class="switch-label">考虑非标记资产</span>
-        <el-switch v-model="includeMarkedAssets" @change="handleSwitchChange" />
-      </div>
-    </div>
+      <template #end>
+        <div class="time-range-container">
+          <span class="time-range-label">时间范围：</span>
+          <el-radio-group v-model="selectedTimeRange" @change="saveTimeRangeToStorage(selectedTimeRange)">
+            <el-radio-button label="1d">一天</el-radio-button>
+            <el-radio-button label="7d">本周</el-radio-button>
+            <el-radio-button label="30d">本月</el-radio-button>
+          </el-radio-group>
+        </div>
+        <div class="switch-container">
+          <span class="switch-label">考虑非标记资产</span>
+          <el-switch v-model="includeMarkedAssets" @change="handleSwitchChange" />
+        </div>
+      </template>
+    </KToolbar>
 
     <!-- 数据展示 -->
     <div v-if="!isEmpty" class="data-section">
       <el-row :gutter="24">
-        <!-- 总价值 -->
+        <!-- 总资产估值 -->
         <el-col>
-          <el-card shadow="hover" class="data-card data-card-total">
+          <KCard hover padding="none" class="data-card data-card-total" tone="primary">
             <div class="data-card-content">
-              <div class="data-header">
-                <el-icon class="data-icon data-icon-total">
-                  <Money />
-                </el-icon>
-                <div class="data-label">总价值</div>
-              </div>
-              <div class="data-value data-value-total">{{ formatNumber(outputTotalValue) }} ISK</div>
+              <el-icon class="data-icon data-icon-total">
+                <Money />
+              </el-icon>
+              <KStat label="总资产估值" :value="formatNumber(outputTotalValue)" unit="ISK"
+                hint="含钱包、订单、运行中、标记与非标记资产" align="center" />
               <div v-if="changeData.totalValue.hasChange"
                 :class="['data-change', getChangeColorClass(changeData.totalValue)]">
                 {{ formatChange(changeData.totalValue) }}
               </div>
             </div>
-          </el-card>
+          </KCard>
         </el-col>
       </el-row>
-      <el-row :gutter="24">
+      <GridShell gap="0 24px">
         <!-- 钱包总价值 -->
-        <el-col :xs="24" :sm="12" :md="8" :lg="6">
-          <el-card shadow="hover" class="data-card data-card-wallet" @click="handleWalletCardClick">
+        <div class="k-col-3">
+          <KCard hover padding="none" class="data-card data-card-wallet" tone="success" @click="handleWalletCardClick">
             <div class="data-card-content">
-              <div class="data-header">
-                <el-icon class="data-icon data-icon-wallet">
-                  <Wallet />
-                </el-icon>
-                <div class="data-label">钱包总价值</div>
-              </div>
-              <div class="data-value">{{ formatNumber(outputWalletToDisplayValue) }} ISK</div>
+              <el-icon class="data-icon data-icon-wallet">
+                <Wallet />
+              </el-icon>
+              <KStat label="钱包总价值" :value="formatNumber(outputWalletToDisplayValue)" unit="ISK" align="center" />
               <div v-if="changeData.walletValue.hasChange"
                 :class="['data-change', getChangeColorClass(changeData.walletValue)]">
                 {{ formatChange(changeData.walletValue) }}
               </div>
             </div>
-          </el-card>
-        </el-col>
+          </KCard>
+        </div>
 
         <!-- 订单总价值 -->
-        <el-col :xs="24" :sm="12" :md="8" :lg="6">
-          <el-card shadow="hover" class="data-card data-card-order" @click="handleOrderCardClick">
+        <div class="k-col-3">
+          <KCard hover padding="none" class="data-card data-card-order" tone="warning" @click="handleOrderCardClick">
             <div class="data-card-content">
-              <div class="data-header">
-                <el-icon class="data-icon data-icon-order">
-                  <ShoppingCart />
-                </el-icon>
-                <div class="data-label">订单总价值</div>
-              </div>
-              <div class="data-value">{{ formatNumber(outputOrderValue) }} ISK</div>
+              <el-icon class="data-icon data-icon-order">
+                <ShoppingCart />
+              </el-icon>
+              <KStat label="订单总价值" :value="formatNumber(outputOrderValue)" unit="ISK" align="center" />
               <div v-if="changeData.orderValue.hasChange"
                 :class="['data-change', getChangeColorClass(changeData.orderValue)]">
                 {{ formatChange(changeData.orderValue) }}
               </div>
             </div>
-          </el-card>
-        </el-col>
+          </KCard>
+        </div>
 
         <!-- 运行中流程价值 -->
-        <el-col :xs="24" :sm="12" :md="8" :lg="6">
-          <el-card shadow="hover" class="data-card data-card-process" @click="handleRunningProcessCardClick">
+        <div class="k-col-3">
+          <KCard hover padding="none" class="data-card data-card-process" @click="handleRunningProcessCardClick">
             <div class="data-card-content">
-              <div class="data-header">
-                <el-icon class="data-icon data-icon-process">
-                  <Timer />
-                </el-icon>
-                <div class="data-label">运行中流程价值</div>
-              </div>
-              <div class="data-value">{{ formatNumber(outputRunningProcessValue) }} ISK</div>
+              <el-icon class="data-icon data-icon-process">
+                <Timer />
+              </el-icon>
+              <KStat label="运行中流程价值" :value="formatNumber(outputRunningProcessValue)" unit="ISK" align="center" />
               <div v-if="changeData.runningProcessValue.hasChange"
                 :class="['data-change', getChangeColorClass(changeData.runningProcessValue)]">
                 {{ formatChange(changeData.runningProcessValue) }}
               </div>
             </div>
-          </el-card>
-        </el-col>
+          </KCard>
+        </div>
 
         <!-- 标记资产价值 -->
-        <el-col :xs="24" :sm="12" :md="8" :lg="6">
-          <el-card shadow="hover" class="data-card data-card-marked">
+        <div class="k-col-3">
+          <KCard hover padding="none" class="data-card data-card-marked" tone="danger">
             <div class="data-card-content">
-              <div class="data-header">
-                <el-icon class="data-icon data-icon-marked">
-                  <Star />
-                </el-icon>
-                <div class="data-label">标记资产价值</div>
-              </div>
-              <div class="data-value">{{ formatNumber(outputMarkedAssetValue) }} ISK</div>
+              <el-icon class="data-icon data-icon-marked">
+                <Star />
+              </el-icon>
+              <KStat label="标记资产价值" :value="formatNumber(outputMarkedAssetValue)" unit="ISK" align="center" />
               <div v-if="changeData.markedAssetValue.hasChange"
                 :class="['data-change', getChangeColorClass(changeData.markedAssetValue)]">
                 {{ formatChange(changeData.markedAssetValue) }}
               </div>
             </div>
-          </el-card>
-        </el-col>
+          </KCard>
+        </div>
 
         <!-- 非标记资产价值（根据开关显示） -->
-        <el-col v-if="includeMarkedAssets" :xs="24" :sm="12" :md="8" :lg="6">
-          <el-card shadow="hover" class="data-card data-card-unmarked">
+        <div v-if="includeMarkedAssets" class="k-col-3">
+          <KCard hover padding="none" class="data-card data-card-unmarked">
             <div class="data-card-content">
-              <div class="data-header">
-                <el-icon class="data-icon data-icon-unmarked">
-                  <Box />
-                </el-icon>
-                <div class="data-label">非标记资产价值</div>
-              </div>
-              <div class="data-value">{{ formatNumber(outputUnmarkedAssetValue) }} ISK</div>
+              <el-icon class="data-icon data-icon-unmarked">
+                <Box />
+              </el-icon>
+              <KStat label="非标记资产价值" :value="formatNumber(outputUnmarkedAssetValue)" unit="ISK" align="center" />
               <div v-if="changeData.unmarkedAssetValue.hasChange"
                 :class="['data-change', getChangeColorClass(changeData.unmarkedAssetValue)]">
                 {{ formatChange(changeData.unmarkedAssetValue) }}
               </div>
             </div>
-          </el-card>
-        </el-col>
-      </el-row>
+          </KCard>
+        </div>
+      </GridShell>
     </div>
 
     <!-- 空数据状态 -->
     <div v-else class="empty-section">
-      <el-empty description="暂无数据，请点击刷新按钮获取数据" :image-size="200">
-        <el-button type="primary" :icon="Refresh" :loading="loading" @click="handleRefresh">
-          刷新数据
-        </el-button>
-      </el-empty>
+      <KEmpty why="暂无数据，请点击刷新按钮获取数据" size="lg">
+        <template #action>
+          <el-button type="primary" :icon="Refresh" :loading="loading" @click="handleRefresh">
+            刷新数据
+          </el-button>
+        </template>
+      </KEmpty>
     </div>
 
     <!-- 饼状图 -->
     <div class="chart-section">
-      <el-card shadow="hover">
+      <KCard hover>
         <div v-if="!isEmpty" ref="pieChartRef" class="pie-chart"></div>
-        <el-empty v-else description="暂无数据" :image-size="120" />
-      </el-card>
+        <KEmpty v-else why="还没有资产快照" hint="点上方「立刻刷新」拉取一次资产估值" size="md" />
+      </KCard>
     </div>
 
     <!-- 钱包筛选弹窗 -->
@@ -1369,14 +1353,14 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
           </el-button>
         </el-form-item>
         <el-form-item label="搜索结果">
-          <el-table :data="assetSearchForm.data" border v-loading="assetSearchLoading" max-height="700px"
-            show-overflow-tooltip>
+          <KTable :data="assetSearchForm.data" border v-loading="assetSearchLoading" max-height="700px"
+            show-overflow-tooltip density="compact">
             <el-table-column label="名称" prop="asset.type_name" />
             <el-table-column label="数量" prop="asset.quantity" />
             <el-table-column label="建筑" prop="structure.structure_name" />
             <el-table-column label="容器ID" prop="container.item_id" />
             <el-table-column label="容器位置" prop="asset.location_flag" />
-          </el-table>
+          </KTable>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -1390,7 +1374,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
     <el-dialog v-model="walletDetailDialogVisible" title="钱包详情" width="600px" :close-on-click-modal="false">
       <div class="wallet-detail-content">
         <div v-if="walletDetailList.length > 0">
-          <el-table :data="walletDetailList" border max-height="500px" show-overflow-tooltip>
+          <KTable :data="walletDetailList" border max-height="500px" show-overflow-tooltip density="compact">
             <el-table-column label="角色名称" prop="characterName" width="200">
               <template #default="{ row }">
                 <span style="font-weight: 500;">{{ row.characterName }}</span>
@@ -1401,14 +1385,14 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
                 <span style="color: #67c23a; font-weight: 600;">{{ formatNumber(row.walletValue) }} ISK</span>
               </template>
             </el-table-column>
-          </el-table>
+          </KTable>
           <div class="wallet-detail-total">
             <span class="total-label">总计：</span>
             <span class="total-value">{{ formatNumber(walletDetailTotal) }} ISK</span>
           </div>
         </div>
         <div v-else class="wallet-detail-empty">
-          <el-empty description="暂无详细数据" :image-size="100" />
+          <KEmpty why="暂无详细数据" size="md" />
           <div v-if="walletDetailTotal > 0" class="wallet-detail-total">
             <span class="total-label">总价值：</span>
             <span class="total-value">{{ formatNumber(walletDetailTotal) }} ISK</span>
@@ -1426,7 +1410,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
     <el-dialog v-model="orderDetailDialogVisible" title="订单详情" width="90%" :close-on-click-modal="false">
       <div class="order-detail-content" v-loading="orderDetailLoading" element-loading-text="正在加载订单数据...">
         <div v-if="orderDetailList.length > 0">
-          <el-table :data="orderDetailList" border max-height="600px" show-overflow-tooltip stripe>
+          <KTable :data="orderDetailList" border max-height="600px" show-overflow-tooltip stripe density="compact">
             <el-table-column label="角色名称" prop="character_name" width="120" fixed="left">
               <template #default="{ row }">
                 <span style="font-weight: 500;">{{ row.character_name }}</span>
@@ -1481,14 +1465,14 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
                 </span>
               </template>
             </el-table-column>
-          </el-table>
+          </KTable>
           <div class="order-detail-total">
             <span class="total-label">剩余订单总价值：</span>
             <span class="total-value">{{ formatNumber(orderDetailTotal) }} ISK</span>
           </div>
         </div>
         <div v-else class="order-detail-empty">
-          <el-empty description="暂无订单数据" :image-size="100" />
+          <KEmpty why="暂无订单数据" size="md" />
         </div>
       </div>
       <template #footer>
@@ -1522,7 +1506,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
         <!-- 详细信息视图 -->
         <div v-if="runningJobsViewMode === 'detail'">
           <div v-if="runningJobsDetailList.length > 0">
-            <el-table :data="runningJobsDetailList" border max-height="600px" show-overflow-tooltip stripe>
+            <KTable :data="runningJobsDetailList" border max-height="600px" show-overflow-tooltip stripe density="compact">
               <el-table-column label="任务类型" prop="job_type" width="100" align="center">
                 <template #default="{ row }">
                   <el-tag :type="row.job_type === '个人' ? 'success' : 'info'" size="small">
@@ -1579,7 +1563,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
                   <span style="color: #67c23a; font-weight: 600;">{{ formatNumber(row.value) }} ISK</span>
                 </template>
               </el-table-column>
-            </el-table>
+            </KTable>
             <div class="running-jobs-detail-total">
               <span class="total-label">总生产价值：</span>
               <span class="total-value">{{formatNumber(runningJobsDetailList.reduce((sum, item) => sum + item.value,
@@ -1588,14 +1572,14 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
             </div>
           </div>
           <div v-else class="running-jobs-detail-empty">
-            <el-empty description="暂无运行中任务数据" :image-size="100" />
+            <KEmpty why="暂无运行中任务数据" size="md" />
           </div>
         </div>
 
         <!-- 角色占用情况视图 -->
         <div v-if="runningJobsViewMode === 'character'">
           <div v-if="runningJobsCharacterSummaryList.length > 0">
-            <el-table :data="runningJobsCharacterSummaryList" border max-height="600px" show-overflow-tooltip stripe>
+            <KTable :data="runningJobsCharacterSummaryList" border max-height="600px" show-overflow-tooltip stripe density="compact">
               <el-table-column label="角色头像" width="100" align="center">
                 <template #default="{ row }">
                   <img :src="`https://imageserver.eveonline.com/Character/${row.character_id}_64.jpg`" alt="角色头像"
@@ -1654,7 +1638,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
                   </span>
                 </template>
               </el-table-column>
-            </el-table>
+            </KTable>
             <div class="running-jobs-character-total">
               <span class="total-label">总角色数：</span>
               <span class="total-value">{{ runningJobsCharacterSummaryList.length }}</span>
@@ -1671,7 +1655,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
             </div>
           </div>
           <div v-else class="running-jobs-detail-empty">
-            <el-empty description="暂无角色占用数据" :image-size="100" />
+            <KEmpty why="暂无角色占用数据" size="md" />
           </div>
         </div>
 
@@ -1681,7 +1665,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
             <el-row :gutter="20">
               <el-col v-for="item in runningJobsSummaryList" :key="item.product_type_id" :xs="24" :sm="12" :md="8"
                 :lg="6" style="margin-bottom: 20px;">
-                <el-card shadow="hover" class="summary-card" style="cursor: pointer;"
+                <KCard hover class="summary-card" style="cursor: pointer;"
                   @click="switchRunningJobsView('detail')">
                   <div class="summary-card-content">
                     <div class="summary-icon-container">
@@ -1702,7 +1686,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
                       </div>
                     </div>
                   </div>
-                </el-card>
+                </KCard>
               </el-col>
             </el-row>
             <div class="running-jobs-summary-total">
@@ -1713,7 +1697,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
             </div>
           </div>
           <div v-else class="running-jobs-detail-empty">
-            <el-empty description="暂无运行中任务数据" :image-size="100" />
+            <KEmpty why="暂无运行中任务数据" size="md" />
           </div>
         </div>
       </div>
@@ -1733,17 +1717,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
   min-height: 400px;
 }
 
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
-  padding: 20px 24px;
-  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-}
+/* 顶部操作条已收敛到 KToolbar（P1-C4），这里不再重复写背景/间距 */
 
 .time-range-container {
   display: flex;
@@ -1754,7 +1728,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 
 .time-range-label {
   font-size: 15px;
-  color: #606266;
+  color: var(--k-color-text-secondary);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -1768,18 +1742,12 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 
 .switch-label {
   font-size: 15px;
-  color: #606266;
+  color: var(--k-color-text-secondary);
   font-weight: 500;
 }
 
 .chart-section {
   margin-bottom: 24px;
-}
-
-.chart-section :deep(.el-card) {
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .pie-chart {
@@ -1799,83 +1767,64 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
   min-height: 400px;
 }
 
-.data-card {
+/* 卡片外壳（底/描边/圆角/阴影）统一交给 KCard，这里只管栅格间距与悬浮位移 */
+.data-section .data-card {
   margin-bottom: 24px;
-  border-radius: 12px;
-  transition: all 0.3s ease;
   overflow: hidden;
-  border: 2px solid transparent;
+  transition:
+    transform var(--k-dur-2) var(--k-ease),
+    box-shadow var(--k-dur-2) var(--k-ease),
+    border-color var(--k-dur-2) var(--k-ease);
 }
 
-.data-card:hover {
+.data-section .data-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-}
-
-.data-card :deep(.el-card__body) {
-  padding: 28px 24px;
 }
 
 .data-card-content {
+  /* KCard 用 padding="none"，内距保留在原内容容器上：
+     版心收窄到 1760 后四列卡内容宽约 302px，横向内距 24 → 20 才不会被省略号截断 */
+  padding: 28px 20px;
   text-align: center;
 }
 
-.data-header {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
 .data-icon {
+  display: block;
+  margin: 0 auto 12px;
   font-size: 24px;
   width: 24px;
   height: 24px;
 }
 
 .data-icon-total {
-  color: #409eff;
+  color: var(--k-color-primary);
 }
 
 .data-icon-wallet {
-  color: #67c23a;
+  color: var(--k-color-success);
 }
 
 .data-icon-order {
-  color: #e6a23c;
+  color: var(--k-color-warning);
 }
 
 .data-icon-process {
-  color: #909399;
+  color: var(--k-color-text-secondary);
 }
 
 .data-icon-marked {
-  color: #f56c6c;
+  color: var(--k-color-danger);
 }
 
 .data-icon-unmarked {
-  color: #909399;
+  color: var(--k-color-text-secondary);
 }
 
-.data-label {
-  font-size: 16px;
-  color: #606266;
-  margin: 0;
-  font-weight: 500;
-}
-
-.data-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: #303133;
-  margin-bottom: 12px;
-  line-height: 1.2;
-}
-
-.data-value-total {
-  font-size: 36px;
-  color: #303133;
+/* 可点击的三张卡：保留指针与 hover 抬升（阴影/描边由 KCard hover 提供） */
+.data-card-wallet,
+.data-card-order,
+.data-card-process {
+  cursor: pointer;
 }
 
 .data-change {
@@ -1883,116 +1832,32 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
   margin-top: 8px;
   font-weight: 500;
   padding: 4px 12px;
-  border-radius: 6px;
+  border-radius: var(--k-radius-sm);
   display: inline-block;
 }
 
 .data-change.change-positive {
-  color: #67c23a;
-  background-color: rgba(103, 194, 58, 0.1);
+  color: var(--k-color-success);
+  background-color: color-mix(in srgb, var(--k-color-success) 12%, transparent);
 }
 
 .data-change.change-negative {
-  color: #f56c6c;
-  background-color: rgba(245, 108, 108, 0.1);
+  color: var(--k-color-danger);
+  background-color: color-mix(in srgb, var(--k-color-danger) 12%, transparent);
 }
 
-.data-card-total {
-  border-left: 4px solid #409eff;
-  background: linear-gradient(135deg, #ffffff 0%, #ecf5ff 100%);
+/* 深色底上 12% 混色几乎看不出，涨跌底色再抬一档 */
+[data-theme='dark'] .data-change.change-positive {
+  background-color: color-mix(in srgb, var(--k-color-success) 22%, transparent);
 }
 
-.data-card-total:hover {
-  border-left-color: #409eff;
-  box-shadow: 0 8px 24px rgba(64, 158, 255, 0.15);
-}
-
-.data-card-wallet {
-  border-left: 4px solid #67c23a;
-  background: linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%);
-  cursor: pointer;
-  position: relative;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.data-card-wallet:hover {
-  border-left-color: #67c23a;
-  border-left-width: 6px;
-  box-shadow: 0 12px 32px rgba(103, 194, 58, 0.25);
-  transform: translateY(-6px) scale(1.02);
-  background: linear-gradient(135deg, #ffffff 0%, #e8f5e9 100%);
-}
-
-.data-card-wallet:active {
-  transform: translateY(-2px) scale(1.01);
-  box-shadow: 0 8px 20px rgba(103, 194, 58, 0.2);
-}
-
-.data-card-order {
-  border-left: 4px solid #e6a23c;
-  background: linear-gradient(135deg, #ffffff 0%, #fff7ed 100%);
-  cursor: pointer;
-  position: relative;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.data-card-order:hover {
-  border-left-color: #e6a23c;
-  border-left-width: 6px;
-  box-shadow: 0 12px 32px rgba(230, 162, 60, 0.25);
-  transform: translateY(-6px) scale(1.02);
-  background: linear-gradient(135deg, #ffffff 0%, #fff4e6 100%);
-}
-
-.data-card-order:active {
-  transform: translateY(-2px) scale(1.01);
-  box-shadow: 0 8px 20px rgba(230, 162, 60, 0.2);
-}
-
-.data-card-process {
-  border-left: 4px solid #909399;
-  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-  cursor: pointer;
-  position: relative;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.data-card-process:hover {
-  border-left-color: #909399;
-  border-left-width: 6px;
-  box-shadow: 0 12px 32px rgba(144, 147, 153, 0.25);
-  transform: translateY(-6px) scale(1.02);
-  background: linear-gradient(135deg, #ffffff 0%, #f0f0f0 100%);
-}
-
-.data-card-process:active {
-  transform: translateY(-2px) scale(1.01);
-  box-shadow: 0 8px 20px rgba(144, 147, 153, 0.2);
-}
-
-.data-card-marked {
-  border-left: 4px solid #f56c6c;
-  background: linear-gradient(135deg, #ffffff 0%, #fef0f0 100%);
-}
-
-.data-card-marked:hover {
-  border-left-color: #f56c6c;
-  box-shadow: 0 8px 24px rgba(245, 108, 108, 0.15);
-}
-
-.data-card-unmarked {
-  border-left: 4px solid #909399;
-  background: linear-gradient(135deg, #ffffff 0%, #f5f7fa 100%);
-}
-
-.data-card-unmarked:hover {
-  border-left-color: #909399;
-  box-shadow: 0 8px 24px rgba(144, 147, 153, 0.15);
+[data-theme='dark'] .data-change.change-negative {
+  background-color: color-mix(in srgb, var(--k-color-danger) 22%, transparent);
 }
 
 .filter-badge {
   margin-left: 4px;
-  color: #409eff;
+  color: var(--k-color-primary);
   font-weight: 500;
 }
 
@@ -2003,14 +1868,14 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 .filter-label {
   margin-bottom: 12px;
   font-size: 15px;
-  color: #606266;
+  color: var(--k-color-text-secondary);
   font-weight: 500;
 }
 
 .filter-tip {
   margin-top: 12px;
   font-size: 13px;
-  color: #909399;
+  color: var(--k-color-text-secondary);
 }
 
 .dialog-footer {
@@ -2021,12 +1886,6 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 
 @media (max-width: 768px) {
   .overview-container {
-    padding: 16px;
-  }
-
-  .toolbar {
-    flex-direction: column;
-    align-items: stretch;
     padding: 16px;
   }
 
@@ -2041,16 +1900,8 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
     justify-content: space-between;
   }
 
-  .data-value {
-    font-size: 24px;
-  }
-
-  .data-value-total {
-    font-size: 28px;
-  }
-
-  .data-label {
-    font-size: 14px;
+  .data-card-content {
+    padding: 20px 16px;
   }
 
   .data-icon {
@@ -2073,7 +1924,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 .overview-container :deep(.el-loading-text) {
   font-size: 16px;
   font-weight: 500;
-  color: #409eff;
+  color: var(--k-color-primary);
   margin-top: 12px;
 }
 
@@ -2082,7 +1933,31 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 }
 
 .overview-container :deep(.el-loading-spinner .path) {
-  stroke: #409eff;
+  stroke: var(--k-color-primary);
+}
+
+/* 汇总条：浅色底改成「语义色 8% 混 surface」，深浅两套都成立 */
+.wallet-detail-total,
+.order-detail-total,
+.running-jobs-detail-total,
+.running-jobs-summary-total,
+.running-jobs-character-total {
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: 8px;
+  text-align: right;
+  background: var(--k-color-surface-soft);
+  border: 1px solid var(--k-color-border);
+}
+
+.wallet-detail-total {
+  background: color-mix(in srgb, var(--k-color-success) 8%, var(--k-color-surface));
+  border-color: color-mix(in srgb, var(--k-color-success) 25%, var(--k-color-border));
+}
+
+.order-detail-total {
+  background: color-mix(in srgb, var(--k-color-warning) 8%, var(--k-color-surface));
+  border-color: color-mix(in srgb, var(--k-color-warning) 25%, var(--k-color-border));
 }
 
 /* 钱包详情弹窗样式 */
@@ -2090,25 +1965,16 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
   padding: 10px 0;
 }
 
-.wallet-detail-total {
-  margin-top: 20px;
-  padding: 16px;
-  background: linear-gradient(135deg, #f0f9ff 0%, #e8f5e9 100%);
-  border-radius: 8px;
-  text-align: right;
-  border: 1px solid rgba(103, 194, 58, 0.2);
-}
-
 .total-label {
   font-size: 16px;
-  color: #606266;
+  color: var(--k-color-text-secondary);
   font-weight: 500;
   margin-right: 12px;
 }
 
 .total-value {
   font-size: 20px;
-  color: #67c23a;
+  color: var(--k-color-success);
   font-weight: 700;
 }
 
@@ -2120,15 +1986,6 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 /* 订单详情弹窗样式 */
 .order-detail-content {
   padding: 10px 0;
-}
-
-.order-detail-total {
-  margin-top: 20px;
-  padding: 16px;
-  background: linear-gradient(135deg, #fff7ed 0%, #fff4e6 100%);
-  border-radius: 8px;
-  text-align: right;
-  border: 1px solid rgba(230, 162, 60, 0.2);
 }
 
 .order-detail-empty {
@@ -2147,48 +2004,22 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
   justify-content: flex-end;
 }
 
-.running-jobs-detail-total {
-  margin-top: 20px;
-  padding: 16px;
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  border-radius: 8px;
-  text-align: right;
-  border: 1px solid rgba(144, 147, 153, 0.2);
-}
-
-.running-jobs-summary-total {
-  margin-top: 20px;
-  padding: 16px;
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  border-radius: 8px;
-  text-align: right;
-  border: 1px solid rgba(144, 147, 153, 0.2);
-}
-
-.running-jobs-character-total {
-  margin-top: 20px;
-  padding: 16px;
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  border-radius: 8px;
-  text-align: right;
-  border: 1px solid rgba(144, 147, 153, 0.2);
-}
-
 .running-jobs-detail-empty {
   padding: 40px 0;
   text-align: center;
 }
 
-/* 分类汇总卡片样式 */
+/* 分类汇总卡片样式：外壳交给 KCard，这里只保留悬浮位移 */
 .summary-card {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 2px solid transparent;
+  transition:
+    transform var(--k-dur-2) var(--k-ease),
+    box-shadow var(--k-dur-2) var(--k-ease),
+    border-color var(--k-dur-2) var(--k-ease);
 }
 
 .summary-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  border-color: #909399;
+  border-color: var(--k-color-text-secondary);
 }
 
 .summary-card-content {
@@ -2209,7 +2040,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 .summary-name {
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: var(--k-color-text);
   margin-bottom: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2218,7 +2049,7 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 
 .summary-name-en {
   font-size: 12px;
-  color: #909399;
+  color: var(--k-color-text-secondary);
   margin-bottom: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2235,56 +2066,29 @@ const outputUnmarkedAssetValue = useTransition(unmarkedAssetValueSource, transit
 }
 
 .summary-label {
-  color: #606266;
+  color: var(--k-color-text-secondary);
   margin-right: 8px;
 }
 
 .summary-value {
-  color: #303133;
+  color: var(--k-color-text);
   font-weight: 500;
 }
 
 .summary-value-number {
-  color: #67c23a;
+  color: var(--k-color-success);
   font-weight: 600;
   font-size: 16px;
 }
 
-/* Theme override */
-.overview-container,
-.toolbar,
-.chart-section :deep(.el-card),
-.data-card,
-.summary-card,
-.wallet-detail-total,
-.order-detail-total,
-.running-jobs-detail-total,
-.running-jobs-summary-total,
-.running-jobs-character-total {
-  background: var(--k-color-surface) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text) !important;
-}
-
-.toolbar {
-  background: var(--k-color-surface-soft) !important;
-}
-
-.data-label,
-.switch-label,
-.time-range-label,
-.summary-label,
-.summary-name-en {
-  color: var(--k-color-text-secondary) !important;
-}
-
-.data-value,
-.data-value-total,
-.summary-name {
-  color: var(--k-color-text) !important;
-}
-
-.overview-container :deep(.el-loading-mask) {
-  background-color: color-mix(in srgb, var(--k-color-surface) 92%, transparent) !important;
+/* ── P2-C ≤1280 窄屏兜底 ─────────────────────────────────
+   1200–1280 之间 12 栏里 k-col-3 仍是 4 张/行，卡片内容宽只剩约 180px，
+   KStat 的长金额被省略号截成 116,777,966,0…（数据读不到）。降到 3 张/行
+   （span 4），内容宽回到约 260px，与 1760 版心下 4 列的 302px 同量级。
+   加 min-width 下限：≤1199 的 span 4、≤991 的 span 6、≤767 的 span 12 保持原样。 */
+@media (max-width: 1280px) and (min-width: 1200px) {
+  .data-section .k-col-3 {
+    grid-column: span 4;
+  }
 }
 </style>

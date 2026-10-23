@@ -2,6 +2,8 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Box, Document, List, Coin } from '@element-plus/icons-vue'
+import KTable from '@/components/k/KTable.vue'
+import KStat from '@/components/k/KStat.vue'
 import { http } from '@/http'
 
 // ==================== 功能模块 ====================
@@ -57,6 +59,15 @@ const formatStatusLabel = (status: string) => {
     failed: { label: '失败', type: 'danger' },
   }
   return map[status] || { label: status || '未知', type: 'info' }
+}
+
+/** 把状态语义映射到 KStat 的 tone（info 无对应档，回落 default） */
+const statusTone = (status: string): 'default' | 'primary' | 'success' | 'warning' | 'danger' => {
+  const type = formatStatusLabel(status).type
+  if (type === 'success' || type === 'warning' || type === 'danger' || type === 'primary') {
+    return type
+  }
+  return 'default'
 }
 
 const formatDateTime = (isoStr: string): string => {
@@ -341,24 +352,10 @@ onUnmounted(() => {
         </div>
 
         <div class="status-grid">
-          <div class="status-item">
-            <div class="status-label">当前状态</div>
-            <div class="status-value">
-              <el-tag
-                :type="formatStatusLabel(statusData.overall_status).type as any"
-                size="large"
-                effect="dark"
-              >
-                {{ formatStatusLabel(statusData.overall_status).label }}
-              </el-tag>
-            </div>
-          </div>
-          <div class="status-item">
-            <div class="status-label">缓存 type_id 数量</div>
-            <div class="status-value">
-              <span class="highlight-number">{{ statusData.cached_type_id_count ?? 0 }}</span>
-            </div>
-          </div>
+          <KStat class="status-item" label="当前状态" :value="formatStatusLabel(statusData.overall_status).label"
+            :tone="statusTone(statusData.overall_status)" align="center" />
+          <KStat class="status-item" label="缓存 type_id 数量" :value="statusData.cached_type_id_count ?? 0"
+            align="center" />
           <div class="status-item">
             <div class="status-label">Flag 状态</div>
             <div class="status-value">
@@ -478,11 +475,13 @@ onUnmounted(() => {
             刷新
           </el-button>
         </div>
-        <el-table
+        <KTable
           :data="logsData"
           style="width: 100%"
           size="small"
-          empty-text="暂无刷新历史"
+          density="compact"
+          empty-why="还没有刷新记录"
+          empty-hint="手动或定时刷新一次后就会出现在这里"
         >
           <el-table-column label="时间" min-width="160">
             <template #default="{ row }">
@@ -510,7 +509,7 @@ onUnmounted(() => {
               <span v-else>-</span>
             </template>
           </el-table-column>
-        </el-table>
+        </KTable>
       </div>
     </div>
 
@@ -533,11 +532,13 @@ onUnmounted(() => {
           <p class="action-warn">删除标记后，系统将在下次轮询时（最多5分钟）重新拉取该角色的订单历史数据。</p>
         </div>
 
-        <el-table
+        <KTable
           :data="ordersStatsUsers"
           style="width: 100%"
           size="small"
-          empty-text="暂无VIP用户"
+          density="compact"
+          empty-why="没有需要刷新订单统计的 VIP 用户"
+          empty-hint="VIP 用户产生订单历史后会自动出现在这里"
         >
           <el-table-column prop="user_name" label="用户名" min-width="160" />
           <el-table-column label="标记状态" width="120" align="center">
@@ -564,7 +565,7 @@ onUnmounted(() => {
               </el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </KTable>
       </div>
     </div>
 
@@ -671,7 +672,7 @@ onUnmounted(() => {
   justify-content: center;
   width: 52px;
   height: 52px;
-  border-radius: 10px;
+  border-radius: var(--k-radius-sm);
   background: var(--k-color-primary-soft);
   color: var(--k-color-primary);
   flex-shrink: 0;
@@ -747,8 +748,8 @@ onUnmounted(() => {
 }
 
 .status-item {
-  background: var(--k-color-background);
-  border-radius: 6px;
+  background: var(--k-color-surface-soft);
+  border-radius: var(--k-radius-sm);
   padding: 16px;
   text-align: center;
 }
@@ -774,8 +775,8 @@ onUnmounted(() => {
 .progress-section {
   margin-top: 20px;
   padding: 16px;
-  background: var(--k-color-background);
-  border-radius: 6px;
+  background: var(--k-color-surface-soft);
+  border-radius: var(--k-radius-sm);
 }
 
 .progress-header {

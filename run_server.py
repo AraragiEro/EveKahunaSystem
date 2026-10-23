@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import sys
 import asyncio
 import platform
@@ -228,6 +228,14 @@ async def main():
         logger.info("Jita 订单刷新定时器已启动")
     except Exception as e:
         logger.error(f"启动 Jita 订单刷新定时器时发生错误: {e}", exc_info=True)
+
+    # 启动调价缓存刷新定时器（计算链路只读 market_price_cache，这里是唯一刷新者）
+    try:
+        from src_v2.model.EVE.market.market_price_cache import MarketPriceCacheRefreshTimer
+        MarketPriceCacheRefreshTimer().start()
+        logger.info("调价缓存刷新定时器已启动")
+    except Exception as e:
+        logger.error(f"启动调价缓存刷新定时器时发生错误: {e}", exc_info=True)
 
     # 启动jita基础成本刷新定时器（企业版功能；社区版无该模块时静默跳过）
     if is_enterprise():

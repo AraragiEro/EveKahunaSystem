@@ -528,7 +528,7 @@ watch([priceBase, materialPriceBase], () => {
         <div v-for="group in groupedProducts" :key="group.tier" class="tier-group">
           <!-- Tier Group Header -->
           <div class="tier-group-header" :style="{ borderLeftColor: tierBorderColor(group.tier) }">
-            <img :src="typeIconUrl(group.items[0].type_id)" class="tier-group-icon-img" />
+            <img :src="typeIconUrl(group.items[0].type_id)" class="tier-group-icon-img" alt="" />
             <span class="tier-group-label">{{ group.label }}</span>
             <span class="tier-group-count">({{ group.items.length }} 产品)</span>
           </div>
@@ -544,7 +544,7 @@ watch([priceBase, materialPriceBase], () => {
             >
               <!-- Icon area -->
               <div class="card-icon-area">
-                <img :src="typeIconUrl(product.type_id)" class="card-icon-img" />
+                <img :src="typeIconUrl(product.type_id)" class="card-icon-img" alt="" />
                 <el-tag :type="tierTagType(product.tier)" size="small" effect="dark" class="card-tier-tag">
                   {{ tierLabel(product.tier) }}
                 </el-tag>
@@ -664,7 +664,7 @@ watch([priceBase, materialPriceBase], () => {
 
                 <!-- Leaf: P1 input -->
                 <template v-if="nodeProps.data.nodeType === 'leaf'">
-                  <img :src="typeIconUrl(nodeProps.data.item.type_id)" class="pi-fn-icon" />
+                  <img :src="typeIconUrl(nodeProps.data.item.type_id)" class="pi-fn-icon" alt="" />
                   <div class="pi-fn-name">{{ nodeProps.data.item.name_zh }}</div>
                   <div class="pi-fn-qty">×{{ nodeProps.data.item.quantity }}</div>
                   <div class="pi-fn-price">{{ formatMoney(nodeProps.data.item.unit_price) }}</div>
@@ -672,7 +672,7 @@ watch([priceBase, materialPriceBase], () => {
 
                 <!-- Factory node -->
                 <template v-if="nodeProps.data.nodeType === 'factory'">
-                  <img :src="typeIconUrl(nodeProps.data.tierDetail.type_id)" class="pi-fn-icon" />
+                  <img :src="typeIconUrl(nodeProps.data.tierDetail.type_id)" class="pi-fn-icon" alt="" />
                   <div class="pi-fn-name">{{ nodeProps.data.tierDetail.name_zh }}</div>
                   <div class="pi-fn-tier">P{{ nodeProps.data.tierDetail.tier }}</div>
                   <div class="pi-fn-divider"></div>
@@ -685,7 +685,7 @@ watch([priceBase, materialPriceBase], () => {
 
                 <!-- Output node -->
                 <template v-if="nodeProps.data.nodeType === 'output'">
-                  <img :src="typeIconUrl(nodeProps.data.outputItem.type_id)" class="pi-fn-icon" />
+                  <img :src="typeIconUrl(nodeProps.data.outputItem.type_id)" class="pi-fn-icon" alt="" />
                   <div class="pi-fn-name">{{ nodeProps.data.outputItem.name_zh }}</div>
                   <div class="pi-fn-tier">产出</div>
                   <div class="pi-fn-divider"></div>
@@ -876,7 +876,7 @@ watch([priceBase, materialPriceBase], () => {
 }
 
 .product-card:hover {
-  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+  box-shadow: var(--k-shadow-md);
   transform: translateY(-2px);
   border-color: var(--k-color-primary);
 }
@@ -951,7 +951,7 @@ watch([priceBase, materialPriceBase], () => {
 
 .fin-margin {
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: var(--k-radius-xs);
 }
 
 .fin-sep {
@@ -990,26 +990,26 @@ watch([priceBase, materialPriceBase], () => {
    MARGIN COLOR CLASSES
    ================================================================ */
 .margin-high {
-  color: #16a34a;
-  background: rgba(22, 163, 74, 0.1);
+  color: var(--k-color-success);
+  background: var(--k-color-success-soft);
 }
 
 .margin-mid {
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
+  color: var(--k-color-warning);
+  background: var(--k-color-warning-soft);
 }
 
 .margin-low {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
+  color: var(--k-color-danger);
+  background: var(--k-color-danger-soft);
 }
 
 .profit-positive {
-  color: #16a34a;
+  color: var(--k-color-success);
 }
 
 .profit-negative {
-  color: #ef4444;
+  color: var(--k-color-danger);
 }
 
 /* ================================================================
@@ -1132,9 +1132,9 @@ watch([priceBase, materialPriceBase], () => {
 }
 
 .level-badge {
-  color: #fff;
+  color: var(--k-color-text-inverse);
   padding: 1px 8px;
-  border-radius: 3px;
+  border-radius: var(--k-radius-xs);
   font-size: 12px;
   font-weight: 700;
 }
@@ -1176,14 +1176,14 @@ watch([priceBase, materialPriceBase], () => {
 .tree-node {
   background: var(--k-color-surface);
   border: 1px solid var(--k-color-border);
-  border-radius: 6px;
+  border-radius: var(--k-radius-sm);
   padding: 10px 12px;
   min-width: 100px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  box-shadow: var(--k-shadow-xs);
 }
 
 .tree-node-icon {
@@ -1233,7 +1233,7 @@ watch([priceBase, materialPriceBase], () => {
   font-size: 13px;
   font-weight: 700;
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: var(--k-radius-xs);
   margin-top: 2px;
 }
 
@@ -1377,7 +1377,7 @@ watch([priceBase, materialPriceBase], () => {
   padding: 10px 24px;
   background: var(--k-color-surface-soft);
   border: 1px solid var(--k-color-border);
-  border-radius: 6px;
+  border-radius: var(--k-radius-sm);
   font-size: 14px;
   color: var(--k-color-text-secondary);
   flex-wrap: wrap;
@@ -1496,7 +1496,7 @@ watch([priceBase, materialPriceBase], () => {
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--k-shadow-xs);
   font-size: 12px;
   color: var(--k-color-text);
 }
@@ -1564,7 +1564,7 @@ watch([priceBase, materialPriceBase], () => {
   font-size: 12px;
   font-weight: 700;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--k-radius-xs);
   margin-top: 2px;
   white-space: nowrap;
 }
@@ -1588,7 +1588,7 @@ watch([priceBase, materialPriceBase], () => {
   padding: 10px 24px;
   background: var(--k-color-surface-soft);
   border: 1px solid var(--k-color-border);
-  border-radius: 6px;
+  border-radius: var(--k-radius-sm);
   font-size: 14px;
   color: var(--k-color-text-secondary);
   flex-wrap: wrap;
@@ -1602,4 +1602,9 @@ watch([priceBase, materialPriceBase], () => {
 .total-sep {
   color: var(--k-color-border);
 }
+
+/* 利润率档位原本只靠颜色区分，色觉障碍/深色下都需要一个非颜色线索 */
+.margin-high::before { content: '▲'; margin-right: 3px; font-weight: 700; }
+.margin-mid::before { content: '●'; margin-right: 3px; }
+.margin-low::before { content: '▼'; margin-right: 3px; font-weight: 700; }
 </style>

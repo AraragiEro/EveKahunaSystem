@@ -3,6 +3,7 @@ export interface PricingPlan {
   name: string
   price: string
   priceUnit: string
+  /** 卡片顶部强调色，直接用 CSS 变量字符串，跟着主题走 */
   color: string
   features: Array<{
     category: string
@@ -20,7 +21,7 @@ export const pricingPlans: PricingPlan[] = [
     name: '免费用户',
     price: '免费',
     priceUnit: '',
-    color: '#909399',
+    color: 'var(--k-color-text-secondary)',
     features: [
       {
         category: '零成本，即刻规划你的工业帝国',
@@ -40,7 +41,7 @@ export const pricingPlans: PricingPlan[] = [
     name: 'Alpha 订阅',
     price: '500M',
     priceUnit: 'ISK / 月',
-    color: '#409eff',
+    color: 'var(--k-color-primary)',
     note: '提示：添加公司库存需要总监权限',
     features: [
       {
@@ -75,7 +76,7 @@ export const pricingPlans: PricingPlan[] = [
     name: 'Omega 订阅',
     price: '2B',
     priceUnit: 'ISK / 月',
-    color: '#e6a23c',
+    color: 'var(--k-color-warning)',
     hasTrial: true,
     trialText: '可领取 7 天试用',
     features: [

@@ -1,4 +1,6 @@
 <script setup lang="ts" name="HistoryView">
+import KCard from '@/components/k/KCard.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
@@ -574,19 +576,16 @@ onUnmounted(() => {
 
     <!-- 图表区域 -->
     <div class="chart-section">
-      <el-card shadow="hover">
+      <KCard>
         <div v-if="loading" class="loading-container">
-          <el-empty description="加载中..." :image-size="120" />
+          <KEmpty why="正在加载历史数据" size="md" />
         </div>
         <div v-else-if="historyData.length === 0" class="empty-container">
-          <el-empty description="暂无历史数据" :image-size="120">
-            <el-button type="primary" @click="handleSaveSnapshot">
-              保存当日快照
-            </el-button>
-          </el-empty>
+          <KEmpty why="还没有历史快照" hint="每天保存一次快照，这里就会累积出资产趋势" action-text="保存当日快照"
+            @action="handleSaveSnapshot" />
         </div>
         <div v-else ref="chartRef" class="chart"></div>
-      </el-card>
+      </KCard>
     </div>
   </div>
 </template>
@@ -648,21 +647,6 @@ onUnmounted(() => {
   }
 }
 
-/* Theme override */
-.history-container,
-.toolbar,
-.chart-section :deep(.el-card),
-.chart {
-  background: var(--k-color-surface) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text) !important;
-}
-
-.toolbar {
-  background: var(--k-color-surface-soft) !important;
-}
-
-.switch-label {
-  color: var(--k-color-text-secondary) !important;
-}
+/* 卡片已换成 KCard（surface/描边/圆角来自 --k-* token），
+   原先针对 .el-card 的「Theme override」强制覆盖整段删除。 */
 </style>

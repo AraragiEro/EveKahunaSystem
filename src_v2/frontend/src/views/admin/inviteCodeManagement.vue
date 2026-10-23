@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import KToolbar from '@/components/k/KToolbar.vue'
+import KTable from '@/components/k/KTable.vue'
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, DocumentCopy } from '@element-plus/icons-vue'
@@ -124,17 +126,19 @@ onMounted(() => {
       </el-button>
     </div>
 
-    <div class="filter-section">
+    <KToolbar dense bordered density-switch>
       <el-checkbox v-model="onlyAvailable" @change="handleFilterChange">
         只显示未使用完的邀请码
       </el-checkbox>
-    </div>
+    </KToolbar>
 
-    <el-table
+    <KTable
       :data="inviteCodes"
       v-loading="loading"
       stripe
       style="width: 100%"
+      empty-why="还没有生成过邀请码"
+      empty-hint="点右上角「生成邀请码」创建第一个"
     >
       <el-table-column prop="inviteCode" label="邀请码" width="350">
         <template #default="{ row }">
@@ -144,6 +148,8 @@ onMounted(() => {
               link
               type="primary"
               size="small"
+              aria-label="复制邀请码"
+              title="复制邀请码"
               @click="handleCopyCode(row.inviteCode)"
             >
               <el-icon><DocumentCopy /></el-icon>
@@ -190,7 +196,7 @@ onMounted(() => {
           </el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </KTable>
 
     <!-- 生成邀请码对话框 -->
     <el-dialog
@@ -232,14 +238,14 @@ onMounted(() => {
       :title="`邀请码 ${selectedInviteCode} 的使用用户`"
       width="600px"
     >
-      <el-table :data="inviteCodeUsers" stripe>
+      <KTable :data="inviteCodeUsers" stripe empty-why="这个邀请码还没有被使用" density="compact">
         <el-table-column prop="userName" label="用户名" width="200" />
         <el-table-column prop="usedDate" label="使用时间" width="300">
           <template #default="{ row }">
             {{ new Date(row.usedDate).toLocaleString('zh-CN') }}
           </template>
         </el-table-column>
-      </el-table>
+      </KTable>
       <template #footer>
         <el-button @click="usersDialogVisible = false">关闭</el-button>
       </template>
@@ -281,7 +287,7 @@ onMounted(() => {
 }
 
 .text-warning {
-  color: #e6a23c;
+  color: var(--k-color-warning);
 }
 </style>
 

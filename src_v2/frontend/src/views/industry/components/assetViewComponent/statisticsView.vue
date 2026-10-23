@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import KEmpty from '@/components/k/KEmpty.vue'
+import KCard from '@/components/k/KCard.vue'
+import KStat from '@/components/k/KStat.vue'
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
-import { ElMessage } from 'element-plus'
 import { ArrowUp, ArrowDown, Refresh } from '@element-plus/icons-vue'
 import { getChartThemeColors, themedTooltip, onThemeTokenChange } from '@/utils/echartsTheme'
 
@@ -27,7 +29,7 @@ interface Props {
     assetView: Record<number, ContainerData>
     sid: string
     view_type: string
-    config: any
+    config: unknown
     lastUpdateTime?: number | string | Date
 }
 
@@ -298,9 +300,11 @@ const initContainerChart = () => {
         tooltip: {
             ...themedTooltip(c),
             trigger: 'item',
-            formatter: (params: any) => {
-                const percentage = ((params.value / total) * 100).toFixed(2)
-                return `${params.name}<br/>价值: ${formatNumber(params.value)} ISK<br/>占比: ${percentage}%`
+            formatter: (params) => {
+                const p = Array.isArray(params) ? params[0] : params
+                const value = Number(p.value)
+                const percentage = ((value / total) * 100).toFixed(2)
+                return `${p.name}<br/>价值: ${formatNumber(value)} ISK<br/>占比: ${percentage}%`
             }
         },
         legend: {
@@ -323,8 +327,8 @@ const initContainerChart = () => {
                 label: {
                     show: true,
                     color: c.text,
-                    formatter: (params: any) => {
-                        const percentage = ((params.value / total) * 100).toFixed(1)
+                    formatter: (params) => {
+                        const percentage = ((Number(params.value) / total) * 100).toFixed(1)
                         return `${params.name}\n${percentage}%`
                     }
                 },
@@ -382,9 +386,11 @@ const initTypeChart = () => {
         tooltip: {
             ...themedTooltip(c),
             trigger: 'item',
-            formatter: (params: any) => {
-                const percentage = ((params.value / total) * 100).toFixed(2)
-                return `${params.name}<br/>价值: ${formatNumber(params.value)} ISK<br/>占比: ${percentage}%`
+            formatter: (params) => {
+                const p = Array.isArray(params) ? params[0] : params
+                const value = Number(p.value)
+                const percentage = ((value / total) * 100).toFixed(2)
+                return `${p.name}<br/>价值: ${formatNumber(value)} ISK<br/>占比: ${percentage}%`
             }
         },
         legend: {
@@ -407,8 +413,8 @@ const initTypeChart = () => {
                 label: {
                     show: true,
                     color: c.text,
-                    formatter: (params: any) => {
-                        const percentage = ((params.value / total) * 100).toFixed(1)
+                    formatter: (params) => {
+                        const percentage = ((Number(params.value) / total) * 100).toFixed(1)
                         return `${params.name}\n${percentage}%`
                     }
                 },
@@ -589,31 +595,31 @@ onUnmounted(() => {
                     </el-button>
                 </div>
             </div>
-            <div v-if="!loading && (!assetView || Object.keys(assetView).length === 0)" class="empty-state">
-                <el-empty description="暂无数据" />
-            </div>
+            <KEmpty
+                v-if="!loading && (!assetView || Object.keys(assetView).length === 0)"
+                size="lg"
+                why="还没有资产数据"
+                hint="先到资产列表添加角色并刷新一次，这里会按容器与类型汇总"
+            />
             <template v-else>
                 <!-- 总价值卡片 -->
-                <el-card class="total-value-card" shadow="hover">
-                <div class="total-value-content">
-                    <div class="total-value-label">资产总价值</div>
-                    <el-statistic 
-                        :value="totalValue" 
-                        :precision="2" 
-                        suffix=" ISK"
-                        class="total-value-statistic"
+                <KCard class="total-value-card" padding="md">
+                    <KStat
+                        size="lg"
+                        label="资产总价值"
+                        :value="totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })"
+                        unit="ISK"
                     />
-                </div>
-            </el-card>
+                </KCard>
 
             <!-- 饼图展示区 -->
             <div class="charts-container">
-                <el-card class="chart-card" shadow="hover">
+                <KCard class="chart-card" padding="sm">
                     <div ref="containerChartRef" class="chart-container"></div>
-                </el-card>
-                <el-card class="chart-card" shadow="hover">
+                </KCard>
+                <KCard class="chart-card" padding="sm">
                     <div ref="typeChartRef" class="chart-container"></div>
-                </el-card>
+                </KCard>
             </div>
         </template>
     </div>
@@ -627,36 +633,37 @@ onUnmounted(() => {
         class="detail-dialog"
     >
         <div class="detail-content">
-            <el-card 
+            <KCard 
                 v-for="stat in containerStats" 
                 :key="stat.name"
                 class="outer-card"
-                shadow="hover"
             >
                 <template #header>
                     <div class="card-header">
                         <div class="header-info">
                             <span class="header-title">{{ stat.name }}</span>
                             <div class="header-stats">
-                                <el-tag type="info" size="large">数量: {{ formatNumber(stat.totalQuantity) }}</el-tag>
-                                <el-tag type="success" size="large">价值: {{ formatNumber(stat.totalValue) }} ISK</el-tag>
-                                <el-tag type="warning" size="large">占比: {{ stat.percentage.toFixed(2) }}%</el-tag>
+                                <KStat label="数量" :value="formatNumber(stat.totalQuantity)" />
+                                <KStat label="价值" :value="formatNumber(stat.totalValue)" unit="ISK" tone="success" />
+                                <KStat label="占比" :value="stat.percentage.toFixed(2)" unit="%" tone="warning" />
                             </div>
                         </div>
                         <el-button 
                             :icon="expandedContainers.has(stat.name) ? ArrowUp : ArrowDown"
                             circle
+                            :aria-label="expandedContainers.has(stat.name) ? `收起 ${stat.name}` : `展开 ${stat.name}`"
+                            :title="expandedContainers.has(stat.name) ? '收起该容器' : '展开该容器'"
                             @click="toggleContainer(stat.name)"
                             class="expand-button"
                         />
                     </div>
                 </template>
                 <div v-if="expandedContainers.has(stat.name)" class="inner-cards">
-                    <el-card 
+                    <KCard 
                         v-for="asset in stat.assets" 
                         :key="asset.type_id"
                         class="inner-card"
-                        shadow="never"
+                        padding="sm"
                     >
                         <!-- 占比背景进度：浅绿色按该资产在容器中的占比填充 -->
                         <div 
@@ -675,23 +682,14 @@ onUnmounted(() => {
                                 <div class="asset-name-en">{{ asset.type_name }}</div>
                             </div>
                             <div class="asset-stats">
-                                <div class="stat-item">
-                                    <span class="stat-label">数量:</span>
-                                    <span class="stat-value">{{ formatNumber(asset.quantity) }}</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label">价值:</span>
-                                    <span class="stat-value">{{ formatNumber(asset.price * asset.quantity) }} ISK</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label">占比:</span>
-                                    <span class="stat-value">{{ getAssetPercentageInContainer(asset, stat).toFixed(2) }}%</span>
-                                </div>
+                                <KStat label="数量" :value="formatNumber(asset.quantity)" align="right" />
+                                <KStat label="价值" :value="formatNumber(asset.price * asset.quantity)" unit="ISK" align="right" />
+                                <KStat label="占比" :value="getAssetPercentageInContainer(asset, stat).toFixed(2)" unit="%" align="right" />
                             </div>
                         </div>
-                    </el-card>
+                    </KCard>
                 </div>
-            </el-card>
+            </KCard>
         </div>
     </el-dialog>
 
@@ -703,36 +701,37 @@ onUnmounted(() => {
         class="detail-dialog"
     >
         <div class="detail-content">
-            <el-card 
+            <KCard 
                 v-for="stat in typeStats" 
                 :key="stat.classType"
                 class="outer-card"
-                shadow="hover"
             >
                 <template #header>
                     <div class="card-header">
                         <div class="header-info">
                             <span class="header-title">{{ stat.classType }}</span>
                             <div class="header-stats">
-                                <el-tag type="info" size="large">数量: {{ formatNumber(stat.totalQuantity) }}</el-tag>
-                                <el-tag type="success" size="large">价值: {{ formatNumber(stat.totalValue) }} ISK</el-tag>
-                                <el-tag type="warning" size="large">占比: {{ stat.percentage.toFixed(2) }}%</el-tag>
+                                <KStat label="数量" :value="formatNumber(stat.totalQuantity)" />
+                                <KStat label="价值" :value="formatNumber(stat.totalValue)" unit="ISK" tone="success" />
+                                <KStat label="占比" :value="stat.percentage.toFixed(2)" unit="%" tone="warning" />
                             </div>
                         </div>
                         <el-button 
                             :icon="expandedTypes.has(stat.classType) ? ArrowUp : ArrowDown"
                             circle
+                            :aria-label="expandedTypes.has(stat.classType) ? `收起 ${stat.classType}` : `展开 ${stat.classType}`"
+                            :title="expandedTypes.has(stat.classType) ? '收起该类目' : '展开该类目'"
                             @click="toggleType(stat.classType)"
                             class="expand-button"
                         />
                     </div>
                 </template>
                 <div v-if="expandedTypes.has(stat.classType)" class="inner-cards">
-                    <el-card 
+                    <KCard 
                         v-for="asset in stat.assets" 
                         :key="asset.type_id"
                         class="inner-card"
-                        shadow="never"
+                        padding="sm"
                     >
                         <!-- 占比背景进度：浅绿色按该资产在分类中的占比填充 -->
                         <div 
@@ -751,36 +750,20 @@ onUnmounted(() => {
                                 <div class="asset-name-en">{{ asset.type_name }}</div>
                             </div>
                             <div class="asset-stats">
-                                <div class="stat-item">
-                                    <span class="stat-label">数量:</span>
-                                    <span class="stat-value">{{ formatNumber(asset.quantity) }}</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label">价值:</span>
-                                    <span class="stat-value">{{ formatNumber(asset.price * asset.quantity) }} ISK</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-label">占比:</span>
-                                    <span class="stat-value">{{ getAssetPercentageInType(asset, stat).toFixed(2) }}%</span>
-                                </div>
+                                <KStat label="数量" :value="formatNumber(asset.quantity)" align="right" />
+                                <KStat label="价值" :value="formatNumber(asset.price * asset.quantity)" unit="ISK" align="right" />
+                                <KStat label="占比" :value="getAssetPercentageInType(asset, stat).toFixed(2)" unit="%" align="right" />
                             </div>
                         </div>
-                    </el-card>
+                    </KCard>
                 </div>
-            </el-card>
+            </KCard>
         </div>
     </el-dialog>
 </template>
 
 <style scoped>
 .statistics-view-content {
-    min-height: 400px;
-}
-
-.empty-state {
-    display: flex;
-    justify-content: center;
-    align-items: center;
     min-height: 400px;
 }
 
@@ -797,7 +780,7 @@ onUnmounted(() => {
     align-items: center;
     gap: 12px;
     padding: 16px;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    background: var(--k-gradient-toolbar);
     border-radius: 8px;
 }
 
@@ -818,12 +801,12 @@ onUnmounted(() => {
     font-size: 14px;
     padding: 10px 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-primary) 20%, transparent);
     transition: all 0.3s ease;
 }
 
 .toolbar-button:hover {
-    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
     transform: translateY(-1px);
 }
 
@@ -832,70 +815,47 @@ onUnmounted(() => {
     align-items: center;
     gap: 8px;
     font-size: 14px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .time-label {
     font-weight: 500;
-    color: #909399;
+    color: var(--k-color-text-tertiary);
 }
 
 .time-value {
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-text);
 }
 
 .refresh-button {
     font-size: 14px;
     padding: 10px 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-primary) 20%, transparent);
     transition: all 0.3s ease;
 }
 
 .refresh-button:hover {
-    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
     transform: translateY(-1px);
 }
 
 /* 总价值卡片 */
 .total-value-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, var(--k-color-primary) 0%, color-mix(in srgb, var(--k-color-primary) 72%, var(--k-color-shade)) 100%);
     border: none;
-    color: white;
 }
 
-.total-value-card :deep(.el-card__body) {
-    padding: 24px;
+/* 渐变卡内的指标反白，保证强调底上的可读性 */
+.total-value-card :deep(.k-stat__label),
+.total-value-card :deep(.k-stat__hint) {
+    color: color-mix(in srgb, var(--k-color-text-inverse) 82%, transparent);
 }
 
-.total-value-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-}
-
-.total-value-label {
-    font-size: 18px;
-    font-weight: 600;
-    opacity: 0.9;
-}
-
-.total-value-statistic {
-    margin-top: 8px;
-}
-
-.total-value-statistic :deep(.el-statistic__number) {
-    font-size: 36px;
-    font-weight: 700;
-    color: white;
-}
-
-.total-value-statistic :deep(.el-statistic__suffix) {
-    font-size: 20px;
-    color: rgba(255, 255, 255, 0.9);
-    margin-left: 8px;
+.total-value-card :deep(.k-stat__value),
+.total-value-card :deep(.k-stat__unit) {
+    color: var(--k-color-text-inverse);
 }
 
 /* 饼图容器 */
@@ -907,10 +867,6 @@ onUnmounted(() => {
 
 .chart-card {
     border-radius: 8px;
-}
-
-.chart-card :deep(.el-card__body) {
-    padding: 16px;
 }
 
 .chart-container {
@@ -938,7 +894,7 @@ onUnmounted(() => {
 }
 
 .outer-card:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--k-shadow-sm);
 }
 
 .card-header {
@@ -957,7 +913,7 @@ onUnmounted(() => {
 .header-title {
     font-size: 18px;
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-text);
 }
 
 .header-stats {
@@ -981,13 +937,8 @@ onUnmounted(() => {
 .inner-card {
     position: relative;
     overflow: hidden;
-    border-radius: 6px;
-    border: 1px solid #e4e7ed;
-}
-
-.inner-card :deep(.el-card__body) {
-    position: relative;
-    padding: 12px;
+    border-radius: var(--k-radius-sm);
+    border: 1px solid var(--k-color-border);
 }
 
 /* 占比背景进度：浅绿色按百分比从左侧填充 */
@@ -1013,7 +964,7 @@ onUnmounted(() => {
 
 .asset-avatar {
     flex-shrink: 0;
-    border: 2px solid #f0f0f0;
+    border: 2px solid var(--k-color-border-subtle);
     border-radius: 4px;
 }
 
@@ -1025,40 +976,23 @@ onUnmounted(() => {
 .asset-name-zh {
     font-size: 14px;
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-text);
     margin-bottom: 4px;
     word-break: break-word;
 }
 
 .asset-name-en {
     font-size: 12px;
-    color: #909399;
+    color: var(--k-color-text-tertiary);
     word-break: break-word;
 }
 
 .asset-stats {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
     flex-shrink: 0;
     text-align: right;
-}
-
-.stat-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.stat-label {
-    font-size: 12px;
-    color: #909399;
-}
-
-.stat-value {
-    font-size: 13px;
-    font-weight: 600;
-    color: #303133;
 }
 
 /* 响应式设计 */
@@ -1114,65 +1048,11 @@ onUnmounted(() => {
     }
 }
 
-/* Theme override */
-.statistics-view-content,
-.statistics-view-container,
-.toolbar,
-.summary-card,
-.total-value-card,
-.charts-container,
-.chart-card,
-.outer-card,
-.inner-card,
-.detail-content {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
-}
-
-.summary-card,
-.chart-card,
-.outer-card,
-.inner-card {
-    box-shadow: var(--k-shadow-sm) !important;
-}
-
-.outer-card:hover,
-.chart-card:hover,
-.summary-card:hover {
-    box-shadow: var(--k-shadow-md) !important;
-}
-
-.header-title,
-.asset-name-zh,
-.stat-value {
-    color: var(--k-color-text) !important;
-}
-
-.total-value-label,
-.asset-name-en,
-.stat-label {
-    color: var(--k-color-text-secondary) !important;
-}
-
-.asset-avatar {
-    border-color: var(--k-color-border) !important;
-}
-
-.statistics-view-container :deep(.el-card),
-.statistics-view-container :deep(.el-dialog),
-.statistics-view-container :deep(.el-dialog__header),
-.statistics-view-container :deep(.el-dialog__body),
-.statistics-view-container :deep(.el-dialog__footer),
-.statistics-view-container :deep(.el-button),
-.statistics-view-container :deep(.el-tag) {
-    border-color: var(--k-color-border) !important;
-}
-
+/* 次要按钮 hover 保持品牌色（深色下用 token 混合，无需 !important） */
 .statistics-view-container :deep(.el-button:not(.el-button--primary):hover) {
-    color: var(--k-color-primary) !important;
-    background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
-    border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
+    color: var(--k-color-primary);
+    background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft));
+    border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border));
 }
 </style>
 

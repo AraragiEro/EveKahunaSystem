@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 import { http } from '@/http'
-import type { PlanProductTableData, PlanTableData } from './components/interfaceType.vue'
+import type { PlanTableData } from './components/interfaceType.vue'
 import { ElMessage } from 'element-plus'
-import { Document, Loading, Check, Close, Refresh } from '@element-plus/icons-vue'
+import { Document, Loading, Check, Close, Refresh, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import KCard from '@/components/k/KCard.vue'
 import LaborView from './components/industryViewComponent/LaborView.vue'
 import CostView from './components/industryViewComponent/costView.vue'
 import PurchaseView from './components/industryViewComponent/PurchaseView.vue'
@@ -284,6 +285,26 @@ const currentStepProgress = ref<number>(0) // 当前步骤进度
 const currentStepProgressIndeterminate = ref<boolean>(false) // 当前步骤进度是否不确定
 const calculationError = ref<string | null>(null)
 const queuePosition = ref<number>(0) // 排队位置
+
+// 顶部工具栏（计划选择 + 进度）可收起，把高度让给表格；状态记在 localStorage 里
+const TOOLBAR_COLLAPSED_KEY = 'report_toolbar_collapsed'
+const toolbarCollapsed = ref<boolean>(localStorage.getItem(TOOLBAR_COLLAPSED_KEY) === '1')
+const toggleToolbar = () => {
+    toolbarCollapsed.value = !toolbarCollapsed.value
+    localStorage.setItem(TOOLBAR_COLLAPSED_KEY, toolbarCollapsed.value ? '1' : '0')
+}
+
+// 收起状态下也要看出当前计算到哪一步
+const calculationStatusText = computed(() => {
+    switch (calculationStatus.value) {
+        case 'pending': return '等待中'
+        case 'waiting': return '排队中'
+        case 'running': return `计算中 ${calculationProgress.value}%`
+        case 'completed': return '计算完成'
+        case 'failed': return '计算失败'
+        default: return '未开始'
+    }
+})
 
 // 定时器
 let statusPollingInterval: number | null = null
@@ -736,16 +757,13 @@ onUnmounted(() => {
     stopStatusPolling()
 })
 
-const LackRowClassName = (data: { row: any, rowIndex: number }) => {
-    return data.row.real_quantity > 0 ? 'lack-row' : 'full'
-}
 
 </script>
 
 <template>
-<div style="max-height: 50vh;">
-    <div class="control-panel">
-        <el-card shadow="never" class="control-card">
+<div class="decomp-page">
+    <div class="control-panel" v-show="!toolbarCollapsed">
+        <KCard class="control-card">
             <el-row :gutter="20" align="middle">
                 <!-- 计划选择区域 -->
                 <el-col :span="6">
@@ -813,6 +831,10 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
                                     <template v-else-if="calculationStatus === 'completed'">计算完成</template>
                                     <template v-else-if="calculationStatus === 'failed'">计算失败</template>
                                 </span>
+                                <!-- 收起工具栏：把上方高度让给表格 -->
+                                <el-button text size="small" class="toolbar-toggle" :icon="ArrowUp" @click="toggleToolbar">
+                                    收起
+                                </el-button>
                             </div>
                             <el-progress 
                                 :percentage="calculationProgress" 
@@ -862,11 +884,25 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
                     </div>
                 </el-col>
             </el-row>
-        </el-card>
+        </KCard>
     </div>
-    <div>
+
+    <!-- 收起后的细条：保留计划名与展开入口 -->
+    <div v-if="toolbarCollapsed" class="toolbar-collapsed-bar">
+        <span class="collapsed-plan">
+            <el-icon><Document /></el-icon>
+            {{ selectedPlan || '未选择计划' }}
+        </span>
+        <span class="collapsed-status">{{ calculationStatusText }}</span>
+        <el-button text size="small" class="toolbar-toggle" @click="toggleToolbar">
+            <el-icon><ArrowDown /></el-icon>
+            展开工具栏
+        </el-button>
+    </div>
+
+    <div class="tabs-region">
         <el-row>
-        <el-tabs style="width: 100%;">
+        <el-tabs class="decomp-tabs" style="width: 100%;">
             <el-tab-pane label="流程视图">
                 <FlowView 
                     :flow-data="PlanCalculateResultTableView"
@@ -957,34 +993,125 @@ const LackRowClassName = (data: { row: any, rowIndex: number }) => {
 <style scoped>
 /* 浅色主题：缺失材料行使用较深的红色背景 */
 :deep(.el-table .lack-row) {
-    background-color: #ff6b6b !important;
+    background-color: var(--k-color-lack-bg) !important;
     font-weight: bold !important;
-    color: #ffffff !important;
+    color: var(--k-color-text-inverse) !important;
 }
 
 /* 深色主题：缺失材料行使用亮红色背景 */
 .dark :deep(.el-table .lack-row),
 [data-theme="dark"] :deep(.el-table .lack-row),
 html.dark :deep(.el-table .lack-row) {
-    background-color: #ff4444 !important;
+    background-color: var(--k-color-lack-bg) !important;
     font-weight: bold !important;
-    color: #ffffff !important;
+    color: var(--k-color-text-inverse) !important;
 }
 
 /* 完成任务的行样式 */
 :deep(.el-table .complete-job) {
-    background-color: #e7ffc8 !important;
+    background-color: var(--k-color-success-soft) !important;
     font-weight: bold !important;
-    color: #000000 !important;
+    color: var(--k-color-text) !important;
+}
+
+/* ── 页面骨架：整页只让表格自己滚，外层不再出滚动条 ───────────────── */
+.decomp-page {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 .control-panel {
-    margin-bottom: 20px;
+    flex: 0 0 auto;
+    margin-bottom: 0;
+}
+
+/* 收起后的细条 */
+.toolbar-collapsed-bar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--k-color-border);
+    border-radius: var(--k-radius-sm);
+    background: var(--k-color-surface-soft);
+    font-size: var(--k-font-xs);
+    color: var(--k-color-text-secondary);
+}
+
+.collapsed-plan {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--k-color-text);
+    font-weight: 600;
+}
+
+.collapsed-status {
+    color: var(--k-color-primary);
+}
+
+.toolbar-collapsed-bar .toolbar-toggle {
+    margin-left: auto;
+}
+
+.toolbar-toggle {
+    margin-left: auto;
+    color: var(--k-color-text-secondary) !important;
+}
+
+.toolbar-toggle:hover {
+    color: var(--k-color-primary) !important;
+}
+
+.tabs-region {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+}
+
+.tabs-region > :deep(.el-row) {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    /* el-row 默认 flex-wrap: wrap，会让内部 el-tabs 按内容撑高而不是跟随容器高度 */
+    flex-wrap: nowrap;
+    align-items: stretch;
+}
+
+.decomp-tabs {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.decomp-tabs :deep(.el-tabs__header) {
+    flex: 0 0 auto;
+    margin-bottom: 8px;
+}
+
+.decomp-tabs :deep(.el-tabs__content) {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.decomp-tabs :deep(.el-tab-pane) {
+    height: 100%;
+    min-height: 0;
+    /* 表格类视图会撑满高度、只让表格自己滚；多面板视图（劳动力/化矿/物流）内容超长时由这里滚动，
+       保证任何标签最多只有一条纵向滚动条，且不会被裁掉 */
+    overflow: auto;
 }
 
 .control-card {
-    border-radius: 8px;
-    border: 1px solid #e4e7ed;
+    border-radius: var(--k-radius-sm);
+    border: 1px solid var(--k-color-border);
 }
 
 .control-item {
@@ -999,12 +1126,12 @@ html.dark :deep(.el-table .lack-row) {
     gap: 6px;
     font-size: 14px;
     font-weight: 500;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .label-icon {
     font-size: 16px;
-    color: #409eff;
+    color: var(--k-color-primary);
 }
 
 .progress-container {
@@ -1034,7 +1161,7 @@ html.dark :deep(.el-table .lack-row) {
 .label-text {
     font-size: 14px;
     font-weight: 500;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .status-icon {
@@ -1043,25 +1170,25 @@ html.dark :deep(.el-table .lack-row) {
 }
 
 .status-icon.icon-idle {
-    color: #909399;
+    color: var(--k-color-text-tertiary);
 }
 
 .status-icon.icon-pending {
-    color: #e6a23c;
+    color: var(--k-color-warning);
     animation: rotate 2s linear infinite;
 }
 
 .status-icon.icon-running {
-    color: #409eff;
+    color: var(--k-color-primary);
     animation: rotate 2s linear infinite;
 }
 
 .status-icon.icon-success {
-    color: #67c23a;
+    color: var(--k-color-success);
 }
 
 .status-icon.icon-error {
-    color: #f56c6c;
+    color: var(--k-color-danger);
 }
 
 @keyframes rotate {
@@ -1076,7 +1203,7 @@ html.dark :deep(.el-table .lack-row) {
 .progress-text {
     font-size: 13px;
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-text);
     min-width: 60px;
     text-align: right;
 }
@@ -1087,12 +1214,12 @@ html.dark :deep(.el-table .lack-row) {
 
 .step-progress {
     padding-top: 8px;
-    border-top: 1px solid #f0f2f5;
+    border-top: 1px solid var(--k-color-border-subtle);
 }
 
 .step-name {
     font-size: 12px;
-    color: #909399;
+    color: var(--k-color-text-tertiary);
     margin-top: 4px;
     padding-left: 24px;
 }
@@ -1102,10 +1229,10 @@ html.dark :deep(.el-table .lack-row) {
     align-items: center;
     gap: 6px;
     padding: 8px 12px;
-    background-color: #fef0f0;
-    border: 1px solid #fde2e2;
+    background-color: var(--k-color-danger-soft);
+    border: 1px solid var(--k-color-danger-soft-border);
     border-radius: 4px;
-    color: #f56c6c;
+    color: var(--k-color-danger);
     font-size: 13px;
 }
 
@@ -1120,33 +1247,36 @@ html.dark :deep(.el-table .lack-row) {
     }
 }
 
-/* Theme override */
+/* Theme override
+   这里的选择器要么是本文件自有类（无同权对手，写在后面即生效），
+   要么取值与 theme.css 里的同名规则完全一致（.control-card / .el-tabs__item），
+   因此不再需要强制优先级。 */
 .control-card,
 .control-item,
 .progress-container,
 .progress-item,
 .step-progress {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
+    background: var(--k-color-surface);
+    border-color: var(--k-color-border);
+    color: var(--k-color-text);
 }
 
 .control-label,
 .label-text,
 .step-name {
-    color: var(--k-color-text-secondary) !important;
+    color: var(--k-color-text-secondary);
 }
 
 .progress-text {
-    color: var(--k-color-text) !important;
+    color: var(--k-color-text);
 }
 
 :deep(.el-tabs__item) {
-    color: var(--k-color-text-secondary) !important;
+    color: var(--k-color-text-secondary);
 }
 
 :deep(.el-tabs__item.is-active) {
-    color: var(--k-color-primary) !important;
+    color: var(--k-color-primary);
 }
 
 :deep(.el-tabs--card > .el-tabs__header .el-tabs__item),
@@ -1162,10 +1292,8 @@ html.dark :deep(.el-table .lack-row) {
     background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
 }
 
+/* el-card 已换成 KCard（.k-card 自带 --k-* 底色/描边），这里不再需要 .el-card* 选择器 */
 :deep(.el-tabs__content),
-:deep(.el-card),
-:deep(.el-card__header),
-:deep(.el-card__body),
 :deep(.el-input__wrapper),
 :deep(.el-select__wrapper),
 :deep(.el-input-number .el-input__wrapper),
@@ -1187,12 +1315,12 @@ html.dark :deep(.el-table .lack-row) {
 <style>
 /* 深色主题：使用全局样式确保能匹配到 data-theme="dark" 在 html 元素上的情况 */
 [data-theme="dark"] .el-table .el-table__row.lack-row {
-    background-color: #ff4444 !important;
+    background-color: var(--k-color-lack-bg) !important;
     font-weight: bold !important;
-    color: #ffffff !important;
+    color: var(--k-color-text-inverse) !important;
 }
 
 [data-theme="dark"] .el-table__body .el-table__row.lack-row {
-    background-color: #ff4444 !important;
+    background-color: var(--k-color-lack-bg) !important;
 }
 </style>

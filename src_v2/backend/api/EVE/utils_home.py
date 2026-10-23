@@ -1609,15 +1609,50 @@ async def get_orders_stats_data(user_name: str, period_type: str, periods: int) 
     }
 
 
+OPS_OVERVIEW_LATEST_KEY = "ops_overview_latest"
+
+
+def _decode_redis_text(value) -> str:
+    """Redis 客户端可能返回 bytes，统一转成 str"""
+    if isinstance(value, bytes):
+        return value.decode()
+    return str(value)
+
+
+async def record_ops_latest_overview(user_name: str, overview_data: dict) -> None:
+    """记录用户最新一份「完整 overview」的五项汇总值，供仪表盘运营统计使用。
+
+    ``overview_data:{user}`` 只有 1 小时 TTL，且会被只刷新钱包/订单的
+    dashboardOverview 接口覆盖，运营统计不能依赖它。这里把五项求和后的
+    结果写入长期有效 hash，聚合时优先读取。
+    """
+    try:
+        processed = process_overview_data_for_history(overview_data)
+        await rdm().r.hset(
+            OPS_OVERVIEW_LATEST_KEY, user_name, json.dumps(processed)
+        )
+    except Exception:
+        logger.warning(
+            f"记录运营 overview 最新值失败: user={user_name}, {traceback.format_exc()}"
+        )
+
+
 async def aggregate_ops_stats() -> dict:
     """
     聚合仪表盘运营统计数据（定时器或缓存 miss 时调用）
     - 基础计数直接从 DB 查询
-    - 运行中价值优先读 Redis overview_data 缓存，缓存 miss 时实时计算
-    - 资产价值仅从 Redis 缓存读取（实时计算开销过大）
+    - 资产/运行中价值按「有效 VIP」聚合，数据源优先级：
+      1) Redis hash ``ops_overview_latest``（用户最近一次完整计算 overview 的汇总值）
+      2) ``eve_overview_history`` 里该用户最新一条历史快照
+    - 不再依赖 ``overview_data:{user}``（1 小时 TTL，且会被不含资产的接口覆盖）
+    - 总资产估值 = 五项之和（钱包 + 订单 + 运行中 + 标记资产 + 非标记资产）
     """
-    from src_v2.core.database.kahuna_database_utils_v2 import EveIndustryPlanDBUtils, UserDBUtils, VipStateDBUtils
-    from src_v2.model.EVE.home.overview_history_timer import OverviewHistoryTimer
+    from src_v2.core.database.kahuna_database_utils_v2 import (
+        EveIndustryPlanDBUtils,
+        EveOverviewHistoryDBUtils,
+        UserDBUtils,
+        VipStateDBUtils,
+    )
 
     try:
         total_users = await UserDBUtils.count_all()
@@ -1631,28 +1666,49 @@ async def aggregate_ops_stats() -> dict:
     total_running_value = 0.0
 
     try:
-        timer = OverviewHistoryTimer()
-        vip_users = await timer._get_vip_users()
+        vip_users = await VipStateDBUtils.select_active_vip_user_names()
 
-        redis = rdm().r
-        for user_id in vip_users:
+        # 1) 长期 hash：最近一次完整 overview 计算的汇总值
+        latest: dict[str, dict] = {}
+        try:
+            stored = await rdm().r.hgetall(OPS_OVERVIEW_LATEST_KEY)
+            # decode_responses=True 时 key 是 str；这里兼容 bytes 返回
+            raw_map = {
+                _decode_redis_text(k): v for k, v in (stored or {}).items()
+            }
+            for user_name in vip_users:
+                raw = raw_map.get(user_name)
+                if raw is None:
+                    continue
+                try:
+                    latest[user_name] = json.loads(_decode_redis_text(raw))
+                except Exception:
+                    continue
+        except Exception:
+            logger.warning(f"读取 ops_overview_latest 失败: {traceback.format_exc()}")
+
+        # 2) hash 缺失（从未完整计算过）→ 回退到历史快照最新一条
+        missing = [u for u in vip_users if u not in latest]
+        if missing:
             try:
-                cached = await redis.get(f"overview_data:{user_id}")
-                if cached:
-                    data = json.loads(cached)
-                    total_asset_value += float(data.get("markedAssetValue", 0) or 0)
-                    total_asset_value += float(data.get("unmarkedAssetValue", 0) or 0)
-                    running = data.get("runningProcessValue", {})
-                    if isinstance(running, dict):
-                        total_running_value += float(running.get("total_value", 0) or 0)
-                    else:
-                        total_running_value += float(running or 0)
-                # 缓存 miss：跳过该用户，不触发 ESI 调用
-                # overview_data 由 dashboardOverview API 和 OverviewHistoryTimer 负责填充
+                history = await EveOverviewHistoryDBUtils.get_latest_overview_data_by_user_names(
+                    missing
+                )
+                latest.update(history or {})
+            except Exception:
+                logger.warning(f"读取 overview 历史快照失败: {traceback.format_exc()}")
+
+        for data in latest.values():
+            try:
+                processed = process_overview_data_for_history(data)
+                total_asset_value += float(processed.get("totalValue", 0) or 0)
+                total_running_value += float(
+                    processed.get("runningProcessValue", 0) or 0
+                )
             except Exception:
                 continue
     except Exception:
-        logger.error("聚合资产/运行中价值失败")
+        logger.error(f"聚合资产/运行中价值失败: {traceback.format_exc()}")
 
     return {
         "total_users": total_users,

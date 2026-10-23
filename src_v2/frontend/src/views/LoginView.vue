@@ -263,7 +263,7 @@ onMounted(async () => {
 .login-button {
   width: 100%;
   height: 46px;
-  border-radius: 10px;
+  border-radius: var(--k-radius-sm);
 }
 
 .error-message {

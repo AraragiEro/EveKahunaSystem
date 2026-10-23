@@ -1384,3 +1384,33 @@ def get_new_postgres_manager():
 
 def get_new_redis_manager():
     return RedisDatabaseManager()
+
+
+async def reset_inherited_managers_for_fork():
+    """fork 出的子进程必须调用一次：丢弃从父进程继承的管理器与连接。
+
+    子进程继承来的 engine / driver **绑定在父进程的事件循环上**，在子进程里
+    复用会静默卡在连接池 check-out：没有任何 TCP 连接、没有异常、CPU≈0、
+    日志停在调用点。2026-10-19 成本计算子进程静默卡死正是由此引起
+    （`SdeUtils.get_name_by_id()` / `neo4j_manager()` 等未传 pdm 的调用会落到
+    这些单例上，而单例的池账本还算着父进程那批已失效的连接）。
+
+    重置后，后续 `get_*_manager()` 会在子进程自己的事件循环上重新建连。
+    """
+    global _neo4j_manager, _postgres_manager, _redis_manager
+    for mgr in (_neo4j_manager, _postgres_manager, _redis_manager):
+        if mgr is None:
+            continue
+        engine = getattr(mgr, "engine", None)
+        if engine is not None:
+            try:
+                await engine.dispose()
+            except Exception:
+                pass
+        try:
+            await mgr.close()
+        except Exception:
+            pass
+    _neo4j_manager = None
+    _postgres_manager = None
+    _redis_manager = None

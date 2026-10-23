@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, reactive } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import KTable from '@/components/k/KTable.vue'
 import { http } from '@/http'
 import { handleApiResponse } from '@/utils/apiResponse'
 
@@ -137,6 +138,21 @@ const handleAuthComplete = (characterName: string) => {
 }
 
 const handleDelete = async (character: Character) => {
+  // 删除前二次确认，取消则直接返回
+  try {
+    await ElMessageBox.confirm(
+      `确定要解绑角色“${character.name}”吗？解绑后该角色的 ESI 授权将被移除，此操作不可撤销。`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
   try {
     const response = await http.post(`/user/deleteCharacter`, {
       characterName: character.name
@@ -396,16 +412,17 @@ import { Eleme } from '@element-plus/icons-vue'
         </el-row>
       </div>
       <div>
-        <el-table :data="characterList.filter(item => item.name)" style="width: 100%">
+        <KTable :data="characterList.filter(item => item.name)" style="width: 100%"
+          empty-why="还没有绑定任何 EVE 角色" empty-hint="点上方「添加角色」走一次 ESI 授权">
           <el-table-column prop="name" label="角色名称" />
           <el-table-column prop="expiresDate" label="过期时间" />
           <el-table-column prop="corpName" label="公司名称" />
           <el-table-column prop="action" label="操作">
             <template #default="scope">
-              <el-button type="primary" @click="handleDelete(scope.row)">删除</el-button>
+              <el-button type="danger" @click="handleDelete(scope.row)">删除</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </KTable>
       </div>
       <el-dialog v-model="addCharacterConfirm" title="绑定ESI" width="30%" center>
         <span>请知悉</span><br>
@@ -435,11 +452,11 @@ import { Eleme } from '@element-plus/icons-vue'
         >
         <template #left-footer>
           <el-tooltip content="获取同title角色" placement="top">
-            <el-button v-if="!getSameTitleAliasCharacterListLoading" class="transfer-footer" size="small" @click="getSameTitleAliasCharacterList"><el-icon><RefreshRight /></el-icon></el-button>
-            <el-button v-else disabled class="transfer-footer" size="small"><el-icon><Eleme /></el-icon></el-button>
+            <el-button v-if="!getSameTitleAliasCharacterListLoading" class="transfer-footer" size="small" aria-label="获取同名角色" @click="getSameTitleAliasCharacterList"><el-icon><RefreshRight /></el-icon></el-button>
+            <el-button v-else disabled class="transfer-footer" size="small" aria-label="正在获取同名角色"><el-icon><Eleme /></el-icon></el-button>
           </el-tooltip>
           <el-tooltip content="添加新角色" placement="top">
-            <el-button class="transfer-footer" size="small" @click="addNewCharacterProcess = true"><el-icon><Plus /></el-icon></el-button>
+            <el-button class="transfer-footer" size="small" aria-label="添加新角色" @click="addNewCharacterProcess = true"><el-icon><Plus /></el-icon></el-button>
           </el-tooltip>
 
           <el-dialog 
@@ -472,15 +489,18 @@ import { Eleme } from '@element-plus/icons-vue'
             <!-- 搜索结果表格 -->
             <el-row v-if="searchResults.length > 0">
               <el-col :span="24">
-                <el-table 
+                <KTable 
                   :data="searchResults" 
                   style="width: 100%"
                   @selection-change="handleSelectionChange"
+                  empty-why="没有搜到匹配的角色"
+                  empty-hint="换个角色 ID 或名称再试一次"
+                  density="compact"
                 >
                   <el-table-column type="selection" width="55" />
                   <el-table-column prop="CharacterId" label="角色ID" />
                   <el-table-column prop="CharacterName" label="角色名称" />
-                </el-table>
+                </KTable>
               </el-col>
             </el-row>
 

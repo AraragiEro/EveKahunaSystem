@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import KEmpty from '@/components/k/KEmpty.vue'
+import KTable from '@/components/k/KTable.vue'
+import { flashCopied, createCopyCellClassName } from '@/composables/useCopyCell'
 import type { BlueprintRequirementItem } from '../interfaceType.vue'
 
-const props = defineProps<{
+defineProps<{
   bpReqData: BlueprintRequirementItem[]
   selectedPlan: string | null
 }>()
@@ -20,7 +23,7 @@ const formatBpcDetails = (details: Array<{runs: number}>): string => {
 }
 
 // Formatting helper for numbers
-const formatAccounting = (value: any): string => {
+const formatAccounting = (value: unknown): string => {
   if (value === null || value === undefined) return '-'
   const num = Number(value)
   if (isNaN(num)) return String(value)
@@ -28,10 +31,14 @@ const formatAccounting = (value: any): string => {
 }
 
 // Copy cell content
-const copyCellContent = async (text: string) => {
+// 可复制列标记（复制成功的高亮由 flashCopied 直接加在 td 上）
+const copyCellClassName = createCopyCellClassName(['type_name_zh', 'type_name', 'tech2_invention_source_bp_type_name'])
+
+const copyCellContent = async (text: string, ev?: MouseEvent) => {
   try {
     await navigator.clipboard.writeText(String(text))
     // ElMessage.success('已复制')
+        flashCopied(ev)
   } catch {
     // fallback
   }
@@ -46,18 +53,31 @@ const getTagType = (type: string): string => {
     default: return 'info'
   }
 }
+// footer 汇总：BPC 数量 / 总运行次数
+const bpSummary = ({ columns, data }: { columns: Array<{ property?: string }>, data: Array<Record<string, unknown>> }) => {
+    return columns.map((col, index: number) => {
+        if (index === 0) return '合计'
+        const prop = col.property
+        if (prop !== 'bpc_count' && prop !== 'runs_total') return ''
+        const total = (data || []).reduce((s: number, row: Record<string, unknown>) => s + (Number(row?.[prop]) || 0), 0)
+        return total.toLocaleString('zh-CN')
+    })
+}
 </script>
 
 <template>
-  <el-table
+  <KTable :cell-class-name="copyCellClassName"
     v-if="bpReqData && bpReqData.length > 0"
+    density="compact"
     :data="bpReqData"
     :key="`bp-req-table-${selectedPlan || 'default'}`"
     row-key="type_id"
-    border
+    show-summary
+    :summary-method="bpSummary"
+
     stripe
-    max-height="75vh"
-    class="blueprint-req-table"
+    height="100%"
+    class="blueprint-req-table k-report-table"
     style="font-size: 16px;"
     :default-sort="{prop: 'missing_blueprint_type', order: 'descending'}"
   >
@@ -77,7 +97,7 @@ const getTagType = (type: string): string => {
       <template #default="{ row }">
         <div
           class="copyable-cell"
-          @click="copyCellContent(row.type_name_zh)"
+          @click="copyCellContent(row.type_name_zh, $event)"
           :title="`点击复制: ${row.type_name_zh || ''}`"
         >
           {{ row.type_name_zh }}
@@ -88,7 +108,7 @@ const getTagType = (type: string): string => {
       <template #default="{ row }">
         <div
           class="copyable-cell"
-          @click="copyCellContent(row.type_name)"
+          @click="copyCellContent(row.type_name, $event)"
           :title="`点击复制: ${row.type_name || ''}`"
         >
           {{ row.type_name }}
@@ -102,13 +122,13 @@ const getTagType = (type: string): string => {
         </el-tag>
       </template>
     </el-table-column>
-    <el-table-column label="缺少BPC数量" prop="bpc_count" width="130" />
-    <el-table-column label="每张BPC运行次数" width="180">
+    <el-table-column label="缺少BPC数量" prop="bpc_count" width="130" align="right" sortable="custom" />
+    <el-table-column label="每张BPC运行次数" width="180" align="right">
       <template #default="{ row }">
         {{ formatBpcDetails(row.bpc_details) }}
       </template>
     </el-table-column>
-    <el-table-column label="总运行次数" prop="runs_total" width="130">
+    <el-table-column label="总运行次数" prop="runs_total" width="130" align="right" sortable="custom">
       <template #default="{ row }">
         {{ formatAccounting(row.runs_total) }}
       </template>
@@ -118,7 +138,7 @@ const getTagType = (type: string): string => {
         <span
           v-if="row.tech2_invention_source_bp_type_name"
           class="copyable-cell"
-          @click="copyCellContent(row.tech2_invention_source_bp_type_name!)"
+          @click="copyCellContent(row.tech2_invention_source_bp_type_name!, $event)"
           :title="`点击复制: ${row.tech2_invention_source_bp_type_name}`"
         >
           {{ row.tech2_invention_source_bp_type_name }}
@@ -126,33 +146,19 @@ const getTagType = (type: string): string => {
         <span v-else class="empty-value">-</span>
       </template>
     </el-table-column>
-  </el-table>
-  <el-empty v-else description="无缺失蓝图" />
+  </KTable>
+  <KEmpty v-else why="无缺失蓝图" hint="当前计划需要的蓝图都已在库存或计划中，不需要额外发明/拷贝" />
 </template>
 
 <style scoped>
 /* 可点击复制的单元格样式 */
 .copyable-cell {
-  cursor: pointer;
-  user-select: none;
-  padding: 4px 8px;
-  margin: -4px -8px;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.copyable-cell:hover {
-  background-color: #f0f9ff;
-  color: #409eff;
-}
-
-.copyable-cell:active {
-  background-color: #e1f5ff;
-  transform: scale(0.98);
+    cursor: pointer;
+    user-select: none;
 }
 
 .empty-value {
-  color: #999;
+  color: var(--k-color-text-secondary);
 }
 </style>
 
@@ -162,13 +168,9 @@ const getTagType = (type: string): string => {
 }
 
 [data-theme="dark"] .blueprint-req-table {
-  --el-table-bg-color: var(--k-color-bg-secondary, #1a1a2e);
-  --el-table-tr-bg-color: var(--k-color-bg-primary, #16213e);
-  --el-table-row-hover-bg-color: var(--k-color-bg-hover, #1f3060);
+  --el-table-bg-color: var(--k-color-surface);
+  --el-table-tr-bg-color: var(--k-color-surface);
+  --el-table-row-hover-bg-color: color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface));
 }
 
-[data-theme="dark"] .blueprint-req-table .copyable-cell:hover {
-  background-color: rgba(64, 158, 255, 0.2);
-  color: #66b1ff;
-}
 </style>

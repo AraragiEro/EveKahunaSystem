@@ -6,6 +6,7 @@ import { User, UserFilled, Pointer, Close, CircleCheckFilled, Plus } from '@elem
 import { http } from '@/http'
 import { useAuthStore } from '@/stores/auth'
 import WorkflowClaimDialog from '@/components/WorkflowClaimDialog.vue'
+import KTable from '@/components/k/KTable.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -409,10 +410,12 @@ onMounted(() => {
                     </el-checkbox>
                 </div>
                 
-                <el-table
+                <KTable
                     :data="filteredWorkflowData"
                     border
                     max-height="70vh"
+                    empty-why="这个工作流还没有可显示的条目"
+                    empty-hint="等计划计算出结果后刷新页面，或联系分享者确认计划状态"
                 >
                     <el-table-column label="icon" width="60" align="center">
                         <template #default="{ row }">
@@ -579,7 +582,7 @@ onMounted(() => {
                             </div>
                         </template>
                     </el-table-column>
-                </el-table>
+                </KTable>
             </template>
         </div>
         
@@ -601,10 +604,6 @@ onMounted(() => {
     padding: 40px 20px;
 }
 
-:global([data-theme="dark"]) .public-workflow-container {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-}
-
 .workflow-header {
     max-width: 1400px;
     margin: 0 auto 32px;
@@ -615,22 +614,14 @@ onMounted(() => {
 .page-title {
     font-size: 32px;
     font-weight: 600;
-    color: #2c3e50;
+    color: var(--k-color-text);
     margin: 0 0 8px 0;
-}
-
-:global([data-theme="dark"]) .page-title {
-    color: #e0e0e0;
 }
 
 .page-subtitle {
     font-size: 16px;
-    color: #64748b;
+    color: var(--k-color-text-secondary);
     margin: 0;
-}
-
-:global([data-theme="dark"]) .page-subtitle {
-    color: #a0a0a0;
 }
 
 .auth-bar {
@@ -649,12 +640,6 @@ onMounted(() => {
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
-:global([data-theme="dark"]) .user-info {
-    background: #2d2d3a;
-    color: #e0e0e0;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-}
-
 .workflow-content {
     max-width: 1400px;
     margin: 0 auto;
@@ -670,11 +655,6 @@ onMounted(() => {
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
 }
 
-:global([data-theme="dark"]) .filter-bar {
-    background: #2d2d3a;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-}
-
 .error-state {
     display: flex;
     justify-content: center;
@@ -684,11 +664,6 @@ onMounted(() => {
     border-radius: 8px;
     padding: 40px;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-}
-
-:global([data-theme="dark"]) .error-state {
-    background: #2d2d3a;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 }
 
 .claim-cell {
@@ -720,7 +695,7 @@ onMounted(() => {
 
 .claim-progress-text {
     font-size: 12px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
     text-align: center;
 }
 

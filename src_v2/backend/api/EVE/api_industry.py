@@ -26,6 +26,8 @@ from src_v2.core.database.kahuna_database_utils_v2 import (
 )
 from src_v2.core.database.neo4j_utils import Neo4jIndustryUtils as NIU
 from src_v2.core.log import logger
+from src_v2.model.EVE.market.price_trend import build_price_trends
+from src_v2.model.EVE.eve_constants import REGION_FORGE_ID
 from src_v2.core.permission.permission_manager import permission_manager
 from src_v2.core.user.user_manager import UserManager
 from src_v2.core.utils import KahunaException
@@ -2765,6 +2767,51 @@ async def get_labor_force_data():
         return response_helper.server_error("获取劳动力数据失败")
 
 
+@api_industry_bp.route("/getMarket4HPrices", methods=["POST"])
+@auth_required
+async def get_market_4h_prices():
+    """
+    批量获取 JITA 与 4-H（FRT）市场的卖单/买单价格（读取 Redis 快照）。
+
+    Request Body:
+        - type_ids (int[], required): 物品类型ID（最多 500 个）
+
+    Responses:
+        200: { status: 200, data: { "<type_id>": { jita_sell, jita_buy, frt_sell, frt_buy } } }
+    """
+    try:
+        body = await request.get_json() or {}
+        raw = body.get("type_ids") or []
+        try:
+            type_ids = [int(t) for t in raw if str(t).lstrip("-").isdigit()]
+        except Exception:
+            type_ids = []
+        type_ids = list(dict.fromkeys(type_ids))[:500]
+        if not type_ids:
+            return response_helper.bad_request("type_ids 不能为空")
+
+        def _f(v):
+            try:
+                return round(float(v), 2)
+            except Exception:
+                return 0.0
+
+        data = {}
+        for tid in type_ids:
+            jita = await rdm().r.hgetall(f"market_price:jita:{tid}")
+            frt = await rdm().r.hgetall(f"market_price:frt:{tid}")
+            data[str(tid)] = {
+                "jita_sell": _f((jita or {}).get("min_sell")),
+                "jita_buy": _f((jita or {}).get("max_buy")),
+                "frt_sell": _f((frt or {}).get("min_sell")),
+                "frt_buy": _f((frt or {}).get("max_buy")),
+            }
+        return jsonify({"status": 200, "data": data})
+    except Exception:
+        traceback.print_exc()
+        logger.error(f"获取 4H 价格失败: {traceback.format_exc()}")
+        return response_helper.server_error("获取 4H 价格失败")
+
 @api_industry_bp.route("/getCompressedAsteroidData", methods=["POST"])
 @auth_required
 @role_required(["vip_alpha"], 402, "仅ALPHA订阅者可获取压缩矿数据。")
@@ -3082,7 +3129,29 @@ async def get_compressed_asteroid_data():
 
         logger.info(f"优化结果状态: {result.get('status')}")
 
+        # 价格趋势：求解涉及的矿石与矿物一起下发，前端无需二次请求
+        try:
+            trend_ids: list[int] = []
+            for ore_id in purcheses_res.keys():
+                try:
+                    trend_ids.append(int(ore_id))
+                except Exception:
+                    pass
+            trend_ids += [int(m) for m in set(list(excess_minerals_res.keys()) + list(shortage_minerals_res.keys()) + list(mineral_purchases_res.keys())) if str(m).isdigit()]
+            trend_ids = list(dict.fromkeys(trend_ids))
+            price_trends, trend_meta = await build_price_trends(
+                trend_ids, REGION_FORGE_ID, 30
+            )
+            logger.info(
+                f"求解价格趋势: 请求={len(trend_ids)} 命中={len(price_trends)} 缺失={len(trend_meta.get('missing', []))}"
+            )
+        except Exception:
+            logger.error(f"求解价格趋势失败: {traceback.format_exc()}")
+            price_trends, trend_meta = {}, {"missing": [], "collecting": 0, "as_of": ""}
+
         data = {
+            "price_trends": price_trends,
+            "price_trends_meta": trend_meta,
             "purcheses_res": purcheses_res,
             "excess_minerals_res": excess_minerals_res,
             "shortage_minerals_res": shortage_minerals_res,

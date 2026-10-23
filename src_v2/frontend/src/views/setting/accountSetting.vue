@@ -147,7 +147,7 @@ onMounted(() => {
     <span>3. 所有使用绑定角色esi获取的数据</span><br></br>
     <span>3. 所有工业配置</span><br></br>
     <template #footer>
-      <el-button type="primary" @click="handleDeleteAccount">注销</el-button>
+      <el-button type="danger" @click="handleDeleteAccount">注销</el-button>
     </template>
   </el-dialog>
 </template>

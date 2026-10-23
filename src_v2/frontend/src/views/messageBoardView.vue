@@ -2,6 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ChatLineRound, Refresh, Search } from '@element-plus/icons-vue'
+import KCard from '@/components/k/KCard.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
 import { http } from '@/http'
 import { useAuthStore } from '@/stores/auth'
 import dayjs from 'dayjs'
@@ -679,12 +681,7 @@ onMounted(async () => {
     <div class="content-layout">
       <!-- 左侧筛选区 -->
       <aside class="filter-panel">
-        <el-card shadow="hover" class="filter-card">
-          <template #header>
-            <div class="filter-header">
-              <span>筛选条件</span>
-            </div>
-          </template>
+        <KCard class="filter-card" title="筛选条件" hover>
 
           <div class="filter-section">
             <div class="filter-label">状态</div>
@@ -756,33 +753,43 @@ onMounted(async () => {
               应用筛选
             </el-button>
           </div>
-        </el-card>
+        </KCard>
       </aside>
 
       <!-- 右侧列表 -->
       <section class="list-panel">
-        <el-card shadow="never" class="list-card">
+        <KCard class="list-card">
           <template #header>
-            <div class="list-header">
-              <div class="list-title">
-                <span>留言列表</span>
-                <el-tag type="info" size="small">
-                  共 {{ pagination.total }} 条
-                </el-tag>
-              </div>
+            <div class="list-title">
+              <span>留言列表</span>
+              <el-tag type="info" size="small">
+                共 {{ pagination.total }} 条
+              </el-tag>
             </div>
           </template>
 
-          <div class="list-body" v-loading="loading">
-            <div v-if="cards.length === 0 && !loading" class="empty-state">
-              <p>当前暂无留言。</p>
-              <el-button type="primary" link @click="openCreateDialog">
-                立即创建第一条留言
-              </el-button>
+          <div class="list-body" v-loading="loading && cards.length > 0">
+            <!-- 首次加载用骨架占位，避免内容区塌成一条黑条 -->
+            <div v-if="loading && cards.length === 0" class="card-list">
+              <KCard v-for="n in 3" :key="n" class="message-card skeleton-card">
+                <el-skeleton animated>
+                  <template #template>
+                    <el-skeleton-item variant="text" style="width: 26%" />
+                    <el-skeleton-item variant="h3" style="width: 55%; margin-top: 14px" />
+                    <el-skeleton-item variant="text" style="margin-top: 12px" />
+                    <el-skeleton-item variant="text" style="width: 72%; margin-top: 8px" />
+                  </template>
+                </el-skeleton>
+              </KCard>
+            </div>
+
+            <div v-else-if="cards.length === 0" class="empty-state">
+              <KEmpty why="还没有人在这里留言" hint="遇到 BUG 或想提需求，新建一条，开发者会看到"
+                action-text="创建第一条留言" size="lg" @action="openCreateDialog" />
             </div>
 
             <div v-else class="card-list">
-              <el-card v-for="card in filteredCards" :key="card.id" class="message-card" shadow="hover"
+              <KCard v-for="card in filteredCards" :key="card.id" class="message-card" hover
                 @click="openCardDetail(card)">
                 <div class="card-main">
                   <div class="card-header-row">
@@ -832,7 +839,7 @@ onMounted(async () => {
                     </div>
                   </div>
                 </div>
-              </el-card>
+              </KCard>
             </div>
 
             <div v-if="pagination.has_next" class="load-more">
@@ -841,7 +848,7 @@ onMounted(async () => {
               </el-button>
             </div>
           </div>
-        </el-card>
+        </KCard>
       </section>
     </div>
 
@@ -1060,13 +1067,13 @@ onMounted(async () => {
   margin: 0;
   font-size: 22px;
   font-weight: 600;
-  color: #1f2933;
+  color: var(--k-color-text);
 }
 
 .subtitle {
   margin: 4px 0 0;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--k-color-text-secondary);
 }
 
 .header-actions {
@@ -1090,15 +1097,6 @@ onMounted(async () => {
 
 .filter-card {
   height: 100%;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-}
-
-.filter-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-weight: 500;
 }
 
 .filter-section {
@@ -1108,12 +1106,12 @@ onMounted(async () => {
 .filter-section+.filter-section {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid #f3f4f6;
+  border-top: 1px solid var(--k-color-border-subtle);
 }
 
 .filter-label {
   font-size: 13px;
-  color: #4b5563;
+  color: var(--k-color-text-secondary);
   margin-bottom: 6px;
 }
 
@@ -1138,14 +1136,6 @@ onMounted(async () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-}
-
-.list-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
 }
 
 .list-title {
@@ -1171,16 +1161,14 @@ onMounted(async () => {
 
 .message-card {
   cursor: pointer;
-  transition: all 0.3s ease;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
+  transition: transform 0.3s ease, border-color 0.3s ease;
   overflow: hidden;
 }
 
 .message-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
-  border-color: #d1d5db;
+  box-shadow: var(--k-shadow-md);
+  border-color: var(--k-color-border);
 }
 
 .card-main {
@@ -1224,23 +1212,23 @@ onMounted(async () => {
 }
 
 .status-tag-created {
-  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
-  color: #fff;
+  background: linear-gradient(135deg, var(--k-color-warning) 0%, color-mix(in srgb, var(--k-color-warning) 76%, var(--k-color-shade)) 100%);
+  color: var(--k-color-text-inverse);
 }
 
 .status-tag-in-progress {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: #fff;
+  background: linear-gradient(135deg, var(--k-color-success) 0%, color-mix(in srgb, var(--k-color-success) 76%, var(--k-color-shade)) 100%);
+  color: var(--k-color-text-inverse);
 }
 
 .status-tag-closed {
-  background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
-  color: #fff;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--k-color-text-secondary) 70%, var(--k-color-surface)) 0%, var(--k-color-text-secondary) 100%);
+  color: var(--k-color-text-inverse);
 }
 
 .card-reply-info {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--k-color-text-secondary);
   font-weight: 500;
   display: flex;
   align-items: center;
@@ -1256,7 +1244,7 @@ onMounted(async () => {
 .card-title {
   font-size: 16px;
   font-weight: 600;
-  color: #111827;
+  color: var(--k-color-text);
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -1269,7 +1257,7 @@ onMounted(async () => {
 /* 内容摘要样式 */
 .card-content-snippet {
   font-size: 14px;
-  color: #6b7280;
+  color: var(--k-color-text-secondary);
   line-height: 1.6;
   margin: 8px 0;
   display: -webkit-box;
@@ -1299,13 +1287,13 @@ onMounted(async () => {
   width: 32px;
   height: 32px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, var(--k-color-primary) 0%, color-mix(in srgb, var(--k-color-primary) 72%, var(--k-color-shade)) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 14px;
   font-weight: 600;
-  color: #fff;
+  color: var(--k-color-text-inverse);
   flex-shrink: 0;
 }
 
@@ -1316,26 +1304,24 @@ onMounted(async () => {
 
 .author-text .name {
   font-size: 14px;
-  color: #111827;
+  color: var(--k-color-text);
   font-weight: 500;
 }
 
 .author-text .time {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--k-color-text-tertiary);
   margin-top: 2px;
 }
 
 .last-reply {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--k-color-text-tertiary);
   text-align: right;
 }
 
 .empty-state {
-  padding: 40px 0;
-  text-align: center;
-  color: #6b7280;
+  padding: 24px 0;
 }
 
 .load-more {
@@ -1397,7 +1383,7 @@ onMounted(async () => {
 .detail-title-text {
   font-weight: 600;
   font-size: 18px;
-  color: #111827;
+  color: var(--k-color-text);
 }
 
 .detail-body {
@@ -1414,12 +1400,12 @@ onMounted(async () => {
   align-items: flex-start;
   gap: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--k-color-border-subtle);
 }
 
 .detail-content-text {
   font-size: 15px;
-  color: #111827;
+  color: var(--k-color-text);
   line-height: 1.8;
   word-wrap: break-word;
 }
@@ -1433,7 +1419,7 @@ onMounted(async () => {
 }
 
 .detail-content-text :deep(code) {
-  background: #f3f4f6;
+  background: var(--k-color-surface-soft);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.9em;
@@ -1441,7 +1427,7 @@ onMounted(async () => {
 }
 
 .detail-content-text :deep(pre) {
-  background: #f3f4f6;
+  background: var(--k-color-surface-soft);
   padding: 12px;
   border-radius: 8px;
   overflow-x: auto;
@@ -1464,15 +1450,15 @@ onMounted(async () => {
 }
 
 .detail-content-text :deep(blockquote) {
-  border-left: 4px solid #e5e7eb;
+  border-left: 4px solid var(--k-color-border);
   padding-left: 16px;
   margin: 12px 0;
-  color: #6b7280;
+  color: var(--k-color-text-secondary);
   font-style: italic;
 }
 
 .detail-content-text :deep(a) {
-  color: #3b82f6;
+  color: var(--k-color-primary);
   text-decoration: none;
 }
 
@@ -1484,7 +1470,7 @@ onMounted(async () => {
 .reply-section-divider {
   margin: 24px 0 16px 0;
   padding-top: 20px;
-  border-top: 2px solid #f3f4f6;
+  border-top: 2px solid var(--k-color-border-subtle);
 }
 
 .reply-section-header {
@@ -1498,12 +1484,12 @@ onMounted(async () => {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #111827;
+  color: var(--k-color-text);
 }
 
 .reply-section-count {
   font-size: 14px;
-  color: #6b7280;
+  color: var(--k-color-text-secondary);
   font-weight: 500;
 }
 
@@ -1519,17 +1505,17 @@ onMounted(async () => {
 }
 
 .reply-section::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
+  background: var(--k-color-surface-strong);
+  border-radius: var(--k-radius-xs);
 }
 
 .reply-section::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 3px;
+  background: var(--k-color-border);
+  border-radius: var(--k-radius-xs);
 }
 
 .reply-section::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+  background: var(--k-color-text-secondary);
 }
 
 .reply-list {
@@ -1542,13 +1528,13 @@ onMounted(async () => {
   display: flex;
   gap: 12px;
   padding: 16px;
-  background: #f9fafb;
+  background: var(--k-color-surface-soft);
   border-radius: 12px;
   transition: all 0.2s ease;
 }
 
 .reply-item:hover {
-  background: #f3f4f6;
+  background: var(--k-color-surface-soft);
   transform: translateX(2px);
 }
 
@@ -1556,13 +1542,13 @@ onMounted(async () => {
   width: 36px;
   height: 36px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, var(--k-color-primary) 0%, color-mix(in srgb, var(--k-color-primary) 72%, var(--k-color-shade)) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 14px;
   font-weight: 600;
-  color: #fff;
+  color: var(--k-color-text-inverse);
   flex-shrink: 0;
 }
 
@@ -1575,25 +1561,25 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--k-color-text-secondary);
   margin-bottom: 8px;
 }
 
 .reply-author {
   font-weight: 600;
-  color: #111827;
+  color: var(--k-color-text);
   font-size: 14px;
 }
 
 .reply-time {
   margin-left: 12px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--k-color-text-tertiary);
 }
 
 .reply-content {
   font-size: 14px;
-  color: #374151;
+  color: var(--k-color-text-secondary);
   line-height: 1.7;
   word-wrap: break-word;
 }
@@ -1607,7 +1593,7 @@ onMounted(async () => {
 }
 
 .reply-content :deep(code) {
-  background: #e5e7eb;
+  background: var(--k-color-surface-strong);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.9em;
@@ -1615,9 +1601,9 @@ onMounted(async () => {
 }
 
 .reply-content :deep(pre) {
-  background: #e5e7eb;
+  background: var(--k-color-surface-strong);
   padding: 8px;
-  border-radius: 6px;
+  border-radius: var(--k-radius-sm);
   overflow-x: auto;
   margin: 8px 0;
 }
@@ -1629,13 +1615,13 @@ onMounted(async () => {
 
 .reply-empty {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--k-color-text-secondary);
 }
 
 .reply-input {
   margin-top: 20px;
   padding-top: 20px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--k-color-border);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1649,20 +1635,20 @@ onMounted(async () => {
 
 .reply-closed-tip {
   font-size: 12px;
-  color: #ef4444;
+  color: var(--k-color-danger);
 }
 
 .reply-action-icon {
   font-size: 14px;
-  color: #6b7280;
+  color: var(--k-color-text-secondary);
 }
 
 .reply-hidden-placeholder {
   font-size: 13px;
-  color: #9ca3af;
+  color: var(--k-color-text-tertiary);
   font-style: italic;
   padding: 8px 0;
-  border: 1px dashed #d1d5db;
+  border: 1px dashed var(--k-color-border);
   border-radius: 4px;
   text-align: center;
   margin-top: 4px;
@@ -1673,19 +1659,19 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #6b7280;
+  color: var(--k-color-text-secondary);
   font-size: 13px;
   padding: 6px 12px;
-  border-radius: 6px;
+  border-radius: var(--k-radius-sm);
   transition: all 0.2s ease;
-  border: 1px solid #e5e7eb;
-  background: #fff;
+  border: 1px solid var(--k-color-border);
+  background: var(--k-color-surface);
 }
 
 .status-action-text:hover {
-  background: #f9fafb;
-  color: #111827;
-  border-color: #d1d5db;
+  background: var(--k-color-surface-soft);
+  color: var(--k-color-text);
+  border-color: var(--k-color-border);
 }
 
 .status-action-icon {
@@ -1711,127 +1697,41 @@ onMounted(async () => {
   }
 }
 
-/* Theme override */
-.message-board-page,
-.header-bar,
-.filter-panel,
-.list-panel,
-.filter-card,
-.list-card,
-.message-card,
-.detail-header,
-.detail-body,
-.detail-content,
-.reply-item,
-.reply-input,
-.status-action-text {
-  background: var(--k-color-surface) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text) !important;
-}
+/* 深色差异：token 表达不了的部分才留在这里。
+   本文件原先有一段上百行的「Theme override」!important 兜底（把上面写死的浅色
+   值强行刷成主题色）。P1-C3 已把这些值全部换成 var(--k-*) token，兜底不再需要；
+   连带去掉被兜底误伤的 :deep(.el-tag)/:deep(.el-button) 染色——那些规则会把
+   语义 tag 刷成纯 surface 底，反而丢了状态色。 */
 
-.subtitle,
-.filter-label,
-.card-content-snippet,
-.time,
-.last-reply,
-.reply-section-count,
-.reply-time,
-.reply-empty,
-.reply-action-icon,
-.reply-hidden-placeholder {
-  color: var(--k-color-text-secondary) !important;
-}
-
-.card-title,
-.name,
-.detail-title-text,
-.reply-author,
-.reply-content,
-.reply-section-title {
-  color: var(--k-color-text) !important;
-}
-
-.message-card {
-  box-shadow: var(--k-shadow-sm) !important;
-}
-
-.message-card:hover {
-  box-shadow: var(--k-shadow-md) !important;
-  border-color: color-mix(in srgb, var(--k-color-primary) 25%, var(--k-color-border)) !important;
-}
-
+/* 头像：浅淡紫底 + 主色字（P0 定的观感，深浅两套都成立） */
 .avatar,
 .reply-avatar {
   background: linear-gradient(
     135deg,
     color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface-soft)) 0%,
     color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-surface)) 100%
-  ) !important;
-  color: var(--k-color-primary) !important;
+  );
+  color: var(--k-color-primary);
+}
+
+/* 正文链接用主色（浏览器默认蓝在深色下刺眼），引用块补足对比 */
+.detail-content-text :deep(a) {
+  color: var(--k-color-primary);
 }
 
 .detail-content-text :deep(blockquote) {
-  border-left-color: var(--k-color-border) !important;
-  color: var(--k-color-text-secondary) !important;
+  color: var(--k-color-text-secondary);
 }
 
-.detail-content-text :deep(a) {
-  color: var(--k-color-primary) !important;
-}
-
-.reply-section-divider {
-  border-top-color: var(--k-color-border) !important;
-}
-
-.reply-section::-webkit-scrollbar-track {
-  background: color-mix(in srgb, var(--k-color-surface-soft) 82%, var(--k-color-surface)) !important;
-}
-
-.reply-section::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--k-color-border) 85%, var(--k-color-surface)) !important;
-}
-
-.reply-section::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
-}
-
-.reply-content :deep(code),
-.reply-content :deep(pre) {
-  background: var(--k-color-surface-soft) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text) !important;
-}
-
-.reply-hidden-placeholder {
-  border-color: var(--k-color-border) !important;
-}
-
+/* 状态切换按钮 hover：用主色提示可点 */
 .status-action-text:hover {
-  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
-  color: var(--k-color-primary) !important;
-  border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
+  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft));
+  color: var(--k-color-primary);
+  border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border));
 }
 
-.message-board-page :deep(.el-card),
-.message-board-page :deep(.el-dialog),
-.message-board-page :deep(.el-dialog__header),
-.message-board-page :deep(.el-dialog__body),
-.message-board-page :deep(.el-dialog__footer),
-.message-board-page :deep(.el-input__wrapper),
-.message-board-page :deep(.el-textarea__inner),
-.message-board-page :deep(.el-select__wrapper),
-.message-board-page :deep(.el-button),
-.message-board-page :deep(.el-tag),
-.message-board-page :deep(.el-date-editor.el-input__wrapper) {
-  background: var(--k-color-surface) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text) !important;
-}
-
-.message-board-page :deep(.el-button:not(.el-button--primary):not(.el-button--danger):hover) {
-  color: var(--k-color-primary) !important;
-  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
-  border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
+/* 卡片悬浮只换边框色，阴影在基础规则里已是 --k-shadow-md */
+.message-card:hover {
+  border-color: color-mix(in srgb, var(--k-color-primary) 25%, var(--k-color-border));
 }
 </style>

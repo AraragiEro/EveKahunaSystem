@@ -359,3 +359,252 @@ class TestAssetViewDataAuthz:
             )
 
         assert resp.status_code == 404
+
+
+# ──────────────────────────────────────────────
+# #6 公司资产拉取任务：一行任务全公司共享
+# ──────────────────────────────────────────────
+def _main_character_context(corp_id, director):
+    character = MagicMock()
+    character.corporation_id = corp_id
+    character.director = director
+    return character
+
+
+def _user_manager(main_character_id: int = 999):
+    manager = MagicMock()
+    manager.get_main_character_id = AsyncMock(return_value=main_character_id)
+    return manager
+
+
+def _character_manager(main_character):
+    manager = MagicMock()
+    manager.get_character_by_character_id = AsyncMock(return_value=main_character)
+    return manager
+
+
+@pytest.mark.api
+class TestCorpAssetPullMissionAuthz:
+    """公司任务由全公司共享一行，权限按「同公司成员 + 删除需总监」判定
+
+    回归背景：e3f5c13 把归属口径改成「mission.user_name == 当前用户」后，
+    同公司其他成员看到任务却一操作就 403，被前端重定向到 /forbidden。
+    """
+
+    CLOSE_URL = "/api/EVE/asset/closeAssetPullMission"
+    DELETE_URL = "/api/EVE/asset/deleteAssetPullMission"
+    CREATE_URL = "/api/EVE/asset/createAssetPullMission"
+    BODY = {"asset_owner_type": "corp", "asset_owner_id": 789, "active": False}
+
+    @staticmethod
+    def _mission(owner: str = "victim"):
+        mission = MagicMock()
+        mission.user_name = owner
+        return mission
+
+    @pytest.mark.asyncio
+    async def test_same_corp_member_can_close_others_mission(self, test_client):
+        """同公司成员关闭他人创建的公司任务 → 200"""
+        with (
+            patch(
+                "src_v2.backend.api.permission_required.permission_manager",
+                _vip_alpha_permission_manager(),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.is_admin_user",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.UserManager",
+                return_value=_user_manager(),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.CharacterManager",
+                return_value=_character_manager(_main_character_context(789, False)),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset."
+                "EveAssetPullMissionDBUtils.select_mission_by_owner_id_and_owner_type",
+                AsyncMock(return_value=self._mission()),
+            ),
+            patch("src_v2.backend.api.EVE.api_asset.AssetManager") as mock_am_cls,
+        ):
+            mock_am = MagicMock()
+            mock_am.change_asset_pull_mission_status = AsyncMock()
+            mock_am_cls.return_value = mock_am
+
+            resp = await test_client.post(
+                self.CLOSE_URL, headers=_auth_headers("member"), json=self.BODY
+            )
+
+        assert resp.status_code == 200
+        mock_am.change_asset_pull_mission_status.assert_awaited_once_with(
+            "corp", 789, False
+        )
+
+    @pytest.mark.asyncio
+    async def test_other_corp_member_close_returns_403(self, test_client):
+        """主角色不在该公司 → 403，且不写库"""
+        with (
+            patch(
+                "src_v2.backend.api.permission_required.permission_manager",
+                _vip_alpha_permission_manager(),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.is_admin_user",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.UserManager",
+                return_value=_user_manager(),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.CharacterManager",
+                return_value=_character_manager(_main_character_context(790, True)),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset."
+                "EveAssetPullMissionDBUtils.select_mission_by_owner_id_and_owner_type",
+                AsyncMock(return_value=self._mission()),
+            ),
+            patch("src_v2.backend.api.EVE.api_asset.AssetManager") as mock_am_cls,
+        ):
+            resp = await test_client.post(
+                self.CLOSE_URL, headers=_auth_headers("outsider"), json=self.BODY
+            )
+
+        assert resp.status_code == 403
+        mock_am_cls.return_value.change_asset_pull_mission_status.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_corp_non_director_delete_returns_403(self, test_client):
+        """同公司但非总监删除 → 403，且不删库"""
+        with (
+            patch(
+                "src_v2.backend.api.permission_required.permission_manager",
+                _vip_alpha_permission_manager(),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.is_admin_user",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.UserManager",
+                return_value=_user_manager(),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.CharacterManager",
+                return_value=_character_manager(_main_character_context(789, False)),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset."
+                "EveAssetPullMissionDBUtils.select_mission_by_owner_id_and_owner_type",
+                AsyncMock(return_value=self._mission()),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.EveAssetPullMissionDBUtils.delete_obj",
+                AsyncMock(),
+            ) as mock_delete,
+        ):
+            resp = await test_client.delete(
+                self.DELETE_URL, headers=_auth_headers("member"), json=self.BODY
+            )
+
+        assert resp.status_code == 403
+        mock_delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_corp_director_can_delete_others_mission(self, test_client):
+        """同公司总监删除他人创建的公司任务 → 200"""
+        with (
+            patch(
+                "src_v2.backend.api.permission_required.permission_manager",
+                _vip_alpha_permission_manager(),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.is_admin_user",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.UserManager",
+                return_value=_user_manager(),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.CharacterManager",
+                return_value=_character_manager(_main_character_context(789, True)),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset."
+                "EveAssetPullMissionDBUtils.select_mission_by_owner_id_and_owner_type",
+                AsyncMock(return_value=self._mission()),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.EveAssetPullMissionDBUtils.delete_obj",
+                AsyncMock(),
+            ) as mock_delete,
+        ):
+            resp = await test_client.delete(
+                self.DELETE_URL, headers=_auth_headers("director"), json=self.BODY
+            )
+
+        assert resp.status_code == 200
+        mock_delete.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_create_for_other_corp_returns_400(self, test_client):
+        """为公司之外的主体创建 → 400，不落库"""
+        with (
+            patch(
+                "src_v2.backend.api.EVE.api_asset.is_admin_user",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.UserManager",
+                return_value=_user_manager(),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.CharacterManager",
+                return_value=_character_manager(_main_character_context(790, True)),
+            ),
+            patch("src_v2.backend.api.EVE.api_asset.AssetManager") as mock_am_cls,
+        ):
+            resp = await test_client.post(
+                self.CREATE_URL,
+                headers=_auth_headers("member"),
+                json={"asset_owner_type": "corp", "asset_owner_id": 789, "active": True},
+            )
+
+        assert resp.status_code == 400
+        mock_am_cls.return_value.create_asset_pull_mission.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_existing_mission_returns_400(self, test_client):
+        """公司任务已存在 → 400 明确文案，而不是 500"""
+        with (
+            patch(
+                "src_v2.backend.api.EVE.api_asset.is_admin_user",
+                AsyncMock(return_value=False),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.UserManager",
+                return_value=_user_manager(),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset.CharacterManager",
+                return_value=_character_manager(_main_character_context(789, True)),
+            ),
+            patch(
+                "src_v2.backend.api.EVE.api_asset."
+                "EveAssetPullMissionDBUtils.select_mission_by_owner_id_and_owner_type",
+                AsyncMock(return_value=self._mission()),
+            ),
+            patch("src_v2.backend.api.EVE.api_asset.AssetManager") as mock_am_cls,
+        ):
+            resp = await test_client.post(
+                self.CREATE_URL,
+                headers=_auth_headers("member"),
+                json={"asset_owner_type": "corp", "asset_owner_id": 789, "active": True},
+            )
+
+        assert resp.status_code == 400
+        mock_am_cls.return_value.create_asset_pull_mission.assert_not_called()

@@ -2,6 +2,9 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/http'
+import KCard from '@/components/k/KCard.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
+import KTable from '@/components/k/KTable.vue'
 import type { User, Role } from '../types'
 
 const users = ref<User[]>([])
@@ -168,7 +171,8 @@ onMounted(() => {
 
 <template>
   <div class="user-role-management">
-    <el-table :data="users" border stripe style="width: 100%">
+    <KTable :data="users" border stripe style="width: 100%" empty-why="还没有可分配角色的用户"
+      empty-hint="用户首次登录后会自动出现在这里">
       <el-table-column prop="userName" label="用户名" width="200" />
       <el-table-column prop="createDate" label="创建时间" width="200" />
       <el-table-column label="操作" width="200" fixed="right">
@@ -176,14 +180,14 @@ onMounted(() => {
           <el-button size="small" type="primary" @click="openUserRoleDialog(scope.row)">管理角色</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </KTable>
 
     <!-- 用户角色关联对话框 -->
     <el-dialog v-model="userRoleDialogVisible" :title="`管理用户角色 - ${selectedUserForRole?.userName}`" width="800px">
       <div class="user-role-content">
         <!-- 当前用户信息 -->
         <div class="current-user-info">
-          <el-card shadow="never" class="user-card">
+          <KCard class="user-card">
             <template #header>
               <div class="card-header">
                 <span class="user-name">{{ selectedUserForRole?.userName }}</span>
@@ -196,11 +200,11 @@ onMounted(() => {
                 <span class="info-value">{{ selectedUserForRole?.createDate || '未知' }}</span>
               </div>
             </div>
-          </el-card>
+          </KCard>
         </div>
 
         <!-- 用户角色区域 -->
-        <el-card shadow="never" class="roles-card">
+        <KCard class="roles-card">
           <template #header>
             <div class="card-header">
               <span>当前角色 ({{ userRoles.length }})</span>
@@ -218,7 +222,8 @@ onMounted(() => {
             >
               {{ role }}
             </el-tag>
-            <div v-if="userRoles.length === 0" class="empty-text">暂无角色</div>
+            <KEmpty v-if="userRoles.length === 0" why="这个用户还没有分配角色" hint="在下方下拉框里选中后批量添加"
+              size="sm" inline />
           </div>
           <el-divider />
           <div class="add-roles-section">
@@ -279,7 +284,7 @@ onMounted(() => {
               批量移除角色 ({{ userRoleForm.selectedRolesToRemove.length }})
             </el-button>
           </div>
-        </el-card>
+        </KCard>
       </div>
       <template #footer>
         <el-button @click="userRoleDialogVisible = false">关闭</el-button>
@@ -303,7 +308,7 @@ onMounted(() => {
 }
 
 .user-card {
-  border: 2px solid #409eff;
+  border: 2px solid var(--k-color-primary);
 }
 
 .card-header {
@@ -318,7 +323,7 @@ onMounted(() => {
 }
 
 .user-info {
-  color: #666;
+  color: var(--k-color-text-secondary);
   font-size: 14px;
 }
 
@@ -328,11 +333,11 @@ onMounted(() => {
 
 .info-label {
   font-weight: 500;
-  color: #333;
+  color: var(--k-color-text);
 }
 
 .info-value {
-  color: #666;
+  color: var(--k-color-text-secondary);
 }
 
 .roles-card {
@@ -362,18 +367,23 @@ onMounted(() => {
   font-size: 14px;
   font-weight: bold;
   margin-bottom: 10px;
-  color: #333;
-}
-
-.empty-text {
-  color: #999;
-  font-size: 14px;
-  padding: 10px 0;
+  color: var(--k-color-text);
 }
 
 .role-description-text {
-  color: #999;
+  color: var(--k-color-text-secondary);
   font-size: 12px;
+}
+
+/* ── P2-C ≤1280 窄屏兜底 ─────────────────────────────────
+   只降级布局，不动基础规则：1920+ 不受影响。 */
+@media (max-width: 1280px) {
+  /* 固定 600px 的滚动区在 800 高的视口里会把弹窗撑到 842px，
+     底部「关闭」被顶出屏幕、必须滚动遮罩才点得到。
+     跟随视口收缩滚动区高度，保证标题/内容/按钮同屏。 */
+  .user-role-content {
+    max-height: min(600px, calc(100vh - 340px));
+  }
 }
 </style>
 

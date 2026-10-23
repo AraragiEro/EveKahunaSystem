@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watch, toRef, onMounted, onUnmounted } from 'vue'
+/* eslint-disable @typescript-eslint/no-explicit-any -- 工作流数据沿用后端原始结构（历史 any 契约），P2 只做 KTable 替换，未改数据契约 */
+import { flashCopied, createCopyCellClassName } from '@/composables/useCopyCell'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CircleCheckFilled, CircleClose, Share, Management, Loading, QuestionFilled } from '@element-plus/icons-vue'
+import { ArrowDown, CircleCheckFilled, CircleClose, Share, Management, Loading, QuestionFilled, Search } from '@element-plus/icons-vue'
 import { useWorkflowImplementation, getWorkflowItemKey } from '@/composables/useWorkflowImplementation'
 import { useWorkflowImplementationSync } from '@/composables/useWorkflowImplementationSync'
 import { useAuthStore } from '@/stores/auth'
+import KTable from '@/components/k/KTable.vue'
 
 // Props定义
 const props = defineProps<{
@@ -35,21 +38,18 @@ const calculationId = computed(() => props.calculationId || null)
 
 // 使用实施标记 composable
 const {
-    isImplemented,
     toggleImplemented,
     implementations,
     lastSynced,
     saveLocalState,
     setRunsImplemented,
     getRunsImplemented,
-    getPartialProgress,
     getRunsImplementedDisplay
 } = useWorkflowImplementation(userName, planName, calculationId)
 
 // 使用同步 composable
 const {
     isSyncing,
-    lastSyncTime,
     conflicts,
     isOnline,
     syncNow,
@@ -163,15 +163,22 @@ const progressPercent = (row: any): number => {
   return Math.round((displayRuns(row) / row.runs_count) * 100)
 }
 
-// 判断是否为部分实施
-const isPartiallyImplemented = (row: any): boolean => {
-  const key = getWorkflowItemKey({ type_id: row.type_id, runs: row.runs, fake: row.fake, avaliable: row.avaliable })
-  const progress = getPartialProgress(key, row.runs_count)
-  return progress.isPartial
-}
-
 // 复制单元格内容
-const copyCellContent = async (content: string | number | null | undefined, fieldName: string = '') => {
+// footer 汇总：只合计数量类列
+const WORKFLOW_SUM_PROPS = ['runs_count', 'runs']
+const summaryMethod = ({ columns, data }: { columns: any[], data: any[] }) => {
+    return columns.map((col: any, index: number) => {
+        if (index === 0) return '合计'
+        const prop = col.property
+        if (!prop || !WORKFLOW_SUM_PROPS.includes(prop)) return ''
+        const total = (data || []).reduce((s: number, row: any) => s + (Number(row?.[prop]) || 0), 0)
+        return formatAccounting(total)
+    })
+}
+// 可复制列标记（复制成功的高亮由 flashCopied 直接加在 td 上）
+const copyCellClassName = createCopyCellClassName(['type_name', 'type_name_zh', 'runs_count'])
+
+const copyCellContent = async (content: string | number | null | undefined, fieldName: string = '', ev?: MouseEvent) => {
     try {
         if (content === null || content === undefined || content === '') {
             ElMessage.warning('没有可复制的内容')
@@ -185,6 +192,7 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
         if (navigator.clipboard && navigator.clipboard.writeText) {
             await navigator.clipboard.writeText(text)
             ElMessage.success(`已复制${fieldName ? ` ${fieldName} ` : ' '}到剪贴板`)
+            flashCopied(ev)
         } else {
             // 降级方案：使用传统的 execCommand 方法
             const textarea = document.createElement('textarea')
@@ -200,6 +208,7 @@ const copyCellContent = async (content: string | number | null | undefined, fiel
                 const successful = document.execCommand('copy')
                 if (successful) {
                     ElMessage.success(`已复制${fieldName ? ` ${fieldName} ` : ' '}到剪贴板`)
+            flashCopied(ev)
                 } else {
                     throw new Error('execCommand 复制失败')
                 }
@@ -232,10 +241,39 @@ const availableMarketGroups = computed(() => {
 })
 
 // 工作流表格数据计算
+// 市场组筛选：面板内搜索 + 全选/清空 + 路径提示
+const mgSearch = ref('')
+const marketGroupPathMap = computed(() => {
+    const map = new Map<string, string>()
+    props.workFlowData.forEach((w: any) => {
+        const path: string[] = w.market_group_list || []
+        path.slice(0, -1).forEach((mg: string, i: number) => {
+            if (!map.has(mg)) map.set(mg, path.slice(0, i + 1).join(' / '))
+        })
+    })
+    return map
+})
+const filteredMarketGroups = computed(() => {
+    const kw = mgSearch.value.trim().toLowerCase()
+    const all = availableMarketGroups.value as string[]
+    if (!kw) return all
+    return all.filter((mg: string) => {
+        const full = marketGroupPathMap.value.get(mg) || mg
+        return full.toLowerCase().includes(kw) || mg.toLowerCase().includes(kw)
+    })
+})
+const toggleMarketGroup = (mg: string) => {
+    const i = marketGroupFilter.value.indexOf(mg)
+    if (i >= 0) marketGroupFilter.value.splice(i, 1)
+    else marketGroupFilter.value.push(mg)
+}
+const selectAllMarketGroups = () => {
+    marketGroupFilter.value = [...(filteredMarketGroups.value as string[])]
+}
 const workFlowTableView = computed(() => {
     // 使用嵌套对象进行分组：type_id -> fake -> avaliable -> runs
     const grouped: Record<string, Record<string, Record<string, Record<string, { count: number, eiv: number, active_time: number }>>>> = {}
-    const typeInfo: Record<string, { type_name: string, type_name_zh: string, avaliable: boolean, active_id: number, class_type: string }> = {}
+    const typeInfo: Record<string, { type_name: string, type_name_zh: string, avaliable: boolean, active_id: number, class_type: string, category_name: string, market_group_list: string[] }> = {}
     
     // 遍历数据，进行分组统计
     props.workFlowData.forEach((work: any) => {
@@ -333,15 +371,6 @@ const workFlowTableView = computed(() => {
     return result
 })
 
-// 计算当前筛选结果下的线总计
-const totalRunsCount = computed(() => {
-    return workFlowTableView.value.reduce((sum, row) => sum + (Number(row.runs_count) || 0), 0)
-})
-
-// 计算总EIV
-const totalEIV = computed(() => {
-    return workFlowTableView.value.reduce((sum, row) => sum + (row.eiv || 0), 0)
-})
 
 // ============ 分享功能 ============
 
@@ -361,20 +390,6 @@ const handleShare = () => {
 // 处理接取管理按钮点击
 const handleManageClaims = () => {
     emit('manage-claims')
-}
-
-// 处理实施标记切换
-const handleToggleImplementation = (row: any) => {
-    if (isReadonly.value) return
-    
-    const itemKey = getWorkflowItemKey({
-        type_id: row.type_id,
-        runs: row.runs,
-        fake: row.fake,
-        avaliable: row.avaliable
-    })
-    
-    toggleImplemented(itemKey, row.runs_count)
 }
 
 // 打开部分实施对话框
@@ -538,12 +553,17 @@ onUnmounted(() => {
             </el-tag>
         </div>
         
-        <el-table
+        <KTable :cell-class-name="copyCellClassName"
             :data="workFlowTableView"
             :key="`workflow-table-${selectedPlan || 'default'}`"
             :row-class-name="ImplementRowClassName"
-            border
-            max-height="75vh"
+
+
+            empty-why="当前计划还没有工作流"
+            empty-hint="先在工业计划里添加生产步骤，这里会按物品汇总线数与材料状态"
+            show-summary
+            :summary-method="summaryMethod"
+            height="100%"
         >
         <el-table-column label="icon" width="120">
             <template #default="{ row }">
@@ -555,7 +575,7 @@ onUnmounted(() => {
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
-                    @click="copyCellContent(row.type_name, '物品名en')"
+                    @click="copyCellContent(row.type_name, '物品名en', $event)"
                     :title="`点击复制: ${row.type_name || ''}`"
                 >
                     {{ row.type_name }}
@@ -566,32 +586,32 @@ onUnmounted(() => {
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
-                    @click="copyCellContent(row.type_name_zh, '物品名zh')"
+                    @click="copyCellContent(row.type_name_zh, '物品名zh', $event)"
                     :title="`点击复制: ${row.type_name_zh || ''}`"
                 >
                     {{ row.type_name_zh }}
                 </div>
             </template>
         </el-table-column>
-        <el-table-column prop="runs_count" width="120" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)">
+        <el-table-column label="线" prop="runs_count" width="120" align="right" sortable="custom" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)">
             <template #header>
-                <span>线 (总计: {{ formatAccounting(totalRunsCount) }})</span>
+                <span>线</span>
             </template>
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
-                    @click="copyCellContent(row.runs_count, 'Runs Count')"
+                    @click="copyCellContent(row.runs_count, 'Runs Count', $event)"
                     :title="`点击复制: ${row.runs_count || ''}`"
                 >
                     {{ formatAccounting(row.runs_count) }}
                 </div>
             </template>
         </el-table-column>
-        <el-table-column label="流程" prop="runs" width="100" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)">
+        <el-table-column label="流程" prop="runs" width="100" align="right" sortable="custom" :formatter="(row: any, column: any, cellValue: any) => formatAccounting(cellValue)">
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
-                    @click="copyCellContent(row.runs, 'Runs')"
+                    @click="copyCellContent(row.runs, 'Runs', $event)"
                     :title="`点击复制: ${row.runs || ''}`"
                 >
                     {{ formatAccounting(row.runs) }}
@@ -648,7 +668,7 @@ onUnmounted(() => {
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
-                    @click="copyCellContent(row.category_name, '类型')"
+                    @click="copyCellContent(row.category_name, '类型', $event)"
                     :title="`点击复制: ${row.category_name || ''}`"
                 >
                     {{ row.category_name }}
@@ -657,10 +677,34 @@ onUnmounted(() => {
         </el-table-column>
         <el-table-column label="市场组" width="100">
             <template #header>
-                <span>市场组</span>
-                <el-select v-model="marketGroupFilter" :disabled="isReadonly" multiple collapse-tags collapse-tags-tooltip size="small" style="max-width: 120px;">
-                    <el-option v-for="mg in availableMarketGroups" :key="mg" :value="mg" :label="mg" />
-                </el-select>
+                <el-popover trigger="click" placement="bottom-start" :width="330" popper-class="mg-filter-pop" @show="mgSearch = ''">
+                    <template #reference>
+                        <button type="button" class="hdr-filter-btn" :class="{ active: marketGroupFilter.length > 0 }"
+                            :disabled="isReadonly">
+                            <span>市场组</span>
+                            <span v-if="marketGroupFilter.length" class="hdr-filter-count">{{ marketGroupFilter.length }}</span>
+                            <el-icon class="hdr-filter-caret"><ArrowDown /></el-icon>
+                        </button>
+                    </template>
+                    <div class="mg-filter-panel">
+                        <el-input v-model="mgSearch" size="small" placeholder="输入关键字筛选" clearable :prefix-icon="Search" />
+                        <div class="mg-filter-tools">
+                            <el-button text size="small" @click="selectAllMarketGroups">全选</el-button>
+                            <el-button text size="small" @click="marketGroupFilter = []">清空</el-button>
+                            <span class="mg-filter-stat">已选 {{ marketGroupFilter.length }} / {{ filteredMarketGroups.length }}</span>
+                        </div>
+                        <div class="mg-filter-list">
+                            <el-checkbox v-for="mg in filteredMarketGroups" :key="mg"
+                                :model-value="marketGroupFilter.includes(mg)" @change="toggleMarketGroup(mg)">
+                                <span class="mg-filter-item">
+                                    <span class="mg-filter-name">{{ mg }}</span>
+                                    <span class="mg-filter-path">{{ marketGroupPathMap.get(mg) }}</span>
+                                </span>
+                            </el-checkbox>
+                            <div v-if="!filteredMarketGroups.length" class="mg-filter-empty">没有匹配的市场组</div>
+                        </div>
+                    </div>
+                </el-popover>
             </template>
             <template #default="{ row }">
                 <el-popover trigger="hover" placement="top" :width="300" :disabled="!(row.market_group_list || []).length">
@@ -679,11 +723,10 @@ onUnmounted(() => {
         </el-table-column>
         <el-table-column label="活动id" width="100">
             <template #header>
-                <span>工作类型</span>
-                <el-select v-model="activeIdFilter" :disabled="isReadonly">
-                    <el-option value="all">所有</el-option>
-                    <el-option value="1" label="制造">制造</el-option>
-                    <el-option value="11" label="反应">反应</el-option>
+                <el-select v-model="activeIdFilter" :disabled="isReadonly" size="small" class="hdr-filter-select">
+                    <el-option value="all" label="工作类型·所有" />
+                    <el-option value="1" label="工作类型·制造" />
+                    <el-option value="11" label="工作类型·反应" />
                 </el-select>
             </template>
             <template #default="{ row }">
@@ -708,7 +751,7 @@ onUnmounted(() => {
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
-                    @click="copyCellContent(row.class_type, '产物类型')"
+                    @click="copyCellContent(row.class_type, '产物类型', $event)"
                     :title="`点击复制: ${row.class_type || ''}`"
                 >
                     {{ row.class_type }}
@@ -717,12 +760,12 @@ onUnmounted(() => {
         </el-table-column>
         <el-table-column width="150">
             <template #header>
-                <span>EIV (总计: {{ formatAccounting(totalEIV) }})</span>
+                <span>EIV</span>
             </template>
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
-                    @click="copyCellContent(row.eiv, 'EIV')"
+                    @click="copyCellContent(row.eiv, 'EIV', $event)"
                     :title="`点击复制: ${row.eiv || ''}`"
                 >
                     {{ formatAccounting(row.eiv) }}
@@ -733,7 +776,7 @@ onUnmounted(() => {
             <template #default="{ row }">
                 <div 
                     class="copyable-cell" 
-                    @click="copyCellContent(row.active_time, '估计时间')"
+                    @click="copyCellContent(row.active_time, '估计时间', $event)"
                     :title="`点击复制: ${row.active_time || ''}秒`"
                 >
                     {{ formatDuration(row.active_time) }}
@@ -803,7 +846,7 @@ onUnmounted(() => {
             </div>
           </template>
         </el-table-column>
-    </el-table>
+    </KTable>
     
     <!-- 部分实施对话框 -->
     <el-dialog
@@ -839,9 +882,17 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     gap: 16px;
+    height: 100%;
+    min-height: 0;
+}
+
+.workflow-view-container > :deep(.el-table) {
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .workflow-toolbar {
+    flex: 0 0 auto;
     display: flex;
     justify-content: flex-end;
     padding: 8px 0;
@@ -851,20 +902,6 @@ onUnmounted(() => {
 .copyable-cell {
     cursor: pointer;
     user-select: none;
-    padding: 4px 8px;
-    margin: -4px -8px;
-    border-radius: 4px;
-    transition: all 0.2s;
-}
-
-.copyable-cell:hover {
-    background-color: #f0f9ff;
-    color: #409eff;
-}
-
-.copyable-cell:active {
-    background-color: #e1f5ff;
-    transform: scale(0.98);
 }
 
 /* 实施标记提示 */
@@ -872,14 +909,14 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     padding: 8px 12px;
-    background-color: #f0f9ff;
+    background-color: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface));
     border-radius: 4px;
-    border-left: 4px solid #409eff;
+    border-left: 4px solid var(--k-color-primary);
 }
 
 .implementation-hint .el-icon {
     margin-right: 6px;
-    color: #67c23a;
+    color: var(--k-color-success);
 }
 
 /* 实施状态列样式 - 紧凑布局 */
@@ -901,7 +938,7 @@ onUnmounted(() => {
 
 .implementation-progress-text {
     font-size: 13px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -954,30 +991,25 @@ onUnmounted(() => {
     font-size: 12px;
 }
 
-/* 已实施行样式（浅绿色背景，参考 FlowView.vue 的 complete-row） */
+/* 已实施行样式：token 混合，深浅两套都可读（参考 FlowView.vue 的 complete-row） */
 :deep(.el-table__body tr.implemented-row),
 :deep(.el-table__body tr.implemented-row > td.el-table__cell),
 :deep(.el-table__body tr.implemented-row:hover > td.el-table__cell) {
-    background-color: #e7ffc8 !important;
-    font-weight: bold !important;
-    color: #000000 !important;
+    background-color: color-mix(in srgb, var(--k-color-success) 22%, var(--k-color-surface));
+    font-weight: bold;
+    color: var(--k-color-text);
 }
 
-/* 部分实施行样式（浅黄色/橙色，light主题） */
+/* 部分实施行样式：warning 混合，深浅通用 */
 :deep(.el-table__body tr.partially-implemented-row),
 :deep(.el-table__body tr.partially-implemented-row > td.el-table__cell),
 :deep(.el-table__body tr.partially-implemented-row:hover > td.el-table__cell) {
-    background-color: #fff3cd !important;
-    color: #000000 !important;
+    background-color: color-mix(in srgb, var(--k-color-warning) 18%, var(--k-color-surface));
+    color: var(--k-color-text);
 }
 
 /* 深色主题 - 已实施行 */
-:global([data-theme='dark']) .workflow-view-container :deep(.el-table__body tr.implemented-row),
-:global([data-theme='dark']) .workflow-view-container :deep(.el-table__body tr.implemented-row > td.el-table__cell),
-:global([data-theme='dark']) .workflow-view-container :deep(.el-table__body tr.implemented-row:hover > td.el-table__cell) {
-    background-color: color-mix(in srgb, var(--k-color-success) 22%, var(--k-color-surface)) !important;
-    color: var(--k-color-text) !important;
-}
+
 
 /* 市场组单行截断 */
 .market-group-line {
@@ -999,30 +1031,116 @@ onUnmounted(() => {
 </style>
 
 <style>
-/* 深色主题：使用全局样式确保能匹配到 data-theme="dark" 在 html 元素上的情况 */
-[data-theme="dark"] .workflow-view-container .implementation-hint {
-    background-color: var(--k-color-surface-soft);
-    border-left-color: var(--k-color-primary);
+/* 表头筛选：按钮 + 市场组复选面板 ─────────────────────────────────
+   面板内容被 teleport 到 body，样式必须写在非 scoped 块里。 */
+.hdr-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--k-color-border-subtle);
+  border-radius: var(--k-radius-xs);
+  background: var(--k-color-surface);
+  color: var(--k-color-text-secondary);
+  font-size: var(--k-font-xs);
+  line-height: 1.6;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-[data-theme="dark"] .workflow-view-container .copyable-cell:hover {
-    background-color: color-mix(in srgb, var(--k-color-primary) 20%, transparent);
-    color: var(--k-color-text);
-}
-[data-theme="dark"] .workflow-view-container .copyable-cell:active {
-    background-color: color-mix(in srgb, var(--k-color-primary) 30%, transparent);
+.hdr-filter-btn:hover:not(:disabled) {
+  border-color: var(--k-color-primary);
+  color: var(--k-color-primary);
 }
 
-/* 深色主题 - 部分实施行 */
-[data-theme="dark"] .workflow-view-container .el-table__body tr.partially-implemented-row,
-[data-theme="dark"] .workflow-view-container .el-table__body tr.partially-implemented-row > td.el-table__cell,
-[data-theme="dark"] .workflow-view-container .el-table__body tr.partially-implemented-row:hover > td.el-table__cell {
-    background-color: color-mix(in srgb, #ffc107 18%, var(--k-color-surface)) !important;
-    color: var(--k-color-text) !important;
+.hdr-filter-btn.active {
+  border-color: var(--k-color-primary);
+  color: var(--k-color-primary);
+  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface));
 }
 
-[data-theme="dark"] .workflow-view-container .implementation-progress-text {
-    color: #a0a0a0;
+.hdr-filter-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
-</style>
 
+.hdr-filter-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.hdr-filter-caret {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.hdr-filter-select {
+  width: 100%;
+}
+
+.mg-filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mg-filter-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--k-color-border-subtle);
+}
+
+.mg-filter-tools .el-button + .el-button {
+  margin-left: 0;
+}
+
+.mg-filter-stat {
+  margin-left: auto;
+  font-size: var(--k-font-xs);
+  color: var(--k-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mg-filter-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.mg-filter-list .el-checkbox {
+  height: auto;
+  margin-right: 0;
+  padding: 4px 0;
+}
+
+.mg-filter-list .el-checkbox__label {
+  width: 100%;
+}
+
+.mg-filter-item {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.mg-filter-name {
+  font-size: var(--k-font-sm);
+  color: var(--k-color-text);
+}
+
+.mg-filter-path {
+  font-size: var(--k-font-xs);
+  color: var(--k-color-text-secondary);
+  opacity: 0.7;
+}
+
+.mg-filter-empty {
+  padding: 12px 0;
+  text-align: center;
+  font-size: var(--k-font-xs);
+  color: var(--k-color-text-secondary);
+}</style>

@@ -1,4 +1,9 @@
 <script setup lang="ts">
+/* eslint-disable @typescript-eslint/no-explicit-any -- 资产视图/容器列表沿用后端原始结构（历史 any 契约），P2 只做 KCard/KTable 替换，未改数据契约 */
+import KCard from '@/components/k/KCard.vue'
+import KTable from '@/components/k/KTable.vue'
+import KRowMenu from '@/components/k/KRowMenu.vue'
+import type { KRowMenuItem } from '@/components/k/types'
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { http } from '@/http'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -113,7 +118,7 @@ const fetchUserList = async () => {
             return
         }
         userList.value = data.data || []
-    } catch (error) {
+    } catch {
         ElMessage.error('获取用户列表失败')
     } finally {
         userListLoading.value = false
@@ -187,7 +192,7 @@ const refreshAssetView = async () => {
         saveAssetViewCache(AssetViewDialogSid.value, processedData, data.view_type, data.config)
 
         ElMessage.success('刷新成功')
-    } catch (error) {
+    } catch {
         assetViewDialogLoading.value = false
         ElMessage.error('刷新失败')
     }
@@ -447,7 +452,7 @@ const copyPublicLink = async (assetViewItem: any) => {
     try {
         await navigator.clipboard.writeText(publicUrl)
         ElMessage.success('公开链接已复制到剪贴板')
-    } catch (error) {
+    } catch {
         // 如果 clipboard API 不可用，使用备用方法
         const textArea = document.createElement('textarea')
         textArea.value = publicUrl
@@ -458,11 +463,31 @@ const copyPublicLink = async (assetViewItem: any) => {
         try {
             document.execCommand('copy')
             ElMessage.success('公开链接已复制到剪贴板')
-        } catch (err) {
+        } catch {
             ElMessage.error('复制失败，请手动复制链接')
         }
         document.body.removeChild(textArea)
     }
+}
+
+// ============== 卡片「⋯ 更多」菜单 ==============
+// 设置/分享/删除都是低频操作，收进菜单；删除用 danger 色，不放在外面当主图标。
+const cardMenuItems = (assetViewItem: any): KRowMenuItem[] => [
+    { key: 'set', label: '设置视图', icon: Setting },
+    {
+        key: 'share',
+        label: '复制公开链接',
+        icon: Share,
+        disabled: !assetViewItem.public,
+        divided: true,
+    },
+    { key: 'delete', label: '删除视图', icon: Delete, danger: true, divided: true },
+]
+
+const handleCardMenu = (assetViewItem: any, key: string) => {
+    if (key === 'set') return handleSetAssetView(assetViewItem)
+    if (key === 'share') return copyPublicLink(assetViewItem)
+    if (key === 'delete') return handleDeleteAssetView(assetViewItem)
 }
 
 // ============== 删除资产视图 ==============
@@ -504,7 +529,7 @@ const handleDeleteAssetView = async (assetViewItem: any) => {
 const addMonitorDialogVisible = ref(false)
 const selectedContainers = ref<Array<{ container_id: number, owner_id: number }>>([])
 const newViewTag = ref('')
-const containerPermissionList = ref<any[]>([])
+const containerPermissionList = ref<ContainerPermissionItem[]>([])
 const containerPermissionLoading = ref(false)
 
 interface ContainerPermissionItem {
@@ -541,7 +566,7 @@ const fetchContainerPermissionList = async () => {
         // 使用数组替换确保响应式更新
         containerPermissionList.value = Array.isArray(data.data) ? [...data.data] : []
         console.log("fetchContainerPermissionList containerPermissionList", containerPermissionList.value)
-    } catch (error) {
+    } catch {
         ElMessage.error('获取容器许可列表失败')
     } finally {
         containerPermissionLoading.value = false
@@ -583,17 +608,6 @@ const handleTableSelectionChange = (selection: any[]) => {
     }))
 }
 
-const handleToggleSelection = (containerId: number, ownerId: number) => {
-    const index = selectedContainers.value.findIndex(
-        item => item.container_id === containerId && item.owner_id === ownerId
-    )
-    if (index > -1) {
-        selectedContainers.value.splice(index, 1)
-    } else {
-        selectedContainers.value.push({ container_id: containerId, owner_id: ownerId })
-    }
-}
-
 const handleAddMonitor = async () => {
     if (!newViewTag.value || newViewTag.value.trim() === '') {
         ElMessage.warning('请输入标签')
@@ -627,7 +641,7 @@ const handleAddMonitor = async () => {
         selectedContainers.value = []
         newViewTag.value = ''
         await getAssetViewList()
-    } catch (error) {
+    } catch {
         ElMessage.error('创建监控失败')
     }
 }
@@ -684,7 +698,7 @@ const fetchManageContainerList = async () => {
         }
         // 使用数组替换确保响应式更新
         manageContainerList.value = Array.isArray(data.data) ? [...data.data] : []
-    } catch (error) {
+    } catch {
         ElMessage.error('获取容器许可列表失败')
     } finally {
         manageContainerLoading.value = false
@@ -778,7 +792,7 @@ const handleSaveManageContainer = async () => {
         manageContainerDialogVisible.value = false
         assetViewSetForm.value.asset_container_id_list = containerList.map(item => ({ ...item }))
         await getAssetViewList()
-    } catch (error) {
+    } catch {
         ElMessage.error('更新容器列表失败')
     }
 }
@@ -809,7 +823,7 @@ onMounted(async () => {
 </script>
 
 <template>
-    <div class="asset-view-container">
+    <div class="asset-view-container asset-view-list-page">
         <!-- 管理员用户选择器 -->
         <div v-if="haveAdminRole" class="admin-user-selector">
             <el-form-item label="选择用户" style="margin-bottom: 16px;">
@@ -823,58 +837,43 @@ onMounted(async () => {
 
         <div class="asset-view-grid">
             <!-- 增加监控卡片 -->
-            <el-card class="add-monitor-card" shadow="hover" @click="handleOpenAddMonitorDialog">
+            <KCard class="add-monitor-card" @click="handleOpenAddMonitorDialog">
                 <div class="add-monitor-content">
                     <el-icon class="add-icon">
                         <Plus />
                     </el-icon>
                     <div class="add-monitor-text">增加监控</div>
                 </div>
-            </el-card>
+            </KCard>
 
             <!-- 资产视图卡片 -->
-            <el-card v-for="assetView in assetViewList" :key="assetView.sid" class="asset-view-card" shadow="hover"
+            <KCard v-for="assetView in assetViewList" :key="assetView.sid" class="asset-view-card"
                 @click="handleViewAssetView(assetView)">
                 <div class="card-header">
                     <div class="card-info">
                         <div class="card-title">{{ assetView.tag || '未命名视图' }}</div>
                         <div class="card-sid">ID: {{ assetView.sid }}</div>
                     </div>
+                    <!-- 公开/私有都用文字徽标：以前「私有」没有任何标记，只能靠「没有徽标」推断 -->
                     <el-badge v-if="assetView.public" value="公开" class="public-badge" />
+                    <el-badge v-else value="私有" class="public-badge private-badge" />
                 </div>
 
                 <div class="card-actions" @click.stop>
+                    <!-- 主操作留在外面：查看详情是卡片最高频的动作 -->
                     <el-tooltip content="查看详情" placement="top">
-                        <el-button circle size="medium" type="primary" @click="handleViewAssetView(assetView)">
+                        <el-button circle size="medium" type="primary" aria-label="查看详情" title="查看详情"
+                            @click="handleViewAssetView(assetView)">
                             <el-icon>
                                 <View />
                             </el-icon>
                         </el-button>
                     </el-tooltip>
-                    <el-tooltip content="设置" placement="top">
-                        <el-button circle size="medium" type="primary" plain @click="handleSetAssetView(assetView)">
-                            <el-icon>
-                                <Setting />
-                            </el-icon>
-                        </el-button>
-                    </el-tooltip>
-                    <el-tooltip content="分享链接" placement="top">
-                        <el-button circle size="medium" type="success" plain :disabled="!assetView.public"
-                            @click="copyPublicLink(assetView)">
-                            <el-icon>
-                                <Share />
-                            </el-icon>
-                        </el-button>
-                    </el-tooltip>
-                    <el-tooltip content="删除" placement="top">
-                        <el-button circle size="medium" type="danger" plain @click="handleDeleteAssetView(assetView)">
-                            <el-icon>
-                                <Delete />
-                            </el-icon>
-                        </el-button>
-                    </el-tooltip>
+                    <!-- 低频操作 + 删除收进 ⋯：删除必须是 danger 菜单项，不能当外面的主图标 -->
+                    <KRowMenu circle size="medium" :items="cardMenuItems(assetView)"
+                        @select="key => handleCardMenu(assetView, key)" />
                 </div>
-            </el-card>
+            </KCard>
         </div>
     </div>
 
@@ -926,8 +925,7 @@ onMounted(async () => {
             <el-divider content-position="left">过滤条件</el-divider>
 
             <div class="filter-groups">
-                <el-card v-for="group in assetViewSetForm.filter_groups" :key="group.index" class="filter-group-card"
-                    shadow="never">
+                <KCard v-for="group in assetViewSetForm.filter_groups" :key="group.index" class="filter-group-card">
                     <template #header>
                         <div class="filter-group-header">
                             <span>过滤组 #{{ group.index + 1 }}</span>
@@ -948,7 +946,7 @@ onMounted(async () => {
                             value-key="value" @click="before_fetch_filter_suggestions(group.filter_type)"
                             placeholder="请输入过滤值" style="width: 100%" />
                     </el-form-item>
-                </el-card>
+                </KCard>
             </div>
 
             <el-button @click="add_filter_group" type="primary" size="small" :icon="Plus" class="add-filter-btn">
@@ -980,8 +978,11 @@ onMounted(async () => {
                         </el-icon>
                         <span>正在加载容器列表...</span>
                     </div>
-                    <el-table ref="containerTableRef" :key="`container-table-${addMonitorDialogVisible}`"
+                    <KTable ref="containerTableRef" :key="`container-table-${addMonitorDialogVisible}`"
+                        density="compact"
                         :data="containerPermissionList" :loading="containerPermissionLoading"
+                        empty-why="还没有可选的容器"
+                        empty-hint="先给角色授予容器权限，再回来创建监控"
                         :row-key="(row: any) => `${row.asset_container_id}-${row.asset_owner_id}`" max-height="400px"
                         @selection-change="handleTableSelectionChange">
                         <el-table-column type="selection" :reserve-selection="true" width="55"
@@ -995,7 +996,7 @@ onMounted(async () => {
                                 <span>{{ scope.row.owner_type === 'character' ? '角色' : '公司' }}</span>
                             </template>
                         </el-table-column>
-                    </el-table>
+                    </KTable>
                 </div>
             </el-form-item>
             <div class="dialog-actions">
@@ -1018,8 +1019,11 @@ onMounted(async () => {
                 </el-icon>
                 <span>正在加载容器列表...</span>
             </div>
-            <el-table ref="manageContainerTableRef" :key="`manage-container-table-${manageContainerDialogVisible}`"
+            <KTable ref="manageContainerTableRef" :key="`manage-container-table-${manageContainerDialogVisible}`"
+                density="compact"
                 :data="manageContainerList" :loading="manageContainerLoading"
+                empty-why="还没有可选的容器"
+                empty-hint="先给角色授予容器权限，再回来管理监控容器"
                 :row-key="(row: any) => `${row.asset_container_id}-${row.asset_owner_id}-${row.location_flag}`"
                 max-height="400px" @selection-change="handleManageContainerSelectionChange">
                 <el-table-column type="selection" :reserve-selection="true" width="55"
@@ -1034,7 +1038,7 @@ onMounted(async () => {
                         <span>{{ scope.row.owner_type === 'character' ? '角色' : '公司' }}</span>
                     </template>
                 </el-table-column>
-            </el-table>
+            </KTable>
         </div>
         <div class="dialog-actions">
             <el-button @click="manageContainerDialogVisible = false">取消</el-button>
@@ -1078,21 +1082,12 @@ onMounted(async () => {
     background:
         radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--k-color-primary) 30%, transparent) 0%, transparent 45%),
         linear-gradient(140deg,
-            color-mix(in srgb, var(--k-color-primary) 56%, #ffffff) 0%,
-            color-mix(in srgb, var(--k-color-primary) 42%, #eaf2ff) 55%,
-            color-mix(in srgb, var(--k-color-primary) 30%, #f5f9ff) 100%);
+            color-mix(in srgb, var(--k-color-primary) 56%, var(--k-color-surface)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 42%, var(--k-color-primary-soft)) 55%,
+            color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-surface-soft)) 100%);
     box-shadow:
         0 0 0 1px color-mix(in srgb, var(--k-color-primary) 28%, transparent),
         0 14px 34px color-mix(in srgb, var(--k-color-primary) 20%, transparent);
-}
-
-:global([data-theme='dark']) .add-monitor-card {
-    background:
-        radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--k-color-primary) 30%, transparent) 0%, transparent 45%),
-        linear-gradient(140deg,
-            color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-surface-soft)) 0%,
-            color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface)) 55%,
-            color-mix(in srgb, #0b1120 65%, var(--k-color-surface)) 100%);
 }
 
 .add-monitor-card:hover {
@@ -1126,7 +1121,7 @@ onMounted(async () => {
     justify-content: center;
     height: 100%;
     min-height: 160px;
-    color: white;
+    color: var(--k-color-text-inverse);
 }
 
 .add-icon {
@@ -1147,19 +1142,19 @@ onMounted(async () => {
     transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
     position: relative;
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--k-color-primary) 24%, var(--k-color-border)) !important;
+    border: 1px solid color-mix(in srgb, var(--k-color-primary) 24%, var(--k-color-border));
     background:
         linear-gradient(160deg,
             color-mix(in srgb, var(--k-color-surface) 92%, var(--k-color-surface-soft)) 0%,
-            color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
+            color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%);
     box-shadow:
         inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 12%, transparent),
-        0 8px 24px color-mix(in srgb, #0b1120 16%, transparent);
+        0 8px 24px color-mix(in srgb, var(--k-color-shade) 16%, transparent);
 }
 
 .asset-view-card:hover {
     transform: translateY(-4px);
-    border-color: color-mix(in srgb, var(--k-color-primary) 46%, var(--k-color-border)) !important;
+    border-color: color-mix(in srgb, var(--k-color-primary) 46%, var(--k-color-border));
     box-shadow:
         inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 22%, transparent),
         0 16px 36px color-mix(in srgb, var(--k-color-primary) 18%, transparent);
@@ -1210,8 +1205,16 @@ onMounted(async () => {
 }
 
 .public-badge :deep(.el-badge__content) {
-    background-color: #67c23a;
-    border-color: #67c23a;
+    background-color: var(--k-color-success);
+    border-color: var(--k-color-success);
+    font-size: 11px;
+    padding: 0 6px;
+}
+
+/* 「私有」徽标与「公开」同尺寸，只换中性色 —— 状态靠文字读，不靠有没有徽标 */
+.private-badge :deep(.el-badge__content) {
+    background-color: var(--k-color-text-secondary);
+    border-color: var(--k-color-text-secondary);
     font-size: 11px;
     padding: 0 6px;
 }
@@ -1260,11 +1263,11 @@ onMounted(async () => {
     background:
         linear-gradient(160deg,
             color-mix(in srgb, var(--k-color-surface) 94%, var(--k-color-surface-soft)) 0%,
-            color-mix(in srgb, var(--k-color-primary) 5%, var(--k-color-surface)) 100%) !important;
+            color-mix(in srgb, var(--k-color-primary) 5%, var(--k-color-surface)) 100%);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 12%, transparent);
 }
 
-.filter-group-card :deep(.el-card__header) {
+.filter-group-card :deep(.k-card__header) {
     padding: 12px 16px;
     background: var(--k-color-surface-soft);
     border-bottom: 1px solid var(--k-color-border);
@@ -1335,43 +1338,9 @@ onMounted(async () => {
     font-size: 14px;
 }
 
-.asset-view-container :deep(.el-card),
-.asset-view-container :deep(.el-card__header),
-.asset-view-container :deep(.el-card__body) {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
-}
-
-.asset-view-container :deep(.el-card) {
-    border-radius: 12px !important;
-}
-
-.asset-view-container :deep(.el-card.add-monitor-card),
-.asset-view-container :deep(.el-card.add-monitor-card .el-card__body) {
-    border: 1px solid color-mix(in srgb, var(--k-color-primary) 42%, var(--k-color-border)) !important;
-    background:
-        radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--k-color-primary) 30%, transparent) 0%, transparent 45%),
-        linear-gradient(140deg,
-            color-mix(in srgb, var(--k-color-primary) 56%, #ffffff) 0%,
-            color-mix(in srgb, var(--k-color-primary) 42%, #eaf2ff) 55%,
-            color-mix(in srgb, var(--k-color-primary) 30%, #f5f9ff) 100%) !important;
-    color: #fff !important;
-}
-
-:global([data-theme='dark']) .asset-view-container :deep(.el-card.add-monitor-card),
-:global([data-theme='dark']) .asset-view-container :deep(.el-card.add-monitor-card .el-card__body) {
-    background:
-        radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--k-color-primary) 30%, transparent) 0%, transparent 45%),
-        linear-gradient(140deg,
-            color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-surface-soft)) 0%,
-            color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface)) 55%,
-            color-mix(in srgb, #0b1120 65%, var(--k-color-surface)) 100%) !important;
-}
-
 .loading-tip .el-icon {
     font-size: 16px;
-    color: #409eff;
+    color: var(--k-color-primary);
 }
 
 /* 响应式设计 */
@@ -1400,5 +1369,19 @@ onMounted(async () => {
     .card-actions {
         flex-wrap: wrap;
     }
+}
+</style>
+
+<style>
+/* 深色主题：必须写在非 scoped 块里 —— scoped 块内的 global 深色写法
+   会被编译成 [data-theme=dark]{…}（类名丢失），规则直接命中 <html>，把整页背景刷成卡片渐变。
+   放在 scoped 块之后，靠源码顺序赢得同权重平局。 */
+html[data-theme='dark'] .asset-view-list-page .add-monitor-card {
+    background:
+        radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--k-color-primary) 30%, transparent) 0%, transparent 45%),
+        linear-gradient(140deg,
+            color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-surface-soft)) 0%,
+            color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface)) 55%,
+            color-mix(in srgb, var(--k-color-bg) 65%, var(--k-color-surface)) 100%);
 }
 </style>

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import KEmpty from '@/components/k/KEmpty.vue'
+import KStat from '@/components/k/KStat.vue'
+import KTable from '@/components/k/KTable.vue'
 import { ref, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, User, RefreshRight } from '@element-plus/icons-vue'
@@ -190,25 +193,27 @@ const formatTime = (timeStr: string) => {
         :close-on-click-modal="false"
     >
         <div v-if="!shareToken" class="no-share-token">
-            <el-empty description="请先创建分享链接" />
+            <KEmpty why="请先创建分享链接" />
         </div>
         
         <div v-else v-loading="loading" class="claim-manage-content">
             <!-- 统计信息 -->
             <div class="claim-stats">
-                <el-statistic title="接取记录数" :value="claims.length" />
-                <el-statistic 
-                    title="总接取线数" 
-                    :value="claims.reduce((sum, c) => sum + (c.claimed_quantity || 0), 0)" 
+                <KStat label="接取记录数" :value="claims.length" />
+                <KStat
+                    label="总接取线数"
+                    :value="claims.reduce((sum, c) => sum + (c.claimed_quantity || 0), 0)"
                 />
             </div>
             
             <!-- 接取列表 -->
-            <el-table
+            <KTable
                 :data="claims"
                 border
                 style="width: 100%; margin-top: 16px"
                 max-height="400"
+                empty-why="还没有人接取这个计划的工作流"
+                empty-hint="把计划分享给生产成员后，接取记录会出现在这里"
             >
                 <el-table-column label="任务信息" min-width="200">
                     <template #default="{ row }">
@@ -271,10 +276,10 @@ const formatTime = (timeStr: string) => {
                         </el-button>
                     </template>
                 </el-table-column>
-            </el-table>
+            </KTable>
             
             <!-- 空状态 -->
-            <el-empty v-if="claims.length === 0 && !loading" description="暂无接取记录" />
+            <KEmpty v-if="claims.length === 0 && !loading" why="暂无接取记录" />
         </div>
         
         <template #footer>
@@ -338,7 +343,7 @@ const formatTime = (timeStr: string) => {
 .task-key {
     font-family: monospace;
     font-size: 12px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
     word-break: break-all;
 }
 
@@ -356,6 +361,6 @@ const formatTime = (timeStr: string) => {
 
 .transfer-content p {
     margin: 8px 0;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 </style>

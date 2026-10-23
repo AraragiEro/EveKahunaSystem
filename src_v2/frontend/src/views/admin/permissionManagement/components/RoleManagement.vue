@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Rank } from '@element-plus/icons-vue'
 import { http } from '@/http'
+import KTable from '@/components/k/KTable.vue'
+import KToolbar from '@/components/k/KToolbar.vue'
+import KRowMenu from '@/components/k/KRowMenu.vue'
+import type { KRowMenuItem } from '@/components/k/types'
 import type { Role } from '../types'
 import RoleHierarchyDialog from './RoleHierarchyDialog.vue'
 import RolePermissionDialog from './RolePermissionDialog.vue'
@@ -122,6 +127,17 @@ const openRolePermissionDialog = (role: Role) => {
   rolePermissionDialogVisible.value = true
 }
 
+// 「⋯ 更多」菜单：层级关系 / 删除（低频 + 危险操作，不占行内主位）
+const roleMenuItems: KRowMenuItem[] = [
+  { key: 'hierarchy', label: '管理层级关系', icon: Rank },
+  { key: 'delete', label: '删除角色', icon: Delete, danger: true, divided: true },
+]
+
+const handleRoleMenu = (role: Role, key: string) => {
+  if (key === 'hierarchy') return openHierarchyDialog(role)
+  if (key === 'delete') return handleDeleteRole(role)
+}
+
 // 刷新角色列表
 const refreshRoles = () => {
   loadRoles()
@@ -138,20 +154,22 @@ defineExpose({
 
 <template>
   <div class="role-management">
-    <div class="toolbar">
+    <KToolbar dense bordered density-switch>
       <el-button type="primary" @click="roleDialogVisible = true">创建角色</el-button>
-    </div>
-    <el-table :data="roles" border stripe style="width: 100%">
+    </KToolbar>
+    <KTable :data="roles" border stripe style="width: 100%" empty-why="还没有创建任何角色"
+      empty-hint="点上方「创建角色」新增一个">
       <el-table-column prop="roleName" label="角色名称" width="200" />
       <el-table-column prop="roleDescription" label="角色描述" />
-      <el-table-column label="操作" width="400" fixed="right">
+      <el-table-column label="操作" width="170" fixed="right">
         <template #default="scope">
-          <el-button size="small" @click="openHierarchyDialog(scope.row)">管理层级关系</el-button>
+          <!-- 主操作：管理权限（最高频） -->
           <el-button size="small" type="primary" @click="openRolePermissionDialog(scope.row)">管理权限</el-button>
-          <el-button size="small" type="danger" @click="handleDeleteRole(scope.row)">删除</el-button>
+          <!-- 层级关系与删除收进 ⋯，删除用 danger 色 -->
+          <KRowMenu size="small" :items="roleMenuItems" @select="key => handleRoleMenu(scope.row, key)" />
         </template>
       </el-table-column>
-    </el-table>
+    </KTable>
 
     <!-- 创建角色对话框 -->
     <el-dialog v-model="roleDialogVisible" title="创建角色" width="500px">
@@ -187,10 +205,6 @@ defineExpose({
 <style scoped>
 .role-management {
   padding: 20px;
-}
-
-.toolbar {
-  margin-bottom: 20px;
 }
 </style>
 

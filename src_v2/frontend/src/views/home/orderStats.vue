@@ -1,4 +1,8 @@
 <script setup lang="ts" name="OrderStatsView">
+import KTable from '@/components/k/KTable.vue'
+import KCard from '@/components/k/KCard.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
+import KStat from '@/components/k/KStat.vue'
 import { ref, onMounted, onUnmounted, nextTick, computed, watch, reactive } from 'vue'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
@@ -231,36 +235,49 @@ onUnmounted(() => {
     </div>
 
     <div class="summary-cards">
-      <el-card shadow="hover" class="summary-card">
-        <div class="card-label">{{ periodType === 'month' ? '近12月' : periodType === 'week' ? '近12周' : '近30日' }}累计收购</div>
-        <div class="card-value buy">{{ periodTotal.buyCount }} 笔</div>
-        <div class="card-sub">{{ formatIsk(periodTotal.buyIsk) }} ISK</div>
-      </el-card>
-      <el-card shadow="hover" class="summary-card">
-        <div class="card-label">{{ periodType === 'month' ? '近12月' : periodType === 'week' ? '近12周' : '近30日' }}累计出售</div>
-        <div class="card-value sell">{{ periodTotal.sellCount }} 笔</div>
-        <div class="card-sub">{{ formatIsk(periodTotal.sellIsk) }} ISK</div>
-      </el-card>
-      <el-card shadow="hover" class="summary-card">
-        <div class="card-label">{{ periodType === 'month' ? '近12月' : periodType === 'week' ? '近12周' : '近30日' }}净收益</div>
-        <div class="card-value" :class="periodTotal.sellIsk - periodTotal.buyIsk >= 0 ? 'net-positive' : 'net-negative'">
-          {{ formatIsk(periodTotal.sellIsk - periodTotal.buyIsk) }} ISK
-        </div>
-        <div class="card-sub">出售 - 收购</div>
-      </el-card>
+      <KCard class="summary-card">
+        <KStat
+          :label="`${periodType === 'month' ? '近12月' : periodType === 'week' ? '近12周' : '近30日'}累计收购`"
+          :value="periodTotal.buyCount"
+          unit="笔"
+          :hint="`${formatIsk(periodTotal.buyIsk)} ISK`"
+          tone="primary"
+          align="center"
+        />
+      </KCard>
+      <KCard class="summary-card">
+        <KStat
+          :label="`${periodType === 'month' ? '近12月' : periodType === 'week' ? '近12周' : '近30日'}累计出售`"
+          :value="periodTotal.sellCount"
+          unit="笔"
+          :hint="`${formatIsk(periodTotal.sellIsk)} ISK`"
+          tone="danger"
+          align="center"
+        />
+      </KCard>
+      <KCard class="summary-card">
+        <KStat
+          label="净收益"
+          :value="formatIsk(periodTotal.sellIsk - periodTotal.buyIsk)"
+          unit="ISK"
+          hint="出售 - 收购"
+          :tone="periodTotal.sellIsk - periodTotal.buyIsk >= 0 ? 'success' : 'danger'"
+          align="center"
+        />
+      </KCard>
     </div>
 
     <div class="chart-section">
-      <el-card shadow="hover">
-        <div v-if="loading" class="empty-wrap"><el-empty description="加载中..." :image-size="120" /></div>
-        <div v-else-if="statsData.history.length === 0" class="empty-wrap"><el-empty description="暂无订单统计数据" :image-size="120" /></div>
+      <KCard>
+        <div v-if="loading" class="empty-wrap"><KEmpty why="加载中..." size="md" /></div>
+        <div v-else-if="statsData.history.length === 0" class="empty-wrap"><KEmpty why="暂无订单统计数据" size="md" /></div>
         <div v-else ref="chartRef" class="chart"></div>
-      </el-card>
+      </KCard>
     </div>
 
     <div v-if="statsData.history.length > 0" class="table-section">
-      <el-card shadow="hover">
-        <el-table :data="statsData.history" stripe style="width:100%" max-height="500"
+      <KCard>
+        <KTable :data="statsData.history" stripe style="width:100%" max-height="500"
           @expand-change="handleExpandChange" show-summary
           :summary-method="({ columns, data }) => {
             const sums: string[] = ['合计'];
@@ -282,9 +299,9 @@ onUnmounted(() => {
                 <div v-else class="detail-grid">
                   <div class="detail-col">
                     <h4 class="detail-title buy">收购明细</h4>
-                    <el-table :data="detailData[row.period_start + '_buy'] || []" size="small" max-height="300">
+                    <KTable :data="detailData[row.period_start + '_buy'] || []" size="small" max-height="300">
                       <el-table-column width="40">
-                        <template #default="{ row: r }"><img :src="getTypeIconUrl(r.type_id)" width="32" height="32" style="border-radius:2px" /></template>
+                        <template #default="{ row: r }"><img :src="getTypeIconUrl(r.type_id)" alt="" width="32" height="32" style="border-radius:2px" /></template>
                       </el-table-column>
                       <el-table-column label="名称" min-width="160">
                         <template #default="{ row: r }">{{ r.name_zh || r.name_en || `Type ${r.type_id}` }}</template>
@@ -295,14 +312,14 @@ onUnmounted(() => {
                       <el-table-column label="ISK" width="140" align="right">
                         <template #default="{ row: r }">{{ formatIsk(r.total_isk) }}</template>
                       </el-table-column>
-                    </el-table>
+                    </KTable>
                     <div v-if="!detailData[row.period_start + '_buy']?.length" class="detail-empty">无收购记录</div>
                   </div>
                   <div class="detail-col">
                     <h4 class="detail-title sell">出售明细</h4>
-                    <el-table :data="detailData[row.period_start + '_sell'] || []" size="small" max-height="300">
+                    <KTable :data="detailData[row.period_start + '_sell'] || []" size="small" max-height="300">
                       <el-table-column width="40">
-                        <template #default="{ row: r }"><img :src="getTypeIconUrl(r.type_id)" width="32" height="32" style="border-radius:2px" /></template>
+                        <template #default="{ row: r }"><img :src="getTypeIconUrl(r.type_id)" alt="" width="32" height="32" style="border-radius:2px" /></template>
                       </el-table-column>
                       <el-table-column label="名称" min-width="160">
                         <template #default="{ row: r }">{{ r.name_zh || r.name_en || `Type ${r.type_id}` }}</template>
@@ -313,7 +330,7 @@ onUnmounted(() => {
                       <el-table-column label="ISK" width="140" align="right">
                         <template #default="{ row: r }">{{ formatIsk(r.total_isk) }}</template>
                       </el-table-column>
-                    </el-table>
+                    </KTable>
                     <div v-if="!detailData[row.period_start + '_sell']?.length" class="detail-empty">无出售记录</div>
                   </div>
                 </div>
@@ -338,8 +355,8 @@ onUnmounted(() => {
               </span>
             </template>
           </el-table-column>
-        </el-table>
-      </el-card>
+        </KTable>
+      </KCard>
     </div>
   </div>
 </template>
@@ -356,13 +373,6 @@ onUnmounted(() => {
 
 .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
 .summary-card { text-align: center; }
-.card-label { font-size: 13px; color: var(--k-color-text-secondary); margin-bottom: 8px; }
-.card-value { font-size: 24px; font-weight: bold; margin-bottom: 4px; }
-.card-value.buy { color: #409EFF; }
-.card-value.sell { color: #F56C6C; }
-.card-value.net-positive { color: #67C23A; }
-.card-value.net-negative { color: #F56C6C; }
-.card-sub { font-size: 15px; color: var(--k-color-text); }
 
 .chart-section { margin-bottom: 20px; }
 .chart { width: 100%; height: calc(100vh - 560px); min-height: 350px; }
@@ -376,7 +386,7 @@ onUnmounted(() => {
 .detail-col { min-width: 0; }
 .detail-title { margin: 0 0 8px 0; font-size: 14px; font-weight: 600; }
 .detail-title.buy { color: #409EFF; }
-.detail-title.sell { color: #F56C6C; }
+.detail-title.sell { color: var(--k-color-danger); }
 .detail-empty { text-align: center; color: var(--k-color-text-secondary); font-size: 13px; padding: 16px 0; }
 
 @media (max-width: 768px) {
@@ -384,12 +394,6 @@ onUnmounted(() => {
   .summary-cards { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
 }
-
-.order-stats-container, .toolbar,
-.chart-section :deep(.el-card), .chart, .table-section :deep(.el-card) {
-  background: var(--k-color-surface) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text) !important;
-}
-.toolbar { background: var(--k-color-surface-soft) !important; }
+/* 卡片/表格已全部走 KCard / KTable + --k-* token，theme.css 负责 EP 基类，
+   原先的「Theme override」强制覆盖整段删除。 */
 </style>

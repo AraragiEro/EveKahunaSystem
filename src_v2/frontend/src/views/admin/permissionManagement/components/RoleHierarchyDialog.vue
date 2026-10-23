@@ -2,6 +2,8 @@
 import { ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/http'
+import KCard from '@/components/k/KCard.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
 import type { Role } from '../types'
 
 interface Props {
@@ -151,7 +153,7 @@ const handleDeleteHierarchy = async (parentRole: string, childRole: string) => {
     <div class="hierarchy-content">
       <!-- 当前角色信息 -->
       <div class="current-role-info">
-        <el-card shadow="never" class="role-card">
+        <KCard class="role-card">
           <template #header>
             <div class="card-header">
               <span class="role-name">{{ role?.roleName }}</span>
@@ -161,11 +163,11 @@ const handleDeleteHierarchy = async (parentRole: string, childRole: string) => {
           <div class="role-description">
             {{ role?.roleDescription || '暂无描述' }}
           </div>
-        </el-card>
+        </KCard>
       </div>
 
       <!-- 父角色区域 -->
-      <el-card shadow="never" class="hierarchy-card">
+      <KCard class="hierarchy-card">
         <template #header>
           <div class="card-header">
             <span>父角色 ({{ parentRoles.length }})</span>
@@ -183,7 +185,7 @@ const handleDeleteHierarchy = async (parentRole: string, childRole: string) => {
           >
             {{ parentRole }}
           </el-tag>
-          <div v-if="parentRoles.length === 0" class="empty-text">暂无父角色</div>
+          <KEmpty v-if="parentRoles.length === 0" why="还没有父角色" hint="在下方下拉框里选一个或多个" size="sm" inline />
         </div>
         <el-divider />
         <div class="add-hierarchy-section">
@@ -210,10 +212,10 @@ const handleDeleteHierarchy = async (parentRole: string, childRole: string) => {
             批量添加父角色
           </el-button>
         </div>
-      </el-card>
+      </KCard>
 
       <!-- 子角色区域 -->
-      <el-card shadow="never" class="hierarchy-card">
+      <KCard class="hierarchy-card">
         <template #header>
           <div class="card-header">
             <span>子角色 ({{ childRoles.length }})</span>
@@ -231,7 +233,7 @@ const handleDeleteHierarchy = async (parentRole: string, childRole: string) => {
           >
             {{ childRole }}
           </el-tag>
-          <div v-if="childRoles.length === 0" class="empty-text">暂无子角色</div>
+          <KEmpty v-if="childRoles.length === 0" why="还没有子角色" hint="在下方下拉框里选一个或多个" size="sm" inline />
         </div>
         <el-divider />
         <div class="add-hierarchy-section">
@@ -258,7 +260,7 @@ const handleDeleteHierarchy = async (parentRole: string, childRole: string) => {
             批量添加子角色
           </el-button>
         </div>
-      </el-card>
+      </KCard>
     </div>
     <template #footer>
       <el-button @click="dialogVisible = false">关闭</el-button>
@@ -277,7 +279,7 @@ const handleDeleteHierarchy = async (parentRole: string, childRole: string) => {
 }
 
 .role-card {
-  border: 2px solid #409eff;
+  border: 2px solid var(--k-color-primary);
 }
 
 .card-header {
@@ -292,7 +294,7 @@ const handleDeleteHierarchy = async (parentRole: string, childRole: string) => {
 }
 
 .role-description {
-  color: #666;
+  color: var(--k-color-text-secondary);
   font-size: 14px;
 }
 
@@ -316,12 +318,6 @@ const handleDeleteHierarchy = async (parentRole: string, childRole: string) => {
 
 .add-hierarchy-section {
   padding-top: 10px;
-}
-
-.empty-text {
-  color: #999;
-  font-size: 14px;
-  padding: 10px 0;
 }
 </style>
 

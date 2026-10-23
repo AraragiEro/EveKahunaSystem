@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import KEmpty from '@/components/k/KEmpty.vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { marked } from 'marked'
@@ -141,7 +142,7 @@ watch(
     <div class="announcement-layout">
       <aside class="announcement-list">
         <h2>公告列表</h2>
-        <el-empty v-if="!announcements.length" description="暂无公告" />
+        <KEmpty v-if="!announcements.length" why="还没有发布过公告" hint="有新的版本说明或维护通知时会出现在这里" />
         <button
           v-for="item in announcements"
           :key="item.slug"
@@ -157,7 +158,7 @@ watch(
       </aside>
 
       <main class="announcement-detail">
-        <el-empty v-if="!selectedAnnouncement" description="请选择公告" />
+        <KEmpty v-if="!selectedAnnouncement" why="从左侧选一条公告" hint="公告按发布时间倒序排列" />
         <template v-else>
           <section class="meta-panel">
             <h2>{{ selectedAnnouncement.title }}</h2>
@@ -228,7 +229,7 @@ watch(
   width: 100%;
   text-align: left;
   border: 1px solid var(--k-color-border);
-  border-radius: 10px;
+  border-radius: var(--k-radius-sm);
   padding: 10px 12px;
   background: var(--k-color-surface-soft);
   cursor: pointer;

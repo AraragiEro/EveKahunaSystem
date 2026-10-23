@@ -424,7 +424,7 @@ onMounted(() => {
   display: flex;
   height: calc(100vh - 60px);
   overflow: hidden;
-  background-color: #f5f7fa;
+  background-color: var(--k-color-surface-soft);
 }
 
 .help-sidebar {
@@ -432,41 +432,41 @@ onMounted(() => {
   border-right: 1px solid #e1e8ed;
   flex-shrink: 0;
   height: 100%;
-  background-color: white;
+  background-color: var(--k-color-surface);
 }
 
 .help-menu {
   border-right: none;
   height: 100%;
-  background-color: white;
+  background-color: var(--k-color-surface);
 }
 
 .help-content {
   flex: 1;
   height: 100%;
   overflow: hidden;
-  background-color: white;
+  background-color: var(--k-color-surface);
 }
 
 .help-content-inner {
   padding: 24px;
   min-height: 100%;
-  background-color: white;
+  background-color: var(--k-color-surface);
 }
 
 .help-content-text {
   line-height: 1.8;
-  color: #2c3e50;
+  color: var(--k-color-text);
   font-size: 14px;
-  background-color: white;
+  background-color: var(--k-color-surface);
 }
 
 .help-content-text :deep(h1) {
   font-size: 24px;
   font-weight: 600;
   margin: 0 0 16px 0;
-  color: #2c3e50;
-  border-bottom: 2px solid #e1e8ed;
+  color: var(--k-color-text);
+  border-bottom: 2px solid var(--k-color-border);
   padding-bottom: 8px;
 }
 
@@ -474,26 +474,26 @@ onMounted(() => {
   font-size: 20px;
   font-weight: 600;
   margin: 24px 0 12px 0;
-  color: #2c3e50;
+  color: var(--k-color-text);
 }
 
 .help-content-text :deep(h3) {
   font-size: 16px;
   font-weight: 600;
   margin: 16px 0 8px 0;
-  color: #2c3e50;
+  color: var(--k-color-text);
 }
 
 .help-content-text :deep(p) {
   margin: 0 0 12px 0;
-  color: #64748b;
+  color: var(--k-color-text-secondary);
 }
 
 .help-content-text :deep(ul),
 .help-content-text :deep(ol) {
   margin: 0 0 12px 0;
   padding-left: 24px;
-  color: #64748b;
+  color: var(--k-color-text-secondary);
 }
 
 .help-content-text :deep(li) {
@@ -501,7 +501,7 @@ onMounted(() => {
 }
 
 .help-content-text :deep(code) {
-  background-color: #f1f5f9;
+  background-color: var(--k-color-surface-soft);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: 'Courier New', monospace;
@@ -510,9 +510,9 @@ onMounted(() => {
 }
 
 .help-content-text :deep(pre) {
-  background-color: #f8fafc;
-  border: 1px solid #e1e8ed;
-  border-radius: 6px;
+  background-color: var(--k-color-surface-soft);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-sm);
   padding: 16px;
   overflow-x: auto;
   margin: 12px 0;
@@ -521,7 +521,7 @@ onMounted(() => {
 .help-content-text :deep(pre code) {
   background-color: transparent;
   padding: 0;
-  color: #2c3e50;
+  color: var(--k-color-text);
 }
 
 .help-content-text :deep(img) {
@@ -546,30 +546,30 @@ onMounted(() => {
 
 /* 菜单项样式优化 */
 :deep(.el-menu-item) {
-  color: #64748b;
+  color: var(--k-color-text-secondary);
   transition: all 0.2s;
 }
 
 :deep(.el-menu-item:hover) {
-  background-color: #f1f5f9;
-  color: #2c3e50;
+  background-color: var(--k-color-surface-soft);
+  color: var(--k-color-text);
 }
 
 :deep(.el-menu-item.is-active) {
-  background-color: #e0f2fe;
-  color: #0284c7;
+  background-color: var(--k-color-primary-soft);
+  color: var(--k-color-primary);
   font-weight: 500;
 }
 
 :deep(.el-sub-menu__title) {
-  color: #2c3e50;
+  color: var(--k-color-text);
   font-weight: 500;
   transition: all 0.2s;
 }
 
 :deep(.el-sub-menu__title:hover) {
-  background-color: #f1f5f9;
-  color: #2c3e50;
+  background-color: var(--k-color-surface-soft);
+  color: var(--k-color-text);
 }
 
 /* 响应式设计 */

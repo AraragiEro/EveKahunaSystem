@@ -939,32 +939,10 @@ class ConfigFlowOperateCenter():
             self._running_asset_allocate[(type_id, index_id)] = quantity
 
         return self._running_asset_allocate[(type_id, index_id)]
-
-    async def refresh_system_cost(self):
-        async with op_lock_manager.refresh_system_cost_lock:
-            if self.plan_name.startswith("calculate_cost") or await self.rdm.r.get(f"system_cost_cache:status") == "ok":
-                return
-
-            result = await eveesi.industry_systems(log=True)
-
-            for item in result:
-                data = {"solar_system_id": item["solar_system_id"]}
-                for cost in item["cost_indices"]:
-                    data[cost["activity"]] = cost["cost_index"]
-                await self.rdm.r.hset(f"system_cost_cache:{item['solar_system_id']}", mapping=data)
-
-            # 过期时间到下一个整小时
-            now = time.time()
-            next_hour = (int(now) // 3600 + 1) * 3600
-            ex_seconds = int(next_hour - now)
-            # 确保过期时间至少为1秒
-            if ex_seconds <= 0:
-                ex_seconds = 3600  # 如果计算错误，默认1小时
-            await self.rdm.r.set(f"system_cost_cache:status", "ok", ex=ex_seconds)
-
     async def get_system_cost(self, solar_system_id: int):
-        if not self._system_cost_status and await self.rdm.r.get(f"system_cost_cache:status") != "ok":
-            await self.refresh_system_cost()
+        # 只读缓存：星系系数由 SystemCostRefreshTimer 每小时刷新（2026-10-19）
+        if not self._system_cost_status and await self.rdm.r.get("system_cost_cache:status") != "ok":
+            logger.warning("计算过程中发现 system_cost_cache 状态非 ok：跳过刷新，仅使用现有缓存")
 
             system_cost = await self.rdm.r.hgetall(f"system_cost_cache:{solar_system_id}")
 
@@ -993,56 +971,21 @@ class ConfigFlowOperateCenter():
             }
         self._system_cost[solar_system_id] = system_cost
         return system_cost
-
-    async def refresh_market_price(self):
-        # 快速路径：无锁检查缓存是否已有效（绝大多数调用走此路径）
-        if await self.rdm.r.get(f"market_price_cache:status") == "ok":
-            self._market_price_status = True
-            return
-
-        # 双重检查锁定：确保只有一个协程执行实际刷新
-        async with op_lock_manager.refresh_market_price_lock:
-            # 获取锁后再次检查（可能被前一个持有者刷新了）
-            if await self.rdm.r.get(f"market_price_cache:status") == "ok":
-                self._market_price_status = True
-                return
-
-            results = await eveesi.markets_prices(log=True)
-            # results = [{'adjusted_price': 36.93619227019693, 'average_price': 33.77, 'type_id': 18}, ...]
-            for data in results:
-                if 'adjusted_price' not in data:
-                    data['adjusted_price'] = 0.0
-                if 'average_price' not in data:
-                    data['average_price'] = 0.0
-
-                await self.rdm.r.hset(f"market_price_cache:{data['type_id']}", mapping=data)
-
-            # 获取到明天0点的时间间隔，单位分钟
-            now = time.time()
-            # 获取当前时间的struct_time
-            now_struct = time.localtime(now)
-            # 构造明天0点的struct_time
-            tomorrow_zero_struct = time.struct_time((
-                now_struct.tm_year,
-                now_struct.tm_mon,
-                now_struct.tm_mday + 1,
-                0, 0, 0,
-                now_struct.tm_wday,
-                now_struct.tm_yday,
-                now_struct.tm_isdst,
-            ))
-            # 转换为时间戳
-            tomorrow_zero_ts = time.mktime(tomorrow_zero_struct)
-            ex_seconds = int(tomorrow_zero_ts - now)
-            # 确保过期时间至少为1秒
-            if ex_seconds <= 0:
-                ex_seconds = 86400  # 如果计算错误，默认24小时（1天）
-            await self.rdm.r.set(f"market_price_cache:status", "ok", ex=ex_seconds)
-            self._market_price_status = True
-
     async def get_type_adjust_price(self, type_id: int):
+        # 🔴 计算过程**只读缓存**，绝不触发价格刷新（2026-10-19 事故根因）。
+        #
+        # 原实现在这里会调 refresh_market_price()：它持有进程内锁
+        # `op_lock_manager.refresh_market_price_lock` 去 ESI 拉全市场价，且该请求
+        # 没有超时。一旦 ESI 慢/挂，锁被长期占用，5 个并发关系计算任务全在
+        # lock.acquire() 上无限等待 → 整个成本计算静默卡死
+        # （CPU≈0、无日志、无数据库活动，协程栈停在 locks.py:acquire）。
+        #
+        # 价格刷新是父进程定时器的职责，计算链路永远不该承担；拿不到缓存就用 0.0
+        # 降级，保证计算一定能推进。
         if not self._market_price_status and await self.rdm.r.get(f"market_price_cache:status") != "ok":
-            await self.refresh_market_price()
+            logger.warning(
+                "计算过程中发现 market_price_cache 状态非 ok：跳过刷新，仅使用现有缓存"
+                "（价格刷新由定时器负责）")
 
         if type_id in self._type_adjust_price:
             return self._type_adjust_price[type_id]

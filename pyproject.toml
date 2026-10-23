@@ -1,6 +1,6 @@
 [project]
 name = "astrbot-plugin-kahunabot"
-version = "1.6.1"
+version = "1.6.3"
 description = "EVE Online 工业规划与资产管理系统"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"

@@ -17,7 +17,11 @@ export const useThemeStore = defineStore('theme', () => {
   })
 
   const applyTheme = (theme: 'light' | 'dark') => {
-    document.documentElement.setAttribute('data-theme', theme)
+    const root = document.documentElement
+    root.setAttribute('data-theme', theme)
+    // Element Plus 官方深色变量挂在 html.dark 上，必须同步这个类名，
+    // 否则 el-input / el-table / el-tag 等组件永远停留在浅色默认值。
+    root.classList.toggle('dark', theme === 'dark')
   }
 
   const setMode = (nextMode: ThemeMode) => {

@@ -33,8 +33,10 @@
                     :size="cardStyleMode === 'compact' ? 'small' : undefined"
                     @change="(val: boolean) => handleGroupActiveChange(item, val)"
                   />
-                  <el-button size="small" :icon="Edit" circle @click="handleEditGroup(item)" />
-                  <el-button size="small" :icon="Delete" circle @click="handleDeleteGroup(item)" />
+                  <el-button size="small" :icon="Edit" circle :aria-label="`编辑分组 ${item.name}`" title="编辑分组"
+                    @click="handleEditGroup(item)" />
+                  <el-button size="small" :icon="Delete" circle :aria-label="`删除分组 ${item.name}`" title="删除分组"
+                    @click="handleDeleteGroup(item)" />
                 </div>
               </div>
 
@@ -87,7 +89,8 @@
                         :size="cardStyleMode === 'compact' ? 'small' : undefined"
                         @change="emitFlattened"
                       />
-                      <el-button size="small" :icon="Delete" circle @click="handleDeleteProduct(product, item)" />
+                      <el-button size="small" :icon="Delete" circle :aria-label="`删除产品 ${product.name}`" title="删除产品"
+                        @click="handleDeleteProduct(product, item)" />
                     </div>
                   </div>
                 </VueDraggable>
@@ -128,7 +131,8 @@
                   :size="cardStyleMode === 'compact' ? 'small' : undefined"
                   @change="emitFlattened"
                 />
-                <el-button size="small" :icon="Delete" circle @click="handleDeleteTopLevelProduct(item)" />
+                <el-button size="small" :icon="Delete" circle :aria-label="`删除产品 ${item.name}`" title="删除产品"
+                  @click="handleDeleteTopLevelProduct(item)" />
               </div>
             </div>
           </template>
@@ -412,7 +416,22 @@ const handleDeleteGroup = async (group: LocalGroupRow) => {
   }
 }
 
-const handleDeleteProduct = (product: LocalProductRow, group: LocalGroupRow) => {
+const handleDeleteProduct = async (product: LocalProductRow, group: LocalGroupRow) => {
+  const productName = product.type_name_zh || product.type_name || '未命名产品'
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除产品「${productName}」吗？删除后需保存计划才生效，且不可撤销。`,
+      '删除产品',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch {
+    // 用户取消
+    return
+  }
   const index = group.products.findIndex((item) => item.key === product.key)
   if (index >= 0) {
     group.products.splice(index, 1)
@@ -420,7 +439,22 @@ const handleDeleteProduct = (product: LocalProductRow, group: LocalGroupRow) => 
   }
 }
 
-const handleDeleteTopLevelProduct = (product: LocalProductRow) => {
+const handleDeleteTopLevelProduct = async (product: LocalProductRow) => {
+  const productName = product.type_name_zh || product.type_name || '未命名产品'
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除产品「${productName}」吗？删除后需保存计划才生效，且不可撤销。`,
+      '删除产品',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch {
+    // 用户取消
+    return
+  }
   const index = topLevelItems.value.findIndex((item) => item.type === 'product' && item.key === product.key)
   if (index >= 0) {
     topLevelItems.value.splice(index, 1)
@@ -485,7 +519,7 @@ const handleCancelEditGroup = () => {
 .group-card {
   border: 1px solid var(--k-color-border);
   background: var(--k-color-surface);
-  border-radius: 10px;
+  border-radius: var(--k-radius-sm);
   padding: 10px;
 }
 
@@ -585,29 +619,34 @@ const handleCancelEditGroup = () => {
   --el-fill-color-blank: var(--k-color-surface-soft);
 }
 
+/* 以下声明已去掉强制优先级：`:deep()` 编译后选择器权重为 (0,4,0)，
+   高于 Element Plus 自身的 `.el-input__wrapper` / `.el-input-number__decrease` (0,1,0)
+   与它们的 `:hover` 状态 (0,2,0)，普通声明即可生效。 */
 .plan-table-container :deep(.el-input-number .el-input__wrapper) {
-  background: var(--k-color-surface-soft) !important;
-  box-shadow: 0 0 0 1px var(--k-color-border) inset !important;
+  background: var(--k-color-surface-soft);
+  box-shadow: 0 0 0 1px var(--k-color-border) inset;
 }
 
 .plan-table-container :deep(.el-input-number .el-input__inner) {
-  color: var(--k-color-text) !important;
+  color: var(--k-color-text);
   font-weight: 600;
 }
 
 .plan-table-container :deep(.el-input-number__decrease),
 .plan-table-container :deep(.el-input-number__increase) {
-  background: color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text-secondary) !important;
+  background: color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface));
+  border-color: var(--k-color-border);
+  color: var(--k-color-text-secondary);
 }
 
 .plan-table-container :deep(.el-input-number__decrease:hover),
 .plan-table-container :deep(.el-input-number__increase:hover) {
-  color: var(--k-color-primary) !important;
-  background: color-mix(in srgb, var(--k-color-primary) 12%, var(--k-color-surface-soft)) !important;
+  color: var(--k-color-primary);
+  background: color-mix(in srgb, var(--k-color-primary) 12%, var(--k-color-surface-soft));
 }
 
+/* 禁用态必须保留强制优先级：theme.css 的 `.el-input.is-disabled .el-input__wrapper`
+   （背景/描边）本身就带强制优先级，普通声明压不住（theme.css 由 Lead 独占，不改）。 */
 .plan-table-container :deep(.el-input-number.is-disabled .el-input__wrapper),
 .plan-table-container :deep(.el-input-number.is-disabled .el-input-number__decrease),
 .plan-table-container :deep(.el-input-number.is-disabled .el-input-number__increase) {
@@ -677,7 +716,7 @@ const handleCancelEditGroup = () => {
 
 .compact .product-card {
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--k-radius-sm);
   gap: 6px;
 }
 

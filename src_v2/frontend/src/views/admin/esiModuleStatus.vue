@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import KCard from '@/components/k/KCard.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
+import KStat from '@/components/k/KStat.vue'
+import KTable from '@/components/k/KTable.vue'
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search, Timer } from '@element-plus/icons-vue'
@@ -406,12 +410,14 @@ onUnmounted(() => {
         </div>
 
         <!-- 角色表格 -->
-        <el-table
+        <KTable
           :data="filteredCharacters"
           v-loading="loading"
           stripe
           style="width: 100%"
           class="character-table"
+          empty-why="还没有已授权的 EVE 角色"
+          empty-hint="在角色管理里完成 SSO 授权后会出现在这里"
         >
           <el-table-column prop="character_id" label="角色ID" width="120" />
           <el-table-column prop="character_name" label="角色名" min-width="150" />
@@ -467,14 +473,11 @@ onUnmounted(() => {
               </el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </KTable>
         </template>
 
         <!-- 空状态 -->
-        <el-empty
-          v-if="!loading && characters.length === 0"
-          description="暂无已授权的 EVE 角色"
-        />
+        <KEmpty v-if="!loading && characters.length === 0" why="还没有已授权的 EVE 角色" />
       </el-tab-pane>
 
       <!-- 桶监控 -->
@@ -482,28 +485,26 @@ onUnmounted(() => {
         <template v-if="bucketsLoading || buckets.length > 0">
           <!-- 队列深度监控 -->
           <div class="queue-depth-cards">
-          <el-card shadow="hover" class="metric-card">
-            <div class="metric-label">请求积压</div>
-            <div
-              class="metric-value"
-              :class="{ 'metric-warn': queueDepth.backlog > 10 }"
-            >
-              {{ queueDepth.backlog }}
-            </div>
-          </el-card>
-          <el-card shadow="hover" class="metric-card">
-            <div class="metric-label">处理中</div>
-            <div class="metric-value">{{ queueDepth.in_flight }}</div>
-          </el-card>
+          <KCard class="metric-card" padding="sm">
+            <KStat
+              label="请求积压"
+              :value="queueDepth.backlog"
+              :tone="queueDepth.backlog > 10 ? 'warning' : 'default'"
+            />
+          </KCard>
+          <KCard class="metric-card" padding="sm">
+            <KStat label="处理中" :value="queueDepth.in_flight" />
+          </KCard>
         </div>
 
         <!-- 桶列表表格 -->
-        <el-table
+        <KTable
           :data="buckets"
           v-loading="bucketsLoading"
           stripe
           style="width: 100%"
           class="bucket-table"
+          empty-why="当前没有正在使用的 ESI 令牌桶"
         >
           <el-table-column prop="pool_name" label="桶名称" min-width="180" />
           <el-table-column label="令牌水位" width="200">
@@ -548,26 +549,25 @@ onUnmounted(() => {
               </el-tag>
             </template>
           </el-table-column>
-        </el-table>
+        </KTable>
         </template>
 
         <!-- 空状态 -->
-        <el-empty
-          v-if="!bucketsLoading && buckets.length === 0"
-          description="暂无注册的 ESI 桶"
-        />
+        <KEmpty v-if="!bucketsLoading && buckets.length === 0" why="还没有注册的 ESI 令牌桶" />
       </el-tab-pane>
 
       <!-- 使用日志 -->
       <el-tab-pane label="使用日志" name="logs">
         <template v-if="logLoading || logItems.length > 0">
           <!-- 日志表格 -->
-          <el-table
+          <KTable
           :data="logItems"
           v-loading="logLoading"
           stripe
           style="width: 100%"
           class="log-table"
+          empty-why="还没有 ESI 调用记录"
+          empty-hint="有请求进来后这里会按时间倒序累积"
         >
           <el-table-column label="时间" width="180">
             <template #default="{ row }">
@@ -609,7 +609,7 @@ onUnmounted(() => {
               <span class="error-text">{{ row.error_message || '-' }}</span>
             </template>
           </el-table-column>
-        </el-table>
+        </KTable>
 
         <!-- 加载更多 -->
         <div class="load-more-section">
@@ -628,10 +628,7 @@ onUnmounted(() => {
         </template>
 
         <!-- 空状态 -->
-        <el-empty
-          v-if="!logLoading && logItems.length === 0"
-          description="暂无 ESI 使用日志"
-        />
+        <KEmpty v-if="!logLoading && logItems.length === 0" why="暂无 ESI 使用日志" />
       </el-tab-pane>
     </el-tabs>
   </div>

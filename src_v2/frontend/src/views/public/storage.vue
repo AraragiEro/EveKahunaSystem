@@ -104,7 +104,9 @@ onMounted(() => {
 /* 主容器 */
 .storage-container {
     min-height: 100vh;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    /* 复用全站页面底（--k-app-bg 本身就是深浅两套的径向渐变），
+       不再写死 #f5f7fa → #c3cfe2 的浅色渐变——那会让公开资产页在深色主题下白成一片。 */
+    background: var(--k-app-bg);
     padding: 40px 20px;
 }
 
@@ -118,13 +120,13 @@ onMounted(() => {
 .page-title {
     font-size: 32px;
     font-weight: 600;
-    color: #2c3e50;
+    color: var(--k-color-text);
     margin: 0 0 8px 0;
 }
 
 .page-subtitle {
     font-size: 16px;
-    color: #64748b;
+    color: var(--k-color-text-secondary);
     margin: 0;
 }
 
@@ -141,7 +143,7 @@ onMounted(() => {
     justify-content: center;
     align-items: center;
     min-height: 400px;
-    background: white;
+    background: var(--k-color-surface);
     border-radius: 8px;
     padding: 40px;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);

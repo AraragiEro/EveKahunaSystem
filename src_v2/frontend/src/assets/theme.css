@@ -14,11 +14,112 @@
   --k-color-warning: #f59e0b;
   --k-color-danger: #ef4444;
 
+  /* 语义辅助色：反白文字 / 渐变端点（tint=提亮，shade=压暗）/ 告警按钮文字 / 缺失材料行底色。
+     这些值原本散落在组件规则里，收敛成 token 后才能保证深浅两套主题各改各的。 */
+  --k-color-text-inverse: #ffffff;
+  --k-color-tint: #ffffff;
+  --k-color-shade: #0b1120;
+  --k-color-on-warning: #1d1300;
+  --k-color-lack-bg: #ff6b6b;
+
+  --k-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.06);
   --k-shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.08);
   --k-shadow-md: 0 10px 30px rgba(15, 23, 42, 0.12);
+
+  /* ── 层次体系 ────────────────────────────────────────────────────────
+     页面底（sunken） < 模块卡片（surface） < 模块内分区（surface-soft）
+     模块靠「底色差 + 细边框 + 投影 + 间距」区分，不靠分割线。        */
+  --k-color-surface-sunken: #edf1f8;
+  --k-color-border-subtle: color-mix(in srgb, var(--k-color-border) 78%, transparent);
+  --k-shadow-section: 0 1px 2px rgba(15, 23, 42, 0.05), 0 10px 24px -16px rgba(15, 23, 42, 0.18);
+
+  /* ── P1-C1b：语义浅底 / 浅描边 / 三级文字 ─────────────────────────────
+     P1-C3 把组件里的裸色收成 color-mix 后发现：同一套公式在 50 多处重复
+     （语义色 12% 混 surface = 浅底，30% 混 surface = 浅描边，text-secondary 74%
+     混透明 = 三级文字）。这一批收进 token，组件只写变量名。
+     注意 CSS 自定义属性是「使用处」解析，所以这里只在 :root 定义一次，
+     深色主题下会自动吃到 html[data-theme='dark'] 里的 --k-color-surface。 */
+  --k-color-success-soft: color-mix(in srgb, var(--k-color-success) 12%, var(--k-color-surface));
+  --k-color-success-soft-border: color-mix(in srgb, var(--k-color-success) 30%, var(--k-color-surface));
+  --k-color-warning-soft: color-mix(in srgb, var(--k-color-warning) 12%, var(--k-color-surface));
+  --k-color-warning-soft-border: color-mix(in srgb, var(--k-color-warning) 30%, var(--k-color-surface));
+  --k-color-danger-soft: color-mix(in srgb, var(--k-color-danger) 12%, var(--k-color-surface));
+  --k-color-danger-soft-border: color-mix(in srgb, var(--k-color-danger) 30%, var(--k-color-surface));
+
+  /* 三级文字：比 text-secondary 再淡一档（原 #909399 / #9ca3af 那类） */
+  --k-color-text-tertiary: color-mix(in srgb, var(--k-color-text-secondary) 74%, transparent);
+
+  /* 比 border-subtle 更浅的描边（头像框、极细分割线） */
+  --k-color-border-faint: color-mix(in srgb, var(--k-color-border) 55%, transparent);
+
+  /* 工具栏底色渐变（资产页四个视图共用；原来是 #f5f7fa → #c3cfe2） */
+  --k-gradient-toolbar: linear-gradient(
+    135deg,
+    var(--k-color-surface-soft) 0%,
+    var(--k-color-surface-sunken) 100%
+  );
+
+  /* 表格冻结列的方向性边缘阴影：现有三档阴影都是居中卡片阴影，替代不了 -8px spread */
+  --k-shadow-edge: -8px 0 8px -8px rgba(0, 0, 0, 0.28);
+
+  /* 分类强调色：没有对应语义，深浅两套主题共用（小行星统计卡顶边用 accent-1；
+     accent-2/3 在 P2 把统计卡收敛到 KCard tone 后再无引用，已删） */
+  --k-color-accent-1: #4facfe;
+
+  /* 圆角只允许这 5 档（新代码请用变量，不要裸写 px） */
+  --k-radius-xs: 4px;
   --k-radius-sm: 8px;
   --k-radius-md: 12px;
   --k-radius-lg: 16px;
+  --k-radius-pill: 999px;
+
+  /* 字号固定档：9/10/11px 一律并入 xs。
+     lg/xl 已桥接给 Element Plus 的 font-size-medium / extra-large（见下方 EP 变量桥接），
+     组件不再各自写死 16px / 20px。 */
+  --k-font-xs: 12px;
+  --k-font-sm: 13px;
+  --k-font-md: 14px;
+  --k-font-lg: 16px;
+  --k-font-xl: 20px;
+
+  /* hero 数字字号随视口爬升（clamp，report §10.1）。
+     正文档（--k-font-body）在 P2 清死 token 时删除：全站正文实际走 EP 的
+     --el-font-size-base 桥接，独立刻度长期 0 引用只会让人误以为它是生效的。 */
+  --k-font-hero: clamp(40px, 2.4vw + 20px, 68px);
+
+  /* 间距刻度 4/8/12/16/24/32/48：替换裸 px 间距（report §10.1） */
+  --k-space-1: 4px;
+  --k-space-2: 8px;
+  --k-space-3: 12px;
+  --k-space-4: 16px;
+  --k-space-5: 24px;
+  --k-space-6: 32px;
+  --k-space-7: 48px;
+
+  /* 版心与网格：2K 宽屏居中留白 + 12 栏（report §09 原则 01） */
+  --k-page-max: 1760px;
+  --k-gutter: 24px;
+  --k-grid-cols: 12;
+
+  /* 密度：表格标准/紧凑两档 + 表头高 + 单元格水平内距（report §09 原则 04）。
+     紧凑档由 KTable 用 calc(var(--k-row-h) - var(--k-space-1)) 推导，
+     不再单独维护一个 0 引用的 --k-row-h-compact。 */
+  --k-row-h: 44px;
+  --k-head-h: 40px;
+  --k-cell-x: 12px;
+
+  /* 动效与层级：过渡曲线/时长与 z-index 刻度，组件不再各写各的 */
+  --k-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --k-dur-1: 120ms;
+  --k-dur-2: 200ms;
+  --k-z-sticky: 10;
+
+  /* 说明：--k-space-1 / 3–7、--k-page-max / --k-gutter / --k-grid-cols、
+     --k-head-h、--k-font-hero 是 report §10.1 要求的刻度，消费方是 P1-C2/C3。
+     P2 把长期 0 引用的 6 个 token 直接删了（--k-color-info-soft、--k-font-body、
+     --k-row-h-compact、--k-z-dropdown / --k-z-modal / --k-z-toast）：
+     EP 的浮层 z-index 是 JS 动态算的，写死刻度只会变成第二套真相。
+     需要时按同一刻度补回，不要留「看起来生效其实没人读」的变量。 */
 
   --k-app-bg: radial-gradient(circle at 10% 0%, #f3f7ff 0%, #eff4fb 48%, #edf2fb 100%);
   --k-hero-bg:
@@ -27,7 +128,9 @@
     linear-gradient(135deg, #061734 0%, #0a2249 45%, #143163 100%);
 }
 
-[data-theme='dark'] {
+/* 深色主题变量。选择器用 html[data-theme='dark'] 而不是 [data-theme='dark']：
+   Element Plus 官方深色变量挂在 html.dark 上（权重 0,1,1），这里必须同权重并靠后导入才能压住它。 */
+html[data-theme='dark'] {
   color-scheme: dark;
 
   --k-color-bg: #100f19;
@@ -42,9 +145,15 @@
   --k-color-success: #22c55e;
   --k-color-warning: #fbbf24;
   --k-color-danger: #f87171;
+  /* 深色下缺失材料行用更亮的红（原散落在 lack-row 的深色覆盖里） */
+  --k-color-lack-bg: #ff4444;
 
   --k-shadow-sm: 0 2px 10px rgba(2, 6, 23, 0.45);
   --k-shadow-md: 0 14px 34px rgba(2, 6, 23, 0.55);
+  /* 深色下阴影几乎不可见，层次主要靠「亮度阶梯」：底部更暗，模块更亮 */
+  --k-color-surface-sunken: #100f19;
+  --k-color-border-subtle: color-mix(in srgb, var(--k-color-border) 72%, transparent);
+  --k-shadow-section: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 30px -18px rgba(0, 0, 0, 0.75);
   --k-app-bg: radial-gradient(circle at 14% -8%, #1e1a33 0%, #151327 46%, #0d0c18 100%);
   --k-hero-bg:
     radial-gradient(circle at 24% 10%, rgba(154, 134, 216, 0.28), transparent 42%),
@@ -52,7 +161,7 @@
     linear-gradient(135deg, #0a0916 0%, #151126 45%, #1f1836 100%);
 }
 
-[data-theme='dark'] {
+html[data-theme='dark'] {
   --el-text-color-primary: var(--k-color-text);
   --el-text-color-regular: #d8e2f4;
   --el-text-color-secondary: #b8c7e2;
@@ -65,6 +174,19 @@
   --el-fill-color-blank: var(--k-color-surface);
   --el-disabled-text-color: #8ea2c5;
   --el-disabled-bg-color: color-mix(in srgb, var(--k-color-surface-soft) 90%, var(--k-color-surface));
+
+  /* v-loading 遮罩：EP 深色默认是 80% 纯黑，压在空容器上会像一条黑条 */
+  --el-mask-color: color-mix(in srgb, var(--k-color-surface) 76%, transparent);
+  --el-mask-color-extra-light: color-mix(in srgb, var(--k-color-surface) 24%, transparent);
+
+  /* Element Plus 的 primary 派生色（plain 按钮、浅色 tag、hover 态都用它）。
+     EP 官方深色值是按它自己的蓝色算的，这里改成本项目紫色，避免按钮/tag 发蓝。 */
+  --el-color-primary-light-3: color-mix(in srgb, var(--k-color-primary) 74%, #0b0913);
+  --el-color-primary-light-5: color-mix(in srgb, var(--k-color-primary) 54%, #0b0913);
+  --el-color-primary-light-7: color-mix(in srgb, var(--k-color-primary) 34%, #0b0913);
+  --el-color-primary-light-8: color-mix(in srgb, var(--k-color-primary) 24%, #0b0913);
+  --el-color-primary-light-9: color-mix(in srgb, var(--k-color-primary) 15%, #0b0913);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--k-color-primary) 82%, #ffffff);
 }
 
 *,
@@ -93,14 +215,24 @@ body {
   transition: background-color 0.25s ease, color 0.25s ease;
 }
 
+/* 表单控件默认不继承字体，中文会掉到系统兜底字体（Windows 上是 Arial）。
+   全站统一成主题字体栈。 */
+button,
+input,
+select,
+textarea,
+optgroup {
+  font-family: inherit;
+}
+
 a {
   color: inherit;
 }
 
 :focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--k-color-primary) 75%, white);
+  outline: 2px solid color-mix(in srgb, var(--k-color-primary) 75%, var(--k-color-tint));
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: var(--k-radius-xs);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -114,7 +246,11 @@ a {
   }
 }
 
-:root {
+/* Element Plus 变量桥接：把 EP 的语义变量指向本项目主题色。
+   同时作用于 :root（浅色）与 html[data-theme='dark']（深色），后者权重更高，
+   可以压过 EP 官方 html.dark 里的默认值。 */
+:root,
+html[data-theme='dark'] {
   --el-bg-color: var(--k-color-surface);
   --el-bg-color-page: var(--k-color-surface-soft);
   --el-text-color-primary: var(--k-color-text);
@@ -127,10 +263,21 @@ a {
   --el-color-success: var(--k-color-success);
   --el-color-warning: var(--k-color-warning);
   --el-color-danger: var(--k-color-danger);
+
+  /* EP 字号并入 --k-font-* 刻度：映射后每个值与 EP 自带默认值完全相同
+     （20 / 16 / 14 / 13 / 12px），因此 0 观感变化；以后调刻度只改一处。
+     --el-font-size-large（18px）在现有刻度里没有同值档位，暂不映射，避免观感漂移。 */
+  --el-font-size-extra-large: var(--k-font-xl);
+  --el-font-size-medium: var(--k-font-lg);
+  --el-font-size-base: var(--k-font-md);
+  --el-font-size-small: var(--k-font-sm);
+  --el-font-size-extra-small: var(--k-font-xs);
 }
 
-/* Element Plus common components theme bridge */
-.el-card {
+/* Element Plus common components theme bridge
+   —— 用 `html` 前缀把权重提到 (0,1,1)：EP 的 index.css 在 theme.css 之后加载，
+   同权重会被它反压。提高一级权重即可省掉后续大量 !important。 */
+html .el-card {
   background-color: var(--k-color-surface);
   border-color: var(--k-color-border);
   color: var(--k-color-text);
@@ -140,7 +287,7 @@ a {
   border-bottom-color: var(--k-color-border);
 }
 
-.el-table {
+html .el-table {
   --el-table-bg-color: var(--k-color-surface);
   --el-table-tr-bg-color: var(--k-color-surface);
   --el-table-expanded-cell-bg-color: var(--k-color-surface);
@@ -290,35 +437,35 @@ a {
   color: var(--k-color-text) !important;
 }
 
-.el-tabs__header,
-.el-tabs__nav-wrap::after {
-  border-color: var(--k-color-border) !important;
+html .el-tabs__header,
+html .el-tabs__nav-wrap::after {
+  border-color: var(--k-color-border);
 }
 
-.el-tabs__item {
-  color: var(--k-color-text-secondary) !important;
+html .el-tabs__item {
+  color: var(--k-color-text-secondary);
 }
 
-.el-tabs__item:hover,
-.el-tabs__item.is-active {
-  color: var(--k-color-primary) !important;
+html .el-tabs__item:hover,
+html .el-tabs__item.is-active {
+  color: var(--k-color-primary);
 }
 
-.el-tabs__active-bar {
-  background-color: var(--k-color-primary) !important;
+html .el-tabs__active-bar {
+  background-color: var(--k-color-primary);
 }
 
-.el-tag {
-  border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
+html .el-tag {
+  border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border));
 }
 
-.el-tag--info {
-  color: var(--k-color-text-secondary) !important;
-  background-color: color-mix(in srgb, var(--k-color-surface-soft) 88%, transparent) !important;
+html .el-tag--info {
+  color: var(--k-color-text-secondary);
+  background-color: color-mix(in srgb, var(--k-color-surface-soft) 88%, transparent);
 }
 
-.el-progress-bar__outer {
-  background-color: color-mix(in srgb, var(--k-color-surface-strong) 72%, var(--k-color-border)) !important;
+html .el-progress-bar__outer {
+  background-color: color-mix(in srgb, var(--k-color-surface-strong) 72%, var(--k-color-border));
 }
 
 .el-progress__text,
@@ -337,23 +484,18 @@ a {
   color: var(--k-color-text) !important;
 }
 
-.el-button.is-plain,
-.el-button--default {
-  background: var(--k-color-surface) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text-secondary) !important;
-}
+/* 按钮的 plain/default 底色与描边统一下方「sci-fi button skin」块（更完整），这里不再重复声明。 */
 
 /* Global sci-fi button skin */
 .el-button {
   position: relative;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--k-radius-sm);
   border-width: 1px;
   border-style: solid;
   letter-spacing: 0.02em;
   font-weight: 600;
-  transition: transform 0.2s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
+  transition: transform var(--k-dur-2) ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
 }
@@ -411,48 +553,74 @@ a {
 .el-button--primary {
   background:
     linear-gradient(135deg,
-      color-mix(in srgb, var(--k-color-primary) 78%, #ffffff) 0%,
+      color-mix(in srgb, var(--k-color-primary) 78%, var(--k-color-tint)) 0%,
       var(--k-color-primary) 56%,
-      color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
+      color-mix(in srgb, var(--k-color-primary) 78%, var(--k-color-shade)) 100%) !important;
   border-color: color-mix(in srgb, var(--k-color-primary) 66%, var(--k-color-border)) !important;
-  color: #ffffff !important;
+  color: var(--k-color-text-inverse) !important;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--k-color-primary) 34%, transparent),
     0 8px 20px color-mix(in srgb, var(--k-color-primary) 34%, transparent);
 }
 
 .el-button--success {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--k-color-success) 78%, #ffffff) 0%, var(--k-color-success) 100%) !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--k-color-success) 78%, var(--k-color-tint)) 0%, var(--k-color-success) 100%) !important;
   border-color: color-mix(in srgb, var(--k-color-success) 64%, var(--k-color-border)) !important;
 }
 
 .el-button--warning {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--k-color-warning) 78%, #ffffff) 0%, var(--k-color-warning) 100%) !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--k-color-warning) 78%, var(--k-color-tint)) 0%, var(--k-color-warning) 100%) !important;
   border-color: color-mix(in srgb, var(--k-color-warning) 64%, var(--k-color-border)) !important;
-  color: #1d1300 !important;
+  color: var(--k-color-on-warning) !important;
 }
 
 .el-button--danger {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--k-color-danger) 78%, #ffffff) 0%, var(--k-color-danger) 100%) !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--k-color-danger) 78%, var(--k-color-tint)) 0%, var(--k-color-danger) 100%) !important;
   border-color: color-mix(in srgb, var(--k-color-danger) 64%, var(--k-color-border)) !important;
 }
 
+/* Element Plus 2.x 的文本按钮类名是 .is-text（旧的 --text 已弃用）。
+   这里必须把上面 --primary/--danger 的渐变背景一并清掉，否则文本按钮会变成一块实心色块。 */
 .el-button--text,
-.el-button--link {
+.el-button--link,
+.el-button.is-text,
+.el-button.is-link {
   background: transparent !important;
+  background-image: none !important;
   border-color: transparent !important;
-  color: var(--k-color-primary) !important;
   box-shadow: none !important;
+  color: var(--k-color-primary) !important;
 }
 
 .el-button--text:hover,
-.el-button--link:hover {
-  color: color-mix(in srgb, var(--k-color-primary) 82%, #ffffff) !important;
+.el-button--link:hover,
+.el-button.is-text:hover,
+.el-button.is-link:hover {
+  color: color-mix(in srgb, var(--k-color-primary) 82%, var(--k-color-tint)) !important;
   background: color-mix(in srgb, var(--k-color-primary) 12%, transparent) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+/* 文本按钮保留自身语义色（danger 的红色图标不该被primary 覆盖） */
+.el-button.is-text.el-button--danger,
+.el-button.is-link.el-button--danger {
+  color: var(--k-color-danger) !important;
+}
+
+.el-button.is-text.el-button--danger:hover,
+.el-button.is-link.el-button--danger:hover {
+  color: var(--k-color-danger) !important;
+  background: color-mix(in srgb, var(--k-color-danger) 14%, transparent) !important;
+}
+
+.el-button.is-text.el-button--success,
+.el-button.is-text.el-button--warning {
+  color: var(--k-color-success) !important;
 }
 
 .el-button.is-circle {
-  border-radius: 999px;
+  border-radius: var(--k-radius-pill);
 }
 
 .el-button.is-disabled,
@@ -464,15 +632,6 @@ a {
   background: color-mix(in srgb, var(--k-color-surface-soft) 84%, var(--k-color-surface)) !important;
   border-color: var(--k-color-border) !important;
   color: var(--k-color-text-secondary) !important;
-}
-
-.el-select-dropdown__item {
-  color: var(--k-color-text) !important;
-}
-
-.el-select-dropdown__item.hover,
-.el-select-dropdown__item:hover {
-  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
 }
 
 .el-popper,
@@ -487,63 +646,94 @@ a {
   color: var(--k-color-text) !important;
 }
 
-.el-dropdown-menu__item,
-.el-cascader-node,
-.el-select-dropdown__item,
+/* 下拉/级联/日期面板的文字与 hover 统一在文件末尾的 popper 桥接块里（选择器更完整），
+   这里只保留末尾块没覆盖到的两项，同一条声明不再写两遍。 */
 .el-tree-node__label {
   color: var(--k-color-text) !important;
 }
 
-.el-dropdown-menu__item:hover,
-.el-dropdown-menu__item:focus,
-.el-cascader-node:hover,
-.el-select-dropdown__item:hover,
-.el-select-dropdown__item.hover {
-  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
-  color: var(--k-color-primary) !important;
-}
-
-.el-select-dropdown__item.is-selected,
 .el-dropdown-menu__item.is-active {
   color: var(--k-color-primary) !important;
   font-weight: 600;
 }
 
-.el-table__header-wrapper,
-.el-table__body-wrapper,
-.el-table__fixed,
-.el-table__fixed-right {
-  background: var(--k-color-surface) !important;
+/* 表格底色/描边全部由上面的 `html .el-table` 变量桥接承担：
+   EP 的 td/th/tr 背景读的是 --el-table-* 变量，用 html 前缀提高权重后
+   不再需要逐条 background !important 硬压。 */
+
+/* 数字列等宽，避免金额/系数上下不对齐 */
+.el-table .cell {
+  font-variant-numeric: tabular-nums;
 }
 
-.el-table td.el-table__cell,
-.el-table th.el-table__cell {
-  background: var(--k-color-surface) !important;
-  border-bottom-color: var(--k-color-border) !important;
+/* ⚠️ 表格滚动条：Element Plus 把原生滚动条设为 scrollbar-width:none，
+   自己的横条又常常不渲染（display:none），结果超出容器的列「看不见也不像能滚」。
+   报表空间在 1366 宽度下 8 个标签页都要横向滚动，这里必须给一条常显的细滚动条。 */
+html .el-table .el-scrollbar__wrap--hidden-default {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--k-color-text-secondary) 42%, transparent) transparent;
 }
 
-.el-table th.el-table__cell {
-  background: var(--k-color-surface-soft) !important;
+html .el-table .el-scrollbar__wrap--hidden-default::-webkit-scrollbar {
+  display: block;
+  height: 8px;
+  width: 8px;
 }
 
-/* Fix: override Element Plus default TR backgrounds that use CSS variables
-   (those variables get overridden by element-plus/dist/index.css which loads after theme.css) */
-.el-table tr {
-  background-color: var(--k-color-surface) !important;
+.el-table .el-scrollbar__wrap--hidden-default::-webkit-scrollbar-track,
+.el-table .el-scrollbar__wrap--hidden-default::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
-.el-table thead tr {
-  background-color: var(--k-color-surface-soft) !important;
+.el-table .el-scrollbar__wrap--hidden-default::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--k-color-text-secondary) 40%, transparent);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: var(--k-radius-xs);
 }
 
-.el-pagination,
-.el-pagination button,
-.el-pagination .el-pager li {
-  color: var(--k-color-text-secondary) !important;
+.el-table .el-scrollbar__wrap--hidden-default::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--k-color-primary) 62%, transparent);
+  background-clip: padding-box;
 }
 
-.el-pagination .el-pager li.is-active {
-  color: var(--k-color-primary) !important;
+/* 表格空态：不再只有一句灰字，给一个居中的图形 + 呼吸空间 */
+html .el-table__empty-block {
+  min-height: 180px;
+}
+
+html .el-table__empty-text {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.6;
+  color: var(--k-color-text-secondary);
+  font-size: var(--k-font-sm);
+}
+
+.el-table__empty-text::before {
+  content: '';
+  width: 44px;
+  height: 44px;
+  opacity: 0.55;
+  background-color: currentColor;
+  -webkit-mask-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 10h18M9 4v16'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 10h18M9 4v16'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+html .el-pagination,
+html .el-pagination button,
+html .el-pagination .el-pager li {
+  color: var(--k-color-text-secondary);
+}
+
+html .el-pagination .el-pager li.is-active {
+  color: var(--k-color-primary);
 }
 
 .splitter {
@@ -558,8 +748,8 @@ html .el-table .el-table__body .el-table__row.lack-row th,
 .el-table .lack-row,
 .el-table .lack-row td,
 .el-table .lack-row th {
-  background-color: #ff6b6b !important;
-  color: #ffffff !important;
+  background-color: var(--k-color-lack-bg) !important;
+  color: var(--k-color-text-inverse) !important;
   font-weight: bold !important;
 }
 
@@ -576,8 +766,8 @@ html.dark .el-table .el-table__body .el-table__row.lack-row th,
 .dark .el-table .lack-row,
 .dark .el-table .lack-row td,
 .dark .el-table .lack-row th {
-  background-color: #ff4444 !important;
-  color: #ffffff !important;
+  background-color: var(--k-color-lack-bg) !important;
+  color: var(--k-color-text-inverse) !important;
   font-weight: bold !important;
 }
 
@@ -613,6 +803,14 @@ html.dark .el-table .el-table__body .el-table__row.lack-row th,
   border-color: var(--k-color-border) !important;
 }
 
+/* 深色 tooltip（.el-popper.is-dark）的箭头仍取 EP 默认的 --el-text-color-primary，
+   深色主题下几乎是白色；它与上面已被统一的 surface 底色不一致，会留一个白箭头。
+   箭头由 border + background 两处着色，两处都要覆盖；popper 底色两套主题都统一了，故不写主题限定。 */
+.el-popper.is-dark > .el-popper__arrow::before {
+  background: var(--k-color-surface) !important;
+  border-color: var(--k-color-border) !important;
+}
+
 .el-select-dropdown__item,
 .el-dropdown-menu__item,
 .el-cascader-node,
@@ -640,6 +838,19 @@ html.dark .el-table .el-table__body .el-table__row.lack-row th,
 .el-time-spinner__item.active:not(.disabled) {
   background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
   color: var(--k-color-primary) !important;
+}
+
+/* 行内操作菜单的删除项（KRowMenu 的 danger 项）：
+   上面的 popper 桥接用 !important 把菜单文字统一成 --k-color-text、hover 统一成 primary，
+   删除项必须从这里放行，否则会被刷成普通文字色 / 主色。 */
+.el-dropdown-menu__item.k-row-menu__danger {
+  color: var(--k-color-danger) !important;
+}
+
+.el-dropdown-menu__item.k-row-menu__danger:focus,
+.el-dropdown-menu__item.k-row-menu__danger:hover {
+  color: var(--k-color-danger) !important;
+  background: color-mix(in srgb, var(--k-color-danger) 10%, var(--k-color-surface-soft)) !important;
 }
 
 .el-select-dropdown__item.is-selected,

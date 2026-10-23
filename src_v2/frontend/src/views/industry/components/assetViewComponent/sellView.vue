@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import KEmpty from '@/components/k/KEmpty.vue'
+import KCard from '@/components/k/KCard.vue'
+import KStat from '@/components/k/KStat.vue'
 import { ref, computed } from 'vue'
 import { Setting, Search, Refresh } from '@element-plus/icons-vue'
 
@@ -100,7 +103,7 @@ const filteredAssetView = computed(() => {
     <div v-loading="loading" class="sell-view-content">
         <div class="sell-view-container">
             <!-- 配置信息卡片 -->
-            <el-card class="config-card" shadow="hover">
+            <KCard class="config-card">
                 <div class="config-header">
                     <el-icon class="config-icon"><Setting /></el-icon>
                     <span class="config-title">价格配置</span>
@@ -115,7 +118,7 @@ const filteredAssetView = computed(() => {
                         <el-tag type="success" size="large">{{ (config.percent * 100).toFixed(0) }}%</el-tag>
                     </div>
                 </div>
-            </el-card>
+            </KCard>
 
             <!-- 工具栏 -->
             <div class="toolbar">
@@ -135,9 +138,12 @@ const filteredAssetView = computed(() => {
                     </el-button>
                 </div>
             </div>
-            <div v-if="!loading && assetView.length === 0" class="empty-state">
-                <el-empty description="暂无数据" />
-            </div>
+            <KEmpty
+                v-if="!loading && assetView.length === 0"
+                size="lg"
+                why="还没有资产数据"
+                hint="先在资产列表刷新一次角色资产，再回来查看可售价格"
+            />
             <template v-else>
                 <!-- 搜索框 -->
                 <div class="search-container">
@@ -155,11 +161,11 @@ const filteredAssetView = computed(() => {
 
                 <!-- 资产列表 -->
                 <div class="asset-grid">
-                <el-card 
+                <KCard 
                     v-for="asset in filteredAssetView" 
                     :key="asset.type_id" 
-                    class="asset-item-card"
-                    shadow="hover"
+                    class="asset-tile"
+                    padding="none"
                 >
                     <div class="asset-item-content">
                         <!-- 图标容器 -->
@@ -177,10 +183,12 @@ const filteredAssetView = computed(() => {
                             <!-- 第一行：中文名 | 个数 -->
                             <div class="asset-top-row">
                                 <div class="asset-name-zh">{{ asset.type_name_zh || asset.type_name }}</div>
-                                <div class="asset-quantity-display">
-                                    <div class="quantity-number">{{ asset.quantity }}</div>
-                                    <div class="quantity-unit">个</div>
-                                </div>
+                                <KStat
+                                    label="数量"
+                                    :value="asset.quantity"
+                                    unit="个"
+                                    tone="success"
+                                />
                             </div>
                             <!-- 第二行：英文名 -->
                             <div class="asset-name-en">{{ asset.type_name }}</div>
@@ -191,7 +199,7 @@ const filteredAssetView = computed(() => {
                             </div>
                         </div>
                     </div>
-                </el-card>
+                </KCard>
             </div>
         </template>
     </div>
@@ -203,13 +211,6 @@ const filteredAssetView = computed(() => {
     min-height: 400px;
 }
 
-.empty-state {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 400px;
-}
-
 .sell-view-container {
     display: flex;
     flex-direction: column;
@@ -218,13 +219,13 @@ const filteredAssetView = computed(() => {
 
 /* 配置卡片样式 */
 .config-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border: none;
-    color: white;
-}
-
-.config-card :deep(.el-card__body) {
-    padding: 20px;
+    background: linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface-soft)) 0%,
+        color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-surface)) 100%
+    );
+    border: 1px solid var(--k-color-border-subtle);
+    color: var(--k-color-text);
 }
 
 .config-header {
@@ -257,15 +258,7 @@ const filteredAssetView = computed(() => {
 
 .config-label {
     font-size: 14px;
-    opacity: 0.9;
-}
-
-.config-item :deep(.el-tag) {
-    font-size: 14px;
-    padding: 6px 12px;
-    background-color: rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.3);
-    color: white;
+    color: var(--k-color-text-secondary);
 }
 
 /* 工具栏 */
@@ -275,7 +268,7 @@ const filteredAssetView = computed(() => {
     align-items: center;
     gap: 12px;
     padding: 16px;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    background: var(--k-gradient-toolbar);
     border-radius: 8px;
 }
 
@@ -291,29 +284,29 @@ const filteredAssetView = computed(() => {
     align-items: center;
     gap: 8px;
     font-size: 14px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .time-label {
     font-weight: 500;
-    color: #909399;
+    color: var(--k-color-text-tertiary);
 }
 
 .time-value {
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-primary);
 }
 
 .refresh-button {
     font-size: 14px;
     padding: 10px 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-primary) 20%, transparent);
     transition: all 0.3s ease;
 }
 
 .refresh-button:hover {
-    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
     transform: translateY(-1px);
 }
 
@@ -329,16 +322,16 @@ const filteredAssetView = computed(() => {
 
 .search-input :deep(.el-input__wrapper) {
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--k-shadow-sm);
     transition: all 0.3s ease;
 }
 
 .search-input :deep(.el-input__wrapper:hover) {
-    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.2);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-primary) 20%, transparent);
 }
 
 .search-input :deep(.el-input__wrapper.is-focus) {
-    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
 }
 
 /* 资产网格 */
@@ -350,12 +343,12 @@ const filteredAssetView = computed(() => {
 }
 
 /* 资产卡片 - EVE风格 */
-.asset-item-card {
+.asset-tile {
     width: 300px;
     height: 100px;
     transition: all 0.3s ease;
-    background: #2D3234;
-    border: none;
+    background: var(--k-color-surface);
+    border: 1px solid var(--k-color-border-subtle);
     border-radius: 4px 0 0 4px;
     overflow: hidden;
     position: relative;
@@ -370,13 +363,14 @@ const filteredAssetView = computed(() => {
     );
 }
 
-.asset-item-card:hover {
+.asset-tile:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    background: #353A3D;
+    box-shadow: var(--k-shadow-sm);
+    border-color: var(--k-color-border);
+    background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft));
 }
 
-.asset-item-card :deep(.el-card__body) {
+.asset-tile :deep(.k-card__body) {
     padding: 6px 8px;
     height: 100%;
 }
@@ -395,8 +389,8 @@ const filteredAssetView = computed(() => {
     width: 64px;
     height: 64px;
     flex-shrink: 0;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--k-color-border-subtle);
+    background: var(--k-color-surface-soft);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -416,14 +410,14 @@ const filteredAssetView = computed(() => {
     left: -2px;
     width: 16px;
     height: 16px;
-    background: linear-gradient(135deg, #ffa500 0%, #ff8c00 100%);
+    background: linear-gradient(135deg, var(--k-color-warning) 0%, color-mix(in srgb, var(--k-color-warning) 72%, var(--k-color-shade)) 100%);
     clip-path: polygon(0 0, 100% 0, 0 100%);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
-    color: #000;
+    color: var(--k-color-on-warning);
     z-index: 2;
     line-height: 1;
     padding: 1px 0 0 1px;
@@ -456,7 +450,7 @@ const filteredAssetView = computed(() => {
     flex: 0 1 auto;
     font-size: 15px;
     font-weight: 700;
-    color: #ffffff;
+    color: var(--k-color-text);
     line-height: 1.3;
     word-break: break-word;
     overflow: hidden;
@@ -469,36 +463,12 @@ const filteredAssetView = computed(() => {
     max-width: calc(100% - 50px);
 }
 
-/* 个数显示 - 两行，显眼加粗现代化字体 */
-.asset-quantity-display {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    flex-shrink: 0;
-    line-height: 1;
-}
-
-.quantity-number {
-    font-size: 18px;
-    font-weight: 800;
-    color: #67c23a;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-    letter-spacing: -0.5px;
-    line-height: 1.1;
-}
-
-.quantity-unit {
-    font-size: 10px;
-    font-weight: 600;
-    color: rgba(103, 194, 58, 0.8);
-    margin-top: 2px;
-    line-height: 1;
-}
+/* 个数显示由 KStat 承担（等宽数字 + 语义色） */
 
 /* 第二行：英文名 */
 .asset-name-en {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--k-color-text-secondary);
     line-height: 1.3;
     word-break: break-word;
     overflow: hidden;
@@ -520,14 +490,14 @@ const filteredAssetView = computed(() => {
 .price-value {
     font-size: 13px;
     font-weight: 700;
-    color: #409eff;
+    color: var(--k-color-primary);
     line-height: 1.2;
     white-space: nowrap;
 }
 
 .price-unit {
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.6);
+    font-size: 11px;
+    color: var(--k-color-text-tertiary);
     margin-left: 2px;
     white-space: nowrap;
 }
@@ -560,7 +530,7 @@ const filteredAssetView = computed(() => {
         gap: 12px;
     }
 
-    .asset-item-card {
+    .asset-tile {
         width: 100%;
         max-width: 220px;
     }
@@ -568,10 +538,6 @@ const filteredAssetView = computed(() => {
     .config-content {
         flex-direction: column;
         gap: 12px;
-    }
-
-    .config-card :deep(.el-card__body) {
-        padding: 16px;
     }
 }
 
@@ -581,7 +547,7 @@ const filteredAssetView = computed(() => {
         gap: 10px;
     }
 
-    .asset-item-card {
+    .asset-tile {
         width: 100%;
         max-width: 220px;
         height: 90px;
@@ -597,15 +563,7 @@ const filteredAssetView = computed(() => {
     }
 
     .asset-name-en {
-        font-size: 10px;
-    }
-
-    .quantity-number {
-        font-size: 16px;
-    }
-
-    .quantity-unit {
-        font-size: 9px;
+        font-size: 11px;
     }
 
     .price-value {
@@ -613,94 +571,14 @@ const filteredAssetView = computed(() => {
     }
 
     .price-unit {
-        font-size: 9px;
+        font-size: 11px;
     }
 }
 
-/* Theme override */
-.sell-view-content,
-.sell-view-container,
-.config-card,
-.toolbar,
-.search-container,
-.asset-grid,
-.asset-item-card,
-.asset-item-content,
-.asset-info-section {
-    border-color: var(--k-color-border) !important;
-}
-
-.sell-view-content,
-.sell-view-container,
-.toolbar,
-.search-container,
-.asset-item-card {
-    background: var(--k-color-surface) !important;
-    color: var(--k-color-text) !important;
-}
-
-.asset-item-card {
-    box-shadow: var(--k-shadow-sm) !important;
-}
-
-.asset-item-card:hover {
-    box-shadow: var(--k-shadow-md) !important;
-    background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
-}
-
-.config-card {
-    background: linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface-soft)) 0%,
-        color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-surface)) 100%
-    ) !important;
-    color: var(--k-color-text) !important;
-}
-
-.config-label,
-.time-label,
-.asset-name-en,
-.price-unit {
-    color: var(--k-color-text-secondary) !important;
-}
-
-.time-value,
-.price-value {
-    color: var(--k-color-primary) !important;
-}
-
-.asset-name-zh {
-    color: var(--k-color-text) !important;
-}
-
-.asset-sellable-badge {
-    background: linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--k-color-warning) 90%, #0000) 0%,
-        color-mix(in srgb, var(--k-color-warning) 65%, #0000) 100%
-    ) !important;
-}
-
-.quantity-number {
-    color: var(--k-color-success) !important;
-}
-
-.quantity-unit {
-    color: color-mix(in srgb, var(--k-color-success) 72%, var(--k-color-text-secondary)) !important;
-}
-
-.sell-view-container :deep(.el-input__wrapper),
-.sell-view-container :deep(.el-card),
-.sell-view-container :deep(.el-button),
-.sell-view-container :deep(.el-tag) {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
-}
-
+/* 次要按钮 hover 保持品牌色（token 混合，无需 !important） */
 .sell-view-container :deep(.el-button:not(.el-button--primary):hover) {
-    color: var(--k-color-primary) !important;
-    background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
-    border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border)) !important;
+    color: var(--k-color-primary);
+    background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft));
+    border-color: color-mix(in srgb, var(--k-color-primary) 35%, var(--k-color-border));
 }
 </style>

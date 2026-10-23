@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import KEmpty from '@/components/k/KEmpty.vue'
+import KCard from '@/components/k/KCard.vue'
+import KStat from '@/components/k/KStat.vue'
 import { ref, computed, watch } from 'vue'
 import { Setting, DocumentCopy, Refresh } from '@element-plus/icons-vue'
 import { http } from '@/http'
@@ -28,6 +31,9 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+
+// 本地别名：config 由父组件持有，这里只修改其内部字段后回传保存
+const config = props.config
 
 const emit = defineEmits<{
     refresh: []
@@ -72,7 +78,7 @@ const handleRefresh = () => {
 }
 
 const AssetViewSort = computed(() => {
-    return props.assetView.sort((a, b) => {
+    return [...props.assetView].sort((a, b) => {
         return b.type_id - a.type_id
     })
 })
@@ -114,7 +120,7 @@ const getPrevPowerOf10 = (value: number): number => {
 const prevRoundDigit = ref(1)
 
 // 监听位数取整值变化，自动调整为10的幂次方
-watch(roundDigit, (newValue, oldValue) => {
+watch(roundDigit, (newValue) => {
     if (newValue === null || newValue === undefined) {
         roundDigit.value = 1
         prevRoundDigit.value = 1
@@ -164,11 +170,11 @@ const setSingleTargetLineForm = ref({
 const setSingleTargetLine = (asset: AssetItem) => {
     currentAsset.value = asset
     // 初始化 watch_list 如果不存在
-    if (!props.config.watch_list) {
-        props.config.watch_list = {}
+    if (!config.watch_list) {
+        config.watch_list = {}
     }
     // 使用当前 watch_list 中的值，如果没有则使用当前数量
-    setSingleTargetLineForm.value.targetLine = props.config.watch_list[asset.type_id]?.quantity || asset.quantity || 100
+    setSingleTargetLineForm.value.targetLine = config.watch_list[asset.type_id]?.quantity || asset.quantity || 100
     setSingleTargetLineDialogVisible.value = true
 }
 
@@ -176,12 +182,12 @@ const handleSetSingleTargetLine = async () => {
     if (!currentAsset.value) return
 
     // 初始化 watch_list 如果不存在
-    if (!props.config.watch_list) {
-        props.config.watch_list = {}
+    if (!config.watch_list) {
+        config.watch_list = {}
     }
 
     // 为单个资产设置目标线
-    props.config.watch_list[currentAsset.value.type_id] = {
+    config.watch_list[currentAsset.value.type_id] = {
         quantity: setSingleTargetLineForm.value.targetLine
     }
 
@@ -207,13 +213,13 @@ const handleSetAllTargetLine = async () => {
     console.log('handleSetAllTargetLine', setAllTargetLineForm.value.targetLine)
 
     // 初始化 watch_list 如果不存在
-    if (!props.config.watch_list) {
-        props.config.watch_list = {}
+    if (!config.watch_list) {
+        config.watch_list = {}
     }
 
     // 为所有资产设置目标线
     props.assetView.forEach(asset => {
-        props.config.watch_list![asset.type_id] = {
+        config.watch_list![asset.type_id] = {
             quantity: setAllTargetLineForm.value.targetLine
         }
     })
@@ -237,7 +243,7 @@ const handleSetAllTargetLine = async () => {
 
 // 计算进度百分比
 const getProgressPercentage = (asset: AssetItem): number => {
-    const targetQuantity = props.config.watch_list?.[asset.type_id]?.quantity || 0
+    const targetQuantity = config.watch_list?.[asset.type_id]?.quantity || 0
     if (targetQuantity === 0) return 0
     return Math.min(Math.floor((asset.quantity / targetQuantity) * 100), 100)
 }
@@ -258,7 +264,7 @@ const getProgressColor = (asset: AssetItem): string => {
 
 // 计算补充数量：根据填充率向上取整到自定义百分比，然后进行位数取整
 const calculateReplenishQuantity = (asset: AssetItem): number => {
-    const targetQuantity = props.config.watch_list?.[asset.type_id]?.quantity || 0
+    const targetQuantity = config.watch_list?.[asset.type_id]?.quantity || 0
     if (targetQuantity === 0) return 0
     
     const percentage = getProgressPercentage(asset)
@@ -311,7 +317,7 @@ const copySingleItemPurchaseList = async (asset: AssetItem) => {
     try {
         await navigator.clipboard.writeText(text)
         ElMessage.success('已复制到剪贴板')
-    } catch (error) {
+    } catch {
         ElMessage.error('复制失败，请手动复制')
     }
 }
@@ -328,7 +334,7 @@ const copyAllPurchaseList = async () => {
     try {
         await navigator.clipboard.writeText(text)
         ElMessage.success('已复制采购清单到剪贴板')
-    } catch (error) {
+    } catch {
         ElMessage.error('复制失败，请手动复制')
     }
 }
@@ -400,16 +406,18 @@ const copyAllPurchaseList = async () => {
                     </el-button>
                 </div>
             </div>
-            <div v-if="!loading && assetView.length === 0" class="empty-state">
-                <el-empty description="暂无数据" />
-            </div>
+            <KEmpty
+                v-if="!loading && assetView.length === 0"
+                size="lg"
+                why="还没有资产数据"
+                hint="先在资产列表刷新一次角色资产，再回来设置填充目标线"
+            />
             <!-- 资产网格 -->
             <div v-else class="asset-grid">
-                <el-card 
+                <KCard 
                     v-for="asset in AssetViewSort" 
                     :key="asset.type_id" 
-                    class="asset-item-card"
-                    shadow="hover"
+                    class="watch-item"
                 >
                     <!-- 设置按钮 -->
                     <el-button 
@@ -418,6 +426,8 @@ const copyAllPurchaseList = async () => {
                         circle 
                         size="small"
                         class="setting-button"
+                        :aria-label="`设置 ${asset.type_name_zh || asset.type_name} 的填充线`"
+                        title="设置填充线"
                         @click="setSingleTargetLine(asset)"
                     />
                     <!-- 复制按钮 -->
@@ -427,6 +437,8 @@ const copyAllPurchaseList = async () => {
                         circle 
                         size="small"
                         class="copy-button"
+                        :aria-label="`复制 ${asset.type_name_zh || asset.type_name} 的采购清单`"
+                        title="复制采购清单"
                         @click="copySingleItemPurchaseList(asset)"
                     />
                     
@@ -455,8 +467,12 @@ const copyAllPurchaseList = async () => {
                                 </template>
                             </el-progress>
                             <div class="progress-text">
-                                <div class="progress-percentage">{{ getProgressPercentage(asset) }}%</div>
-                                <div class="progress-label">填充率</div>
+                                <KStat
+                                    label="填充率"
+                                    :value="getProgressPercentage(asset)"
+                                    unit="%"
+                                    align="center"
+                                />
                             </div>
                         </div>
                         
@@ -466,12 +482,12 @@ const copyAllPurchaseList = async () => {
                             <div class="asset-name-en">{{ asset.type_name }}</div>
                             <div class="asset-quantity-section">
                                 <el-tag type="success" class="asset-quantity-tag" size="large">
-                                    {{ asset.quantity }} / {{ props.config.watch_list?.[asset.type_id]?.quantity || '-' }}
+                                    {{ asset.quantity }} / {{ config.watch_list?.[asset.type_id]?.quantity || '-' }}
                                 </el-tag>
                             </div>
                         </div>
                     </div>
-                </el-card>
+                </KCard>
             </div>
         </div>
     </div>
@@ -509,13 +525,6 @@ const copyAllPurchaseList = async () => {
     min-height: 400px;
 }
 
-.empty-state {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 400px;
-}
-
 .watch-view-container {
     display: flex;
     flex-direction: column;
@@ -529,7 +538,7 @@ const copyAllPurchaseList = async () => {
     justify-content: space-between;
     align-items: center;
     gap: 12px;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    background: var(--k-gradient-toolbar);
     border-radius: 8px;
 }
 
@@ -552,12 +561,12 @@ const copyAllPurchaseList = async () => {
     font-size: 14px;
     padding: 10px 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-primary) 20%, transparent);
     transition: all 0.3s ease;
 }
 
 .set-all-button:hover {
-    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
     transform: translateY(-1px);
 }
 
@@ -565,13 +574,13 @@ const copyAllPurchaseList = async () => {
     font-size: 14px;
     padding: 10px 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(103, 194, 58, 0.2);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-success) 20%, transparent);
     transition: all 0.3s ease;
     margin-left: 12px;
 }
 
 .copy-all-button:hover {
-    box-shadow: 0 4px 12px rgba(103, 194, 58, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-success) 30%, transparent);
     transform: translateY(-1px);
 }
 
@@ -593,7 +602,7 @@ const copyAllPurchaseList = async () => {
 
 .input-label {
     font-size: 14px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
     white-space: nowrap;
 }
 
@@ -607,7 +616,7 @@ const copyAllPurchaseList = async () => {
 
 .input-suffix {
     font-size: 14px;
-    color: #909399;
+    color: var(--k-color-text-tertiary);
     white-space: nowrap;
 }
 
@@ -616,29 +625,29 @@ const copyAllPurchaseList = async () => {
     align-items: center;
     gap: 8px;
     font-size: 14px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .time-label {
     font-weight: 500;
-    color: #909399;
+    color: var(--k-color-text-tertiary);
 }
 
 .time-value {
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-primary);
 }
 
 .refresh-button {
     font-size: 14px;
     padding: 10px 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-primary) 20%, transparent);
     transition: all 0.3s ease;
 }
 
 .refresh-button:hover {
-    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
     transform: translateY(-1px);
 }
 
@@ -651,17 +660,17 @@ const copyAllPurchaseList = async () => {
 }
 
 /* 资产卡片 */
-.asset-item-card {
+.watch-item {
     position: relative;
     transition: all 0.3s ease;
-    background: white;
-    border-radius: 12px;
+    border-radius: var(--k-radius-md);
     overflow: visible;
 }
 
-.asset-item-card:hover {
+.watch-item:hover {
     transform: translateY(-4px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    box-shadow: var(--k-shadow-md);
+    background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft));
 }
 
 /* 设置按钮 */
@@ -670,13 +679,13 @@ const copyAllPurchaseList = async () => {
     top: 12px;
     right: 12px;
     z-index: 10;
-    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
     transition: all 0.3s ease;
 }
 
 .setting-button:hover {
     transform: scale(1.1);
-    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.4);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-primary) 40%, transparent);
 }
 
 /* 复制按钮 */
@@ -685,13 +694,13 @@ const copyAllPurchaseList = async () => {
     top: 12px;
     right: 56px;
     z-index: 10;
-    box-shadow: 0 2px 8px rgba(103, 194, 58, 0.3);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-success) 30%, transparent);
     transition: all 0.3s ease;
 }
 
 .copy-button:hover {
     transform: scale(1.1);
-    box-shadow: 0 4px 12px rgba(103, 194, 58, 0.4);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-success) 40%, transparent);
 }
 
 /* 卡片内容 */
@@ -728,27 +737,14 @@ const copyAllPurchaseList = async () => {
 }
 
 .asset-avatar {
-    border: 2px solid #f0f0f0;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    border: 2px solid var(--k-color-border-subtle);
+    box-shadow: var(--k-shadow-sm);
 }
 
 .progress-text {
-    text-align: center;
+    width: 100%;
     pointer-events: none;
     margin-top: 2px;
-}
-
-.progress-percentage {
-    font-size: 14px;
-    font-weight: 700;
-    color: #303133;
-    line-height: 1.2;
-}
-
-.progress-label {
-    font-size: 10px;
-    color: #909399;
-    margin-top: 1px;
 }
 
 /* 资产信息 */
@@ -763,14 +759,14 @@ const copyAllPurchaseList = async () => {
 .asset-name-zh {
     font-size: 14px;
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-text);
     word-break: break-word;
     line-height: 1.3;
 }
 
 .asset-name-en {
     font-size: 11px;
-    color: #909399;
+    color: var(--k-color-text-tertiary);
     word-break: break-word;
     line-height: 1.2;
 }
@@ -786,7 +782,7 @@ const copyAllPurchaseList = async () => {
     font-size: 13px;
     font-weight: 600;
     padding: 4px 12px;
-    box-shadow: 0 2px 4px rgba(103, 194, 58, 0.2);
+    box-shadow: 0 2px 4px color-mix(in srgb, var(--k-color-success) 20%, transparent);
 }
 
 /* 响应式设计 */
@@ -848,10 +844,6 @@ const copyAllPurchaseList = async () => {
         height: 50px !important;
     }
 
-    .progress-percentage {
-        font-size: 14px;
-    }
-
     .asset-name-zh {
         font-size: 14px;
     }
@@ -886,20 +878,12 @@ const copyAllPurchaseList = async () => {
         height: 45px !important;
     }
 
-    .progress-percentage {
-        font-size: 12px;
-    }
-
-    .progress-label {
-        font-size: 10px;
-    }
-
     .asset-name-zh {
         font-size: 13px;
     }
 
     .asset-name-en {
-        font-size: 10px;
+        font-size: 11px;
     }
 
     .asset-quantity-tag {
@@ -918,67 +902,8 @@ const copyAllPurchaseList = async () => {
     }
 }
 
-/* Theme override */
-.watch-view-content,
-.watch-view-container,
-.action-bar,
-.asset-grid,
-.asset-item-card,
-.asset-item-content,
-.progress-container,
-.setting-content {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
-}
-
-.asset-item-card,
-.setting-content {
-    box-shadow: var(--k-shadow-sm) !important;
-}
-
-.asset-item-card:hover {
-    box-shadow: var(--k-shadow-md) !important;
-    background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
-}
-
-.asset-avatar {
-    border-color: var(--k-color-border) !important;
-}
-
-.progress-percentage,
-.asset-name-zh {
-    color: var(--k-color-text) !important;
-}
-
-.progress-label,
-.asset-name-en,
-.time-label {
-    color: var(--k-color-text-secondary) !important;
-}
-
-.time-value {
-    color: var(--k-color-primary) !important;
-}
-
-.asset-progress :deep(.el-progress-bar__outer),
+/* 进度环底色跟随主题（token 混合，深浅自适应） */
 .asset-progress :deep(.el-progress-circle__track) {
-    background: color-mix(in srgb, var(--k-color-surface-strong) 72%, var(--k-color-border)) !important;
-    stroke: color-mix(in srgb, var(--k-color-surface-strong) 72%, var(--k-color-border)) !important;
-}
-
-.watch-view-container :deep(.el-card),
-.watch-view-container :deep(.el-dialog),
-.watch-view-container :deep(.el-dialog__header),
-.watch-view-container :deep(.el-dialog__body),
-.watch-view-container :deep(.el-dialog__footer),
-.watch-view-container :deep(.el-input__wrapper),
-.watch-view-container :deep(.el-input-number .el-input__wrapper),
-.watch-view-container :deep(.el-input-number__decrease),
-.watch-view-container :deep(.el-input-number__increase),
-.watch-view-container :deep(.el-select__wrapper) {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
+    stroke: color-mix(in srgb, var(--k-color-surface-strong) 72%, var(--k-color-border));
 }
 </style>

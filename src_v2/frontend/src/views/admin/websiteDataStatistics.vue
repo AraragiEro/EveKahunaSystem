@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import KEmpty from '@/components/k/KEmpty.vue'
+import KTable from '@/components/k/KTable.vue'
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { http } from '@/http'
@@ -840,13 +842,15 @@ onUnmounted(() => {
             <!-- 左侧用户列表 -->
             <div class="user-list-section" v-loading="userFrequencyLoading">
               <div class="section-title">高频用户排行 (Top {{ userFrequencyData.length }})</div>
-              <el-table
+              <KTable
                 :data="userFrequencyData"
                 style="width: 100%"
                 height="500"
                 highlight-current-row
                 @row-click="(row: any) => handleSelectUser(row.user_name)"
                 :row-class-name="(row: any) => row.user_name === selectedUser ? 'selected-row' : ''"
+                empty-why="这段时间内还没有用户使用记录"
+                density="compact"
               >
                 <el-table-column type="index" label="排名" width="70" align="center">
                   <template #default="{ $index }">
@@ -881,7 +885,7 @@ onUnmounted(() => {
                     </el-tag>
                   </template>
                 </el-table-column>
-              </el-table>
+              </KTable>
             </div>
             
             <!-- 右侧用户详情 -->
@@ -910,11 +914,13 @@ onUnmounted(() => {
               
               <!-- 用户详情表格 -->
               <div class="user-detail-table" v-loading="userDetailLoading">
-                <el-table
+                <KTable
                   :data="userDetailData"
                   style="width: 100%"
                   height="250"
                   size="small"
+                  empty-why="这个用户在该时间段没有计算记录"
+                  density="compact"
                 >
                   <el-table-column type="index" label="#" width="50" align="center" />
                   <el-table-column prop="plan_name" label="计划名称" min-width="120" show-overflow-tooltip />
@@ -931,13 +937,13 @@ onUnmounted(() => {
                       </el-tag>
                     </template>
                   </el-table-column>
-                </el-table>
+                </KTable>
               </div>
             </div>
             
             <!-- 未选择用户时的提示 -->
             <div class="user-detail-section empty" v-else>
-              <el-empty description="点击左侧用户查看详情" />
+              <KEmpty why="点击左侧用户查看详情" />
             </div>
           </div>
         </div>
@@ -1073,7 +1079,7 @@ onUnmounted(() => {
 .user-detail-chart-wrapper {
   height: 300px;
   margin-bottom: 15px;
-  background: var(--k-color-background);
+  background: var(--k-color-surface-soft);
   border-radius: 4px;
   padding: 10px;
 }
@@ -1088,8 +1094,10 @@ onUnmounted(() => {
   overflow: auto;
 }
 
-:deep(.selected-row) {
-  background-color: var(--el-color-primary-light-9) !important;
+/* 选中行高亮：k-report-table 的斑马纹/悬浮用强制声明写死 td 底色，
+   所以必须同样落到 td 上并保留强制声明，否则只有奇数行能看到高亮。 */
+:deep(.el-table__body tr.selected-row > td.el-table__cell) {
+  background-color: color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface)) !important;
 }
 
 :deep(.el-table__row) {

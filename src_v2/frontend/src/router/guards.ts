@@ -10,7 +10,12 @@ export function setupAuthGuards(router: Router): void {
     // 定义公开页面列表（不需要认证即可访问）
     const publicPages = ['/', '/login', '/landing', '/announcements', '/forbidden', '/setting/characterSetting/auth/close', '/utils/estimator', '/utils/piProfit']
     // 支持动态路径匹配：/storage/:sid 和 /workflow/:token
-    const isPublicPage = publicPages.includes(to.path) || to.path.startsWith('/storage/') || to.path.startsWith('/workflow/')
+    // 404 兜底页同样公开：不存在的地址不该先被踢去登录页，否则未登录用户永远看不到 404。
+    const isPublicPage =
+      publicPages.includes(to.path) ||
+      to.path.startsWith('/storage/') ||
+      to.path.startsWith('/workflow/') ||
+      to.name === 'notFound'
     
     // 如果访问登录页，检查是否已经登录（验证 token 有效性）
     if (to.path === '/login') {

@@ -7,6 +7,7 @@ from sqlalchemy import delete, func, insert, or_, select, text
 from sqlalchemy.orm import aliased
 
 from ..log import logger
+from ..utils import get_beijing_utctime
 from . import model
 from .connect_manager import get_postgres_manager
 
@@ -1385,14 +1386,42 @@ class VipStateDBUtils(_CommonUtils):
 
     @classmethod
     async def count_vip_users(cls) -> int:
-        """统计VIP用户总数（vip_alpha + vip_omega）"""
+        """统计当前有效的 VIP 用户数（vip_alpha + vip_omega 且未过期）
+
+        说明：过期后 vip_level 不会被清空（历史开通记录保留在原行），
+        因此必须按 vip_end_date 过滤，否则会把已过期用户也算成会员。
+        vip_end_date 以北京时间 naive 值存储；NULL 视为未设置到期（长期有效）。
+        """
+        now = get_beijing_utctime(datetime.now())
         async with get_postgres_manager().get_session() as session:
             result = await session.execute(
                 select(func.count()).select_from(cls.cls_model).where(
-                    cls.cls_model.vip_level.in_(['vip_alpha', 'vip_omega'])
+                    cls.cls_model.vip_level.in_(['vip_alpha', 'vip_omega']),
+                    or_(
+                        cls.cls_model.vip_end_date.is_(None),
+                        cls.cls_model.vip_end_date > now,
+                    ),
                 )
             )
             return result.scalar() or 0
+
+    @classmethod
+    async def select_active_vip_user_names(cls) -> list[str]:
+        """获取当前有效的 VIP 用户名列表（vip_alpha + vip_omega 且未过期）
+
+        口径与 count_vip_users 一致：vip_end_date 为 NULL 视为未设置到期。
+        """
+        now = get_beijing_utctime(datetime.now())
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model.user_name).where(
+                cls.cls_model.vip_level.in_(['vip_alpha', 'vip_omega']),
+                or_(
+                    cls.cls_model.vip_end_date.is_(None),
+                    cls.cls_model.vip_end_date > now,
+                ),
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
 
     @classmethod
     async def update_vip_state(
@@ -1818,6 +1847,34 @@ class EveMarketRegionHistoryStatisticDBUtils(_CommonUtils):
             result = await session.execute(stmt)
             return result.scalars().all()
 
+    @classmethod
+    async def get_records_by_type_ids(
+        cls,
+        type_ids: list[int],
+        region_id: int,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> list:
+        """
+        批量查询多个 type_id 在指定区域与日期范围内的历史统计数据。
+
+        :param type_ids: 物品类型ID列表
+        :param region_id: 区域ID
+        :param start_date: 起始日期（包含）
+        :param end_date: 结束日期（不包含）
+        :return: 查询结果记录列表（含 type_id 字段）
+        """
+        if not type_ids:
+            return []
+        async with get_postgres_manager().get_session() as session:
+            stmt = select(cls.cls_model).where(
+                cls.cls_model.type_id.in_(type_ids),
+                cls.cls_model.region_id == region_id,
+                cls.cls_model.date >= start_date,
+                cls.cls_model.date < end_date,
+            )
+            result = await session.execute(stmt)
+            return result.scalars().all()
     @classmethod
     async def get_latest_record(
         cls,
@@ -2617,6 +2674,38 @@ class EveOverviewHistoryDBUtils(_CommonUtils):
             )
             result = await session.execute(stmt)
             return result.scalars().first()
+
+    @classmethod
+    async def get_latest_overview_data_by_user_names(
+        cls, user_names: list[str]
+    ) -> dict[str, dict]:
+        """批量获取一组用户各自最新一条 overview 历史数据
+
+        用于仪表盘运营统计：Redis 实时缓存缺失时回退到历史快照。
+
+        Args:
+            user_names: 用户名列表
+
+        Returns:
+            {user_name: data_dict}，没有历史数据的用户不会出现在结果里
+        """
+        if not user_names:
+            return {}
+        async with get_postgres_manager().get_session() as session:
+            stmt = (
+                select(cls.cls_model)
+                .where(cls.cls_model.user_name.in_(user_names))
+                .order_by(
+                    cls.cls_model.user_name.asc(),
+                    cls.cls_model.date.desc(),
+                )
+            )
+            result = await session.execute(stmt)
+            latest: dict[str, dict] = {}
+            for row in result.scalars().all():
+                if row.user_name not in latest:
+                    latest[row.user_name] = row.data
+            return latest
 
     @classmethod
     async def get_overview_data_near_date(cls, user_name: str, target_date: date):

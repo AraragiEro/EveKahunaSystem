@@ -168,15 +168,15 @@ defineExpose({
 .hierarchy-tree-container {
   min-height: 400px;
   padding: 20px;
-  background: #fafafa;
+  background: var(--k-color-surface-soft);
   border-radius: 8px;
 }
 
 .hierarchy-tree {
-  background: #fff;
+  background: var(--k-color-surface);
   padding: 20px;
   border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--k-shadow-xs);
 }
 
 .tree-node {
@@ -188,7 +188,7 @@ defineExpose({
 .empty-tree {
   text-align: center;
   padding: 60px 20px;
-  color: #999;
+  color: var(--k-color-text-secondary);
   font-size: 14px;
 }
 </style>

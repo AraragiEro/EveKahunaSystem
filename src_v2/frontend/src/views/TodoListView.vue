@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Check, List, ArrowRight, CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
+import KCard from '@/components/k/KCard.vue'
 
 interface TodoItem {
   id: string
@@ -152,7 +153,7 @@ const toggleExpand = (id: string) => {
         当前TODO LIST
       </h1>
       <div class="progress-card">
-        <el-card shadow="hover" class="progress-stat-card">
+        <KCard class="progress-stat-card">
           <div class="progress-content">
             <div class="progress-info">
               <div class="progress-label">
@@ -171,15 +172,15 @@ const toggleExpand = (id: string) => {
             />
             <div class="progress-percentage">{{ progress.percentage }}%</div>
           </div>
-        </el-card>
+        </KCard>
       </div>
     </div>
 
     <div class="todo-list">
-      <el-card
+      <KCard
         v-for="item in todoItems"
         :key="item.id"
-        shadow="hover"
+        hover
         class="todo-card"
         :class="{ 'completed-card': item.completed }"
       >
@@ -247,7 +248,7 @@ const toggleExpand = (id: string) => {
             </div>
           </div>
         </div>
-      </el-card>
+      </KCard>
     </div>
   </div>
 </template>
@@ -284,14 +285,20 @@ const toggleExpand = (id: string) => {
   margin-bottom: 24px;
 }
 
-.progress-stat-card {
+/* 进度 hero 卡：深蓝渐变是刻意的「首屏强调」，用父级选择器提高权重压过 KCard 的 surface 底 */
+.progress-card .progress-stat-card {
   background: linear-gradient(135deg, #1f4ea1 0%, #205ea8 45%, #258ad0 100%);
-  border: 1px solid color-mix(in srgb, var(--k-color-primary) 30%, transparent);
-  color: white;
+  border-color: color-mix(in srgb, var(--k-color-primary) 30%, transparent);
+  color: var(--k-color-text-inverse);
 }
 
-.progress-stat-card :deep(.el-card__body) {
-  padding: 20px;
+/* 深色主题下这块固定蓝与全站紫色调冲突、亮度也过高：改成主题色压深的渐变 */
+[data-theme='dark'] .progress-card .progress-stat-card {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--k-color-primary) 52%, var(--k-color-shade)) 0%,
+    color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-shade)) 100%
+  );
 }
 
 .progress-content {
@@ -311,29 +318,29 @@ const toggleExpand = (id: string) => {
   font-size: 16px;
   font-weight: 500;
   margin-bottom: 8px;
-  color: rgba(255, 255, 255, 0.9);
+  color: color-mix(in srgb, var(--k-color-text-inverse) 90%, transparent);
 }
 
 .progress-text {
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.8);
+  color: color-mix(in srgb, var(--k-color-text-inverse) 80%, transparent);
   margin-bottom: 12px;
 }
 
 .progress-percentage {
   font-size: 24px;
   font-weight: 600;
-  color: white;
+  color: var(--k-color-text-inverse);
   min-width: 60px;
   text-align: right;
 }
 
 .progress-stat-card :deep(.el-progress-bar__outer) {
-  background-color: rgba(255, 255, 255, 0.3);
+  background-color: color-mix(in srgb, var(--k-color-text-inverse) 30%, transparent);
 }
 
 .progress-stat-card :deep(.el-progress-bar__inner) {
-  background-color: white;
+  background-color: var(--k-color-text-inverse);
 }
 
 .todo-list {
@@ -343,11 +350,8 @@ const toggleExpand = (id: string) => {
 }
 
 .todo-card {
-  transition: all 0.3s ease;
-  border-radius: var(--k-radius-md);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
   overflow: hidden;
-  border: 1px solid var(--k-color-border);
-  background: var(--k-color-surface);
 }
 
 .todo-card:hover {
@@ -359,7 +363,7 @@ const toggleExpand = (id: string) => {
   opacity: 0.85;
 }
 
-.completed-card :deep(.el-card__header) {
+.completed-card :deep(.k-card__header) {
   background-color: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface));
 }
 
@@ -431,7 +435,7 @@ const toggleExpand = (id: string) => {
 .child-item {
   padding: 12px;
   background-color: var(--k-color-surface-soft);
-  border-radius: 6px;
+  border-radius: var(--k-radius-sm);
   transition: all 0.2s ease;
 }
 

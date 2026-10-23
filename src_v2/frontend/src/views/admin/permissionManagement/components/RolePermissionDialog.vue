@@ -2,6 +2,8 @@
 import { ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/http'
+import KCard from '@/components/k/KCard.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
 import type { Role, Permission } from '../types'
 
 interface Props {
@@ -163,7 +165,7 @@ const handleBatchRemovePermissions = async () => {
     <div class="role-permission-content">
       <!-- 当前角色信息 -->
       <div class="current-role-info">
-        <el-card shadow="never" class="role-card">
+        <KCard class="role-card">
           <template #header>
             <div class="card-header">
               <span class="role-name">{{ role?.roleName }}</span>
@@ -173,11 +175,11 @@ const handleBatchRemovePermissions = async () => {
           <div class="role-description">
             {{ role?.roleDescription || '暂无描述' }}
           </div>
-        </el-card>
+        </KCard>
       </div>
 
       <!-- 角色权限区域 -->
-      <el-card shadow="never" class="permissions-card">
+      <KCard class="permissions-card">
         <template #header>
           <div class="card-header">
             <span>当前权限 ({{ rolePermissions.length }})</span>
@@ -195,7 +197,8 @@ const handleBatchRemovePermissions = async () => {
           >
             {{ permission }}
           </el-tag>
-          <div v-if="rolePermissions.length === 0" class="empty-text">暂无权限</div>
+          <KEmpty v-if="rolePermissions.length === 0" why="这个角色还没有任何权限" hint="在下方下拉框里选中后批量添加"
+            size="sm" inline />
         </div>
         <el-divider />
         <div class="add-permissions-section">
@@ -256,7 +259,7 @@ const handleBatchRemovePermissions = async () => {
             批量移除权限 ({{ rolePermissionForm.selectedPermissionsToRemove.length }})
           </el-button>
         </div>
-      </el-card>
+      </KCard>
     </div>
     <template #footer>
       <el-button @click="dialogVisible = false">关闭</el-button>
@@ -275,7 +278,7 @@ const handleBatchRemovePermissions = async () => {
 }
 
 .role-card {
-  border: 2px solid #409eff;
+  border: 2px solid var(--k-color-primary);
 }
 
 .card-header {
@@ -290,7 +293,7 @@ const handleBatchRemovePermissions = async () => {
 }
 
 .role-description {
-  color: #666;
+  color: var(--k-color-text-secondary);
   font-size: 14px;
 }
 
@@ -321,17 +324,11 @@ const handleBatchRemovePermissions = async () => {
   font-size: 14px;
   font-weight: bold;
   margin-bottom: 10px;
-  color: #333;
-}
-
-.empty-text {
-  color: #999;
-  font-size: 14px;
-  padding: 10px 0;
+  color: var(--k-color-text);
 }
 
 .permission-description-text {
-  color: #999;
+  color: var(--k-color-text-secondary);
   font-size: 12px;
 }
 </style>

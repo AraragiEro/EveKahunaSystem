@@ -33,18 +33,22 @@
               </el-tooltip>
             </td>
             <td class="action-cell">
-              <el-button type="primary" plain :size="cardStyleMode === 'compact' ? 'small' : undefined"
-                @click="handleModifyConfigFlow(item)">
-                修改
-              </el-button>
-              <el-button type="primary" plain :size="cardStyleMode === 'compact' ? 'small' : undefined"
-                @click="handleDeleteConfigFlowConfig(item)">
-                删除
-              </el-button>
+              <el-tooltip content="修改配置" placement="top">
+                <el-button text :icon="Edit" :size="cardStyleMode === 'compact' ? 'small' : undefined"
+                  aria-label="修改配置" @click="handleModifyConfigFlow(item)" />
+              </el-tooltip>
+              <el-tooltip content="删除配置" placement="top">
+                <el-button text type="danger" :icon="Delete"
+                  :size="cardStyleMode === 'compact' ? 'small' : undefined" aria-label="删除配置"
+                  @click="handleDeleteConfigFlowConfig(item)" />
+              </el-tooltip>
             </td>
           </tr>
         </tbody>
       </table>
+      <!-- 空态：列表为空时给「为什么空 + 下一步」，不再用 tbody::after 伪装文案 -->
+      <KEmpty v-if="!list.length" why="还没有配置流程" hint="从配置库把配置添加到计划后，这里会按配置顺序生成流程"
+        size="sm" inline />
     </el-scrollbar>
   </div>
 </template>
@@ -52,7 +56,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { http } from '@/http'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Edit } from '@element-plus/icons-vue'
+import KEmpty from '@/components/k/KEmpty.vue'
 
 interface PlanConfigObject {
   "config_id": number,
@@ -89,6 +95,20 @@ const configTypeMap = ref<{ [key: string]: string }>({
 })
 
 const handleDeleteConfigFlowConfig = async (item: PlanConfigObject) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除配置流程「${item.config_tag || item.config_id}」吗？此操作不可撤销。`,
+      '删除配置流程',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch {
+    // 用户取消
+    return
+  }
   emit('delete-config-flow', item)
 }
 
@@ -197,7 +217,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 }
 
 .table-header th:last-child {
-  width: 120px;
+  width: 84px;
 }
 
 .industry-plan-config-flow-table {
@@ -207,7 +227,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 .card-row {
   background: var(--k-color-surface);
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--k-shadow-sm);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   margin-bottom: 12px;
   display: table-row;
@@ -215,7 +235,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 }
 
 .card-row:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--k-shadow-sm);
   transform: translateY(-2px);
   background: var(--k-color-surface);
 }
@@ -276,38 +296,36 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 }
 
 .config-description-text {
-  line-height: 1.6;
+  line-height: 1.55;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: block;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
   width: 100%;
   cursor: help;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--k-font-sm);
+  font-weight: 500;
   color: var(--k-color-text);
-  /* 单行显示，超出部分用省略号，完整内容通过 tooltip 显示 */
 }
 
 .action-cell {
-  width: 110px;
-  min-width: 110px;
-  max-width: 110px;
+  width: 84px;
+  min-width: 84px;
+  max-width: 84px;
   text-align: right;
   white-space: nowrap;
 }
 
 .action-cell .el-button {
-  margin-left: 8px;
-  transition: all 0.2s;
+  width: 30px;
+  padding: 0;
+  margin-left: 4px;
+  transition: color 0.2s ease;
 }
 
 .action-cell .el-button:first-child {
   margin-left: 0;
-}
-
-.action-cell .el-button:hover {
-  transform: scale(1.05);
 }
 
 .compact-mode .action-cell {
@@ -331,7 +349,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 
 .card-row.sortable-drag {
   opacity: 0.8;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--k-shadow-md);
 }
 
 /* 响应式设计 */
@@ -386,24 +404,17 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
   }
 }
 
-/* 空状态优化 */
-.industry-plan-config-flow-table:empty::after {
-  content: '暂无配置';
-  display: block;
-  text-align: center;
-  padding: 40px;
-  color: var(--k-color-text-secondary);
-  font-size: 14px;
-}
+/* 空态已交给 KEmpty 组件（模板里 v-if="!list.length"），这里不再用 :empty 伪元素
+   伪造「暂无配置」文案——伪元素既不可访问，也无法承载下一步说明。 */
 
 /* 隐藏横向滚动条 */
 :deep(.el-scrollbar__bar.is-horizontal) {
-  display: none !important;
+  display: none;
 }
 
 /* 确保内容不会超出容器，禁止横向滚动 */
 :deep(.el-scrollbar__wrap) {
-  overflow-x: hidden !important;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -414,119 +425,115 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
   white-space: normal;
 }
 
-/* Theme override */
+/* Theme override
+   这一段与文件前半部分的自有选择器完全同权重，靠「写在后面」取胜即可，
+   不需要强制优先级；只有会和 theme.css 里带强制优先级的通用规则抢的声明
+   （标签边框色、行尾按钮的文字色）才保留。 */
 .table-container,
 .card-table,
 .card-row,
 .table-header,
 .industry-plan-config-flow-table {
-  background: var(--k-color-surface) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text) !important;
+  background: var(--k-color-surface);
+  border-color: var(--k-color-border);
+  color: var(--k-color-text);
 }
 
 .table-header th,
 .config-description {
-  color: var(--k-color-text-secondary) !important;
+  color: var(--k-color-text-secondary);
 }
 
 .config-type-name,
 .config-description-text {
-  color: var(--k-color-text) !important;
+  color: var(--k-color-text);
 }
 
 .card-row {
-  box-shadow: var(--k-shadow-sm) !important;
+  box-shadow: var(--k-shadow-sm);
 }
 
 .card-row:hover {
-  box-shadow: var(--k-shadow-md) !important;
-  background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+  box-shadow: var(--k-shadow-md);
+  background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft));
 }
 
+/* 每个标签都同时带 .config-type-tag-* 分组类，下面分组规则同权重且更靠后，
+   这里的 border-color / color 永远不会生效，遂去掉强制优先级。 */
 :deep(.el-tag) {
-  border-color: color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-border)) !important;
-  color: var(--k-color-text) !important;
+  border-color: color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-border));
+  color: var(--k-color-text);
 }
 
 :deep(.config-type-tag) {
-  border-width: 1px !important;
-  border-style: solid !important;
+  border-width: 1px;
+  border-style: solid;
 }
 
-:deep(.config-type-tag-StructureRigConfig) {
-  background: color-mix(in srgb, #3b82f6 18%, var(--k-color-surface-soft)) !important;
-  border-color: color-mix(in srgb, #3b82f6 42%, var(--k-color-border)) !important;
-  color: color-mix(in srgb, #3b82f6 78%, var(--k-color-text)) !important;
-}
-
+/* 配置类型标签收敛到 4 个色系：结构=主色、材料=成功色、规则=警示色、中性=灰
+   边框色保留强制优先级：theme.css 用 `html .el-tag` 统一标签边框色（并在持续收敛权重），
+   保留强压可确保全局规则一收紧也不会把上面的分组配色盖掉；背景/文字色没有对手，去掉。 */
+:deep(.config-type-tag-StructureRigConfig),
 :deep(.config-type-tag-StructureAssignConf) {
-  background: color-mix(in srgb, #22c55e 18%, var(--k-color-surface-soft)) !important;
-  border-color: color-mix(in srgb, #22c55e 42%, var(--k-color-border)) !important;
-  color: color-mix(in srgb, #22c55e 78%, var(--k-color-text)) !important;
+  background: color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface-soft));
+  border-color: color-mix(in srgb, var(--k-color-primary) 38%, var(--k-color-border)) !important;
+  color: color-mix(in srgb, var(--k-color-primary) 78%, var(--k-color-text));
 }
 
-:deep(.config-type-tag-MaterialTagConf) {
-  background: color-mix(in srgb, #f59e0b 18%, var(--k-color-surface-soft)) !important;
-  border-color: color-mix(in srgb, #f59e0b 42%, var(--k-color-border)) !important;
-  color: color-mix(in srgb, #f59e0b 78%, var(--k-color-text)) !important;
-}
-
-:deep(.config-type-tag-DefaultBlueprintConf) {
-  background: color-mix(in srgb, #ef4444 18%, var(--k-color-surface-soft)) !important;
-  border-color: color-mix(in srgb, #ef4444 42%, var(--k-color-border)) !important;
-  color: color-mix(in srgb, #ef4444 78%, var(--k-color-text)) !important;
-}
-
+:deep(.config-type-tag-MaterialTagConf),
 :deep(.config-type-tag-LoadAssetConf) {
-  background: color-mix(in srgb, #14b8a6 18%, var(--k-color-surface-soft)) !important;
-  border-color: color-mix(in srgb, #14b8a6 42%, var(--k-color-border)) !important;
-  color: color-mix(in srgb, #14b8a6 78%, var(--k-color-text)) !important;
+  background: color-mix(in srgb, var(--k-color-success) 16%, var(--k-color-surface-soft));
+  border-color: color-mix(in srgb, var(--k-color-success) 36%, var(--k-color-border)) !important;
+  color: color-mix(in srgb, var(--k-color-success) 74%, var(--k-color-text));
+}
+
+:deep(.config-type-tag-TaxConfig),
+:deep(.config-type-tag-DefaultBlueprintConf) {
+  background: color-mix(in srgb, var(--k-color-warning) 16%, var(--k-color-surface-soft));
+  border-color: color-mix(in srgb, var(--k-color-warning) 36%, var(--k-color-border)) !important;
+  color: color-mix(in srgb, var(--k-color-warning) 72%, var(--k-color-text));
 }
 
 :deep(.config-type-tag-MaxJobSplitCountConf) {
-  background: color-mix(in srgb, #8b5cf6 18%, var(--k-color-surface-soft)) !important;
-  border-color: color-mix(in srgb, #8b5cf6 42%, var(--k-color-border)) !important;
-  color: color-mix(in srgb, #8b5cf6 78%, var(--k-color-text)) !important;
+  background: var(--k-color-surface-soft);
+  border-color: var(--k-color-border) !important;
+  color: var(--k-color-text-secondary);
 }
 
-:deep(.config-type-tag-TaxConfig) {
-  background: color-mix(in srgb, #f97316 18%, var(--k-color-surface-soft)) !important;
-  border-color: color-mix(in srgb, #f97316 42%, var(--k-color-border)) !important;
-  color: color-mix(in srgb, #f97316 78%, var(--k-color-text)) !important;
-}
-
+/* 行尾操作是图标按钮，不再套用全局按钮的渐变外壳。
+   EP 的文本按钮最终取色自 --el-button-text-color，这里直接改这个变量最可靠。
+   结构性复位（边框/底色/阴影/圆角）由 theme.css 的 `.el-button.is-text` 已经给到
+   transparent / none，去掉强制优先级不会回退；文字色保留，否则会被全局文本按钮的
+   主色盖掉。 */
 .action-cell :deep(.el-button) {
-  border-radius: 9px !important;
-  border-width: 1px !important;
-  letter-spacing: 0.02em;
-  font-weight: 600;
-  background: linear-gradient(180deg,
-      color-mix(in srgb, var(--k-color-surface) 90%, var(--k-color-surface-soft)) 0%,
-      color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) 100%) !important;
-  border-color: color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border)) !important;
-  color: var(--k-color-text) !important;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 14%, transparent) !important;
+  --el-button-text-color: var(--k-color-text-secondary);
+  --el-button-hover-text-color: var(--k-color-primary);
+  border: none;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: var(--k-color-text-secondary) !important;
+  border-radius: var(--k-radius-xs);
 }
 
 .action-cell :deep(.el-button:hover) {
-  transform: translateY(-1px);
+  transform: none;
+  background: color-mix(in srgb, var(--k-color-primary) 14%, transparent) !important;
   color: var(--k-color-primary) !important;
-  border-color: color-mix(in srgb, var(--k-color-primary) 44%, var(--k-color-border)) !important;
-  background: linear-gradient(140deg,
-      color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface-soft)) 0%,
-      color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-border)),
-    0 8px 20px color-mix(in srgb, var(--k-color-primary) 28%, transparent) !important;
 }
 
-.action-cell :deep(.el-button--primary) {
-  color: #ffffff !important;
-  border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border)) !important;
-  background: linear-gradient(135deg,
-      color-mix(in srgb, var(--k-color-primary) 80%, #ffffff) 0%,
-      var(--k-color-primary) 58%,
-      color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
+/* 删除图标常态用压暗的危险色（直接打在 svg 上最稳），hover 才亮起来。
+   图标自身声明优先于继承色，不需要强制优先级。 */
+.action-cell :deep(.el-button.el-button--danger .el-icon),
+.action-cell :deep(.el-button.el-button--danger svg) {
+  color: color-mix(in srgb, var(--k-color-danger) 68%, var(--k-color-text-secondary));
+  fill: currentColor;
+}
+
+/* hover 态取色与 theme.css 的危险文本按钮完全一致（同为危险色 14% 叠加），
+   因此可以直接沿用 theme.css 的强制优先级声明。 */
+.action-cell :deep(.el-button.el-button--danger:hover) {
+  background: color-mix(in srgb, var(--k-color-danger) 14%, transparent);
+  color: var(--k-color-danger);
 }
 </style>

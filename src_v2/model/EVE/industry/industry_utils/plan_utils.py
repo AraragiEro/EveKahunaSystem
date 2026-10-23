@@ -490,7 +490,18 @@ async def update_plan_status(op: ConfigFlowOperateCenter, all_relation_list: Lis
 
     # 限制并发关系计算数量，防止 Redis 连接池耗尽（MaxConnectionsError）
     # 每个关系计算会调用多次 Redis（get_type_adjust_price 等），需严格控制并发
-    relation_semaphore = asyncio.Semaphore(20)
+    # 并发必须与子进程连接池对齐（2026-10-19 事故）：
+    # 子进程 SDE 池只有 pool_size=2+max_overflow=4，20 并发会把池占满，
+    # 让协程在信号量上无限等待 → 计算静默卡死。可用 [APP] CALC_RELATION_CONCURRENCY 覆盖。
+    try:
+        from src_v2.core.config.config import config as _calc_cfg
+        _default_concurrency = 5 if subprocess else 20
+        _relation_concurrency = max(
+            1, _calc_cfg.getint("APP", "CALC_RELATION_CONCURRENCY",
+                                fallback=_default_concurrency))
+    except Exception:
+        _relation_concurrency = 5 if subprocess else 20
+    relation_semaphore = asyncio.Semaphore(_relation_concurrency)
 
     async def relation_calculater_with_semaphore(relation: dict, product_node_in_relation: List[dict], same_route_relations: List[dict]):
         async with relation_semaphore:

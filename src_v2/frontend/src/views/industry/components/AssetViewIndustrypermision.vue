@@ -1,9 +1,11 @@
 <script setup lang="ts">
+/* eslint-disable @typescript-eslint/no-explicit-any -- 容器许可 / 搜索结果沿用后端原始结构（历史 any 契约），P2 只做 KTable 替换，未改数据契约 */
+import KTable from '@/components/k/KTable.vue'
 import { ref, onMounted, computed, watch } from 'vue'
 import { http } from '@/http'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { InputNumberInstance } from 'element-plus/lib/components/index.js'
-import { Loading, Edit } from '@element-plus/icons-vue'
+import { Edit } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
@@ -30,7 +32,7 @@ const fetchUserList = async () => {
             return
         }
         userList.value = data.data || []
-    } catch (error) {
+    } catch {
         ElMessage.error('获取用户列表失败')
     } finally {
         userListLoading.value = false
@@ -51,7 +53,6 @@ interface HandleSearchItemCountForm {
 }
 
 const handleSearchItemCountdialogVisible = ref(false)
-const handleSearchContainerdialogVisible = ref(false)
 const handleSearchItemCountdialogLoading = ref(false)
 const handleSearchItemCountForm = ref<HandleSearchItemCountForm>({
     item_name: '',
@@ -174,6 +175,21 @@ const getUserAllContainerPermission = async (force_refresh = false) => {
 }
 
 const handleDeleteIndustrypermision = async (row: any) => {
+    // 删除前二次确认，取消则直接返回
+    try {
+        await ElMessageBox.confirm(
+            '确定要删除该资产权限吗？删除后对应资产的可见/管理授权立即失效，此操作不可撤销。',
+            '删除确认',
+            {
+                type: 'warning',
+                confirmButtonText: '删除',
+                cancelButtonText: '取消',
+            },
+        )
+    } catch {
+        return
+    }
+
     const payload: any = {
         asset_owner_id: row.asset_owner_id,
         asset_container_id: row.asset_container_id
@@ -193,10 +209,6 @@ const handleDeleteIndustrypermision = async (row: any) => {
     ElMessage.success(data.message)
     await getUserAllContainerPermission(true)
     console.log("handleDeleteIndustrypermision", row)
-}
-
-const handleViewContent = (row: any) => {
-    console.log("handleViewContent", row)
 }
 
 // 编辑标签相关状态
@@ -238,7 +250,7 @@ const handleSaveTag = async () => {
         ElMessage.success(data.message)
         editTagDialogVisible.value = false
         await getUserAllContainerPermission(true)
-    } catch (error) {
+    } catch {
         ElMessage.error('修改标签失败')
     } finally {
         editTagLoading.value = false
@@ -379,7 +391,10 @@ onMounted(async () => {
             <el-button type="primary" @click="handleSearchContainer">刷新容器许可</el-button>
             <el-button type="primary" @click="handleSyncPermissionToPlanConfig"
                 :loading="syncPermissionToPlanConfigLoading">同步许可到计划配置</el-button>
-            <el-table :data="userContainerPermission" border v-loading="userContainerPermissionLoading">
+            <KTable :data="userContainerPermission" border v-loading="userContainerPermissionLoading"
+                density="compact"
+                empty-why="还没有容器许可"
+                empty-hint="先给角色授予容器权限，或点上方「刷新容器许可」">
                 <el-table-column label="资产类型" prop="owner_type" />
                 <el-table-column label="所有者" prop="owner_name" width="200" />
                 <el-table-column label="容器ID" prop="asset_container_id" />
@@ -389,7 +404,8 @@ onMounted(async () => {
                     <template #default="scope">
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <span>{{ scope.row.tag }}</span>
-                            <el-button size="small" :icon="Edit" @click="handleEditTag(scope.row)" />
+                            <el-button size="small" :icon="Edit" aria-label="编辑标签" title="编辑标签"
+                                @click="handleEditTag(scope.row)" />
                         </div>
                     </template>
                 </el-table-column>
@@ -404,11 +420,11 @@ onMounted(async () => {
                 </el-table-column>
                 <el-table-column label="操作" width="200">
                     <template #default="scope">
-                        <el-button type="primary" @click="handleDeleteIndustrypermision(scope.row)">删除</el-button>
+                        <el-button type="danger" @click="handleDeleteIndustrypermision(scope.row)">删除</el-button>
                         <!-- <el-button type="primary" @click="handleViewContent(scope.row)">查看内容</el-button> -->
                     </template>
                 </el-table-column>
-            </el-table>
+            </KTable>
         </div>
     </div>
 
@@ -422,8 +438,11 @@ onMounted(async () => {
                 搜索
             </el-button>
             <el-form-item label="搜索结果">
-                <el-table :data="handleSearchItemCountForm.data" border v-loading="handleSearchItemCountdialogLoading"
-                    max-height="700px">
+                <KTable :data="handleSearchItemCountForm.data" border v-loading="handleSearchItemCountdialogLoading"
+                    density="compact"
+                    max-height="700px"
+                    empty-why="还没有搜索到物品"
+                    empty-hint="输入物品名后点「搜索」，结果会显示在这里">
                     <el-table-column label="名称" prop="asset.type_name" />
                     <el-table-column label="数量" prop="asset.quantity" />
                     <el-table-column label="建筑">
@@ -447,7 +466,7 @@ onMounted(async () => {
                             <el-button type="primary" @click="handleAddIndustrypermision(scope.row)">新增</el-button>
                         </template>
                     </el-table-column>
-                </el-table>
+                </KTable>
             </el-form-item>
         </el-form>
     </el-dialog>

@@ -6,7 +6,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { VueDraggable } from 'vue-draggable-plus'
 import { haveRole } from '@/router/guards'
 import { useAuthStore } from '@/stores/auth'
-import { Setting, Document, RefreshLeft, Operation, DocumentAdd, FolderOpened, Tools, Edit, Share, Delete, Sort } from '@element-plus/icons-vue'
+import { Setting, Document, RefreshLeft, Operation, DocumentAdd, FolderOpened, Tools, Edit, Share, Delete, Sort, Grid } from '@element-plus/icons-vue'
+import KCard from '@/components/k/KCard.vue'
+import KTable from '@/components/k/KTable.vue'
 
 const authStore = useAuthStore()
 interface Props {
@@ -147,7 +149,21 @@ const addConfigToPlan = async (config: PlanConfigObject) => {
     // configFlowManagementVisible.value = false
 }
 
-const deleteConfigFlowConfig = async (configId: number) => {
+const deleteConfigFlowConfig = async (configId: number, configTag?: string) => {
+    try {
+        await ElMessageBox.confirm(
+            `确定要删除配置流程「${configTag || configId}」吗？此操作不可撤销。`,
+            '删除配置流程',
+            {
+                type: 'warning',
+                confirmButtonText: '删除',
+                cancelButtonText: '取消'
+            }
+        )
+    } catch {
+        // 用户取消
+        return
+    }
     const planInfo = await getPlanInfo()
     const requestData: any = {
         config_id: configId
@@ -1475,6 +1491,12 @@ const handleCardStyleModeChange = (value: 'normal' | 'compact') => {
     localStorage.setItem(STORAGE_KEY_CONFIGFLOW_CARD_STYLE, value)
 }
 
+
+/** 行距切换（与产品列表的「卡片密度」是两个独立设置） */
+const toggleRowDensity = () => {
+    handleCardStyleModeChange(cardStyleMode.value === 'compact' ? 'normal' : 'compact')
+}
+
 const configTypeColorMap = ref<{ [key: string]: string }>({
     "StructureRigConfig": "#9fcfff",
     "StructureAssignConf": "#baff97",
@@ -1489,60 +1511,68 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 <template>
     <div class="industry-plan-config-flow-container">
         <div class="icon-buttons-container">
+            <!-- 全部直出，保持原有点击路径；只把「行距」从文字开关收成图标（仍是一步可达）。
+                 el-tooltip 只是视觉提示，不进无障碍名称，所以每个纯图标按钮都单独给 aria-label。 -->
             <el-tooltip content="配置库管理" placement="top">
-                <el-button circle @click="openConfigFlowManagement" type="primary" plain>
+                <el-button circle aria-label="配置库管理" @click="openConfigFlowManagement" type="primary" plain>
                     <el-icon>
                         <Setting />
                     </el-icon>
                 </el-button>
             </el-tooltip>
             <el-tooltip content="保存当前配置" placement="top">
-                <el-button circle @click="saveConfigFlowToPlan" type="primary" plain>
+                <el-button circle aria-label="保存当前配置到计划" @click="saveConfigFlowToPlan" type="primary" plain>
                     <el-icon>
                         <Document />
                     </el-icon>
                 </el-button>
             </el-tooltip>
             <el-tooltip content="重置修改" placement="top">
-                <el-button circle @click="getConfigFlowList" type="warning" plain>
+                <el-button circle aria-label="重置修改（重新载入配置）" @click="getConfigFlowList" type="warning" plain>
                     <el-icon>
                         <RefreshLeft />
                     </el-icon>
                 </el-button>
             </el-tooltip>
             <el-tooltip content="整理配置" placement="top">
-                <el-button circle @click="sortConfigFlowList" type="info" plain>
+                <el-button circle aria-label="整理配置顺序" @click="sortConfigFlowList" type="info" plain>
                     <el-icon>
                         <Sort />
                     </el-icon>
                 </el-button>
             </el-tooltip>
             <el-tooltip content="保存为预设" placement="top">
-                <el-button circle @click="openSavePresetDialog" type="info" plain>
+                <el-button circle aria-label="保存为预设" @click="openSavePresetDialog" type="info" plain>
                     <el-icon>
                         <DocumentAdd />
                     </el-icon>
                 </el-button>
             </el-tooltip>
             <el-tooltip content="从预设加载" placement="top">
-                <el-button circle @click="openLoadPresetDialog" type="info" plain>
+                <el-button circle aria-label="从预设加载" @click="openLoadPresetDialog" type="info" plain>
                     <el-icon>
                         <FolderOpened />
                     </el-icon>
                 </el-button>
             </el-tooltip>
             <el-tooltip content="预设管理" placement="top">
-                <el-button circle @click="openPresetManagement" type="info" plain>
+                <el-button circle aria-label="预设管理" @click="openPresetManagement" type="info" plain>
                     <el-icon>
                         <Tools />
                     </el-icon>
                 </el-button>
             </el-tooltip>
-            <el-radio-group v-model="cardStyleMode" size="small" @change="handleCardStyleModeChange"
-                style="margin-left: 8px;">
-                <el-radio-button value="normal">普通</el-radio-button>
-                <el-radio-button value="compact">紧凑</el-radio-button>
-            </el-radio-group>
+
+            <!-- 行距切换：图标按钮 + tooltip，与左侧「卡片密度」区分开 -->
+            <div class="row-density-switch">
+                <el-tooltip :content="`表格行距：${cardStyleMode === 'compact' ? '紧凑' : '普通'}`" placement="top">
+                    <el-button circle aria-label="切换表格行距" @click="toggleRowDensity">
+                        <el-icon>
+                            <Grid />
+                        </el-icon>
+                    </el-button>
+                </el-tooltip>
+            </div>
         </div>
         <div style="flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column;">
             <VueDraggable v-model="configFlowList" target="tbody" :animation="150" style="height: 100%;">
@@ -1570,7 +1600,8 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                 </el-checkbox-group>
             </div>
             <div style="flex: 1; min-height: 0; overflow: auto;">
-                <el-table :data="filteredConfigList" style="width: 100%">
+                <KTable :data="filteredConfigList" style="width: 100%" empty-why="还没有可加入计划的配置"
+                    empty-hint="点上方「创建配置」新建一条，或拉取推荐预设">
                     <el-table-column label="配置类型" prop="config_type" width="150px">
                         <template #default="{ row }">
                             <el-tag
@@ -1604,13 +1635,14 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                                 <el-button type="primary" plain @click="addConfigToPlan(row)" v-else size="small">
                                     添加到计划
                                 </el-button>
-                                <el-button type="danger" plain @click="deleteConfigFlowConfig(row.config_id)" size="small">
+                                <el-button type="danger" plain
+                                    @click="deleteConfigFlowConfig(row.config_id, row.config_tag)" size="small">
                                     删除
                                 </el-button>
                             </div>
                         </template>
                     </el-table-column>
-                </el-table>
+                </KTable>
             </div>
         </div>
 
@@ -1640,12 +1672,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                 </el-button>
             </el-tooltip>
             <el-radio-group v-model="createConfigType" size="large" fill="var(--k-color-primary)">
-                <el-tooltips>
-                    <template #content>
-                        123
-                    </template>
-                    <el-radio-button label="建筑插件" value="StructureRigConfig" />
-                </el-tooltips>
+                <el-radio-button label="建筑插件" value="StructureRigConfig" />
                 <el-radio-button label="建筑分配" value="StructureAssignConf" />
                 <el-radio-button label="原材料标记" value="MaterialTagConf" />
                 <el-radio-button label="缺省蓝图参数" value="DefaultBlueprintConf" />
@@ -1681,7 +1708,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                         :fetch-suggestions="fetchStructureSuggestions" value-key="structure_name" />
                 </el-form-item>
 
-                <el-card v-for="group in configForm.StructureAssignConf.keyword_groups" :key="group.index">
+                <KCard v-for="group in configForm.StructureAssignConf.keyword_groups" :key="group.index">
                     <el-form-item label="分配类型">
                         <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
                             <el-option v-for="item in assignTypeOptions" :key="item.value" :label="item.label"
@@ -1697,7 +1724,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                         :disabled="configForm.StructureAssignConf.keyword_groups.length === 1">
                         删除组
                     </el-button>
-                </el-card>
+                </KCard>
                 <el-button @click="add_conf_group(createConfigType)">
                     增加组
                 </el-button>
@@ -1706,7 +1733,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
             <!-- 原材料标记配置 -->
             <el-form :model="configForm.MaterialTagConf" label-width="120px"
                 v-else-if="createConfigType === 'MaterialTagConf'">
-                <el-card v-for="group in configForm.MaterialTagConf.keyword_groups" :key="group.index">
+                <KCard v-for="group in configForm.MaterialTagConf.keyword_groups" :key="group.index">
                     <el-form-item label="原材料类型">
                         <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
                             <el-option v-for="item in assignTypeOptions" :key="item.value" :label="item.label"
@@ -1721,7 +1748,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                         :disabled="configForm.MaterialTagConf.keyword_groups.length === 1">
                         删除组
                     </el-button>
-                </el-card>
+                </KCard>
                 <el-button @click="add_conf_group(createConfigType)">
                     增加组
                 </el-button>
@@ -1730,7 +1757,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
             <!-- 缺省蓝图参数配置 -->
             <el-form :model="configForm.DefaultBlueprintConf" label-width="120px"
                 v-else-if="createConfigType === 'DefaultBlueprintConf'">
-                <el-card v-for="group in configForm.DefaultBlueprintConf.keyword_groups" :key="group.index">
+                <KCard v-for="group in configForm.DefaultBlueprintConf.keyword_groups" :key="group.index">
                     <el-form-item label="蓝图类型">
                         <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
                             <el-option v-for="item in assignTypeOptions" :key="item.value" :label="item.label"
@@ -1745,7 +1772,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                         :disabled="configForm.DefaultBlueprintConf.keyword_groups.length === 1">
                         删除组
                     </el-button>
-                </el-card>
+                </KCard>
                 <el-button @click="add_conf_group(createConfigType)">
                     增加组
                 </el-button>
@@ -1772,7 +1799,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
             <!-- 最大作业拆分控制配置 -->
             <el-form :model="configForm.MaxJobSplitCountConf" label-width="120px"
                 v-else-if="createConfigType === 'MaxJobSplitCountConf'">
-                <el-card v-for="group in configForm.MaxJobSplitCountConf.keyword_groups" :key="group.index">
+                <KCard v-for="group in configForm.MaxJobSplitCountConf.keyword_groups" :key="group.index">
                     <el-form-item label="作业类型">
                         <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
                             <el-option v-for="item in assignTypeOptions" :key="item.value" :label="item.label"
@@ -1787,7 +1814,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                         :disabled="configForm.MaxJobSplitCountConf.keyword_groups.length === 1">
                         删除组
                     </el-button>
-                </el-card>
+                </KCard>
                 <el-button @click="add_conf_group(createConfigType)">
                     增加组
                 </el-button>
@@ -1881,7 +1908,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                 <el-autocomplete v-model="modifyConfigForm.StructureAssignConf.structure_name"
                     :fetch-suggestions="fetchStructureSuggestions" value-key="structure_name" />
             </el-form-item>
-            <el-card v-for="group in modifyConfigForm.StructureAssignConf.keyword_groups" :key="group.index">
+            <KCard v-for="group in modifyConfigForm.StructureAssignConf.keyword_groups" :key="group.index">
                 <el-form-item label="分配类型">
                     <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
                         <el-option v-for="item in assignTypeOptions" :key="item.value" :label="item.label"
@@ -1896,7 +1923,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                     :disabled="modifyConfigForm.StructureAssignConf.keyword_groups.length === 1">
                     删除组
                 </el-button>
-            </el-card>
+            </KCard>
             <el-button @click="add_modify_conf_group(modifyConfigType)">
                 增加组
             </el-button>
@@ -1905,7 +1932,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
         <!-- 原材料标记配置 -->
         <el-form :model="modifyConfigForm.MaterialTagConf" label-width="120px"
             v-else-if="modifyConfigType === 'MaterialTagConf'">
-            <el-card v-for="group in modifyConfigForm.MaterialTagConf.keyword_groups" :key="group.index">
+            <KCard v-for="group in modifyConfigForm.MaterialTagConf.keyword_groups" :key="group.index">
                 <el-form-item label="原材料类型">
                     <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
                         <el-option v-for="item in assignTypeOptions" :key="item.value" :label="item.label"
@@ -1920,7 +1947,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                     :disabled="modifyConfigForm.MaterialTagConf.keyword_groups.length === 1">
                     删除组
                 </el-button>
-            </el-card>
+            </KCard>
             <el-button @click="add_modify_conf_group(modifyConfigType)">
                 增加组
             </el-button>
@@ -1929,7 +1956,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
         <!-- 缺省蓝图参数配置 -->
         <el-form :model="modifyConfigForm.DefaultBlueprintConf" label-width="120px"
             v-else-if="modifyConfigType === 'DefaultBlueprintConf'">
-            <el-card v-for="group in modifyConfigForm.DefaultBlueprintConf.keyword_groups" :key="group.index">
+            <KCard v-for="group in modifyConfigForm.DefaultBlueprintConf.keyword_groups" :key="group.index">
                 <el-form-item label="蓝图类型">
                     <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
                         <el-option v-for="item in assignTypeOptions" :key="item.value" :label="item.label"
@@ -1944,7 +1971,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                     :disabled="modifyConfigForm.DefaultBlueprintConf.keyword_groups.length === 1">
                     删除组
                 </el-button>
-            </el-card>
+            </KCard>
             <el-button @click="add_modify_conf_group(modifyConfigType)">
                 增加组
             </el-button>
@@ -1971,7 +1998,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
         <!-- 最大作业拆分控制配置 -->
         <el-form :model="modifyConfigForm.MaxJobSplitCountConf" label-width="120px"
             v-else-if="modifyConfigType === 'MaxJobSplitCountConf'">
-            <el-card v-for="group in modifyConfigForm.MaxJobSplitCountConf.keyword_groups" :key="group.index">
+            <KCard v-for="group in modifyConfigForm.MaxJobSplitCountConf.keyword_groups" :key="group.index">
                 <el-form-item label="作业类型">
                     <el-select v-model="group.keyword_type" placeholder="Select" style="width: 240px">
                         <el-option v-for="item in assignTypeOptions" :key="item.value" :label="item.label"
@@ -1986,7 +2013,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                     :disabled="modifyConfigForm.MaxJobSplitCountConf.keyword_groups.length === 1">
                     删除组
                 </el-button>
-            </el-card>
+            </KCard>
             <el-button @click="add_modify_conf_group(modifyConfigType)">
                 增加组
             </el-button>
@@ -2080,7 +2107,8 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
             </div>
             <!-- 预设列表表格 -->
             <div v-loading="loadingPresetManagement">
-                <el-table :data="presetManagementList" style="width: 100%">
+                <KTable :data="presetManagementList" style="width: 100%" empty-why="还没有保存的预设"
+                    empty-hint="在编辑预设的弹窗里点「保存当前配置」即可生成第一份预设">
                     <el-table-column label="预设名称" prop="preset_name" min-width="200">
                         <template #default="{ row }">
                             <div v-if="editingPresetId === row.id"
@@ -2094,6 +2122,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                             <div v-else style="display: flex; align-items: center; gap: 8px;">
                                 <span>{{ row.preset_name }}</span>
                                 <el-button size="small" type="primary" plain :icon="Edit" circle
+                                    aria-label="重命名预设" title="重命名预设"
                                     @click="startEditPresetName(row)" />
                             </div>
                         </template>
@@ -2113,7 +2142,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
                             </el-button>
                         </template>
                     </el-table-column>
-                </el-table>
+                </KTable>
             </div>
         </div>
     </el-dialog>
@@ -2206,7 +2235,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
     padding: 10px 12px;
     flex-shrink: 0;
     border: 1px solid color-mix(in srgb, var(--k-color-primary) 22%, var(--k-color-border));
-    border-radius: 10px;
+    border-radius: var(--k-radius-sm);
     background:
         linear-gradient(180deg,
             color-mix(in srgb, var(--k-color-surface) 95%, var(--k-color-surface-soft)) 0%,
@@ -2215,6 +2244,12 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 }
 
 /* 确保拖拽容器可以正确使用剩余空间 */
+.row-density-switch {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+}
+
 .industry-plan-config-flow-container> :deep(.vue-draggable-plus) {
     flex: 1;
     min-height: 0;
@@ -2223,32 +2258,34 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
     flex-direction: column;
 }
 
-/* Theme override */
+/* Theme override
+   抽屉/弹窗壳层的底色、描边、文字色与 theme.css 里 `.el-overlay .el-drawer*` /
+   `.el-overlay .el-dialog*` 的强制优先级规则同值，无需重复强压；
+   本文件自有容器类没有同权对手，靠书写顺序即可。 */
 .industry-plan-config-flow-container,
 .icon-buttons-container,
 :deep(.el-drawer__body),
 :deep(.el-drawer__header),
-:deep(.el-card),
 :deep(.el-dialog__body),
 :deep(.el-dialog__header) {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
+    background: var(--k-color-surface);
+    border-color: var(--k-color-border);
+    color: var(--k-color-text);
 }
 
 .industry-plan-config-flow-container {
     position: relative;
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--k-color-primary) 24%, var(--k-color-border)) !important;
+    border: 1px solid color-mix(in srgb, var(--k-color-primary) 24%, var(--k-color-border));
     border-radius: 12px;
     background:
         radial-gradient(circle at 10% 12%, color-mix(in srgb, var(--k-color-primary) 8%, transparent) 0%, transparent 34%),
         linear-gradient(155deg,
             color-mix(in srgb, var(--k-color-surface) 97%, var(--k-color-surface-soft)) 0%,
-            color-mix(in srgb, var(--k-color-primary) 3%, var(--k-color-surface)) 100%) !important;
+            color-mix(in srgb, var(--k-color-primary) 3%, var(--k-color-surface)) 100%);
     box-shadow:
         inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 10%, transparent),
-        0 8px 24px color-mix(in srgb, #0b1120 16%, transparent);
+        0 8px 24px color-mix(in srgb, var(--k-color-shade) 16%, transparent);
 }
 
 .industry-plan-config-flow-container::before {
@@ -2281,34 +2318,32 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 }
 
 .industry-plan-config-flow-container:hover {
-    border-color: color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-border)) !important;
+    border-color: color-mix(in srgb, var(--k-color-primary) 34%, var(--k-color-border));
     box-shadow:
         inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 18%, transparent),
         0 12px 30px color-mix(in srgb, var(--k-color-primary) 12%, transparent);
 }
 
-:deep(.el-drawer__header),
-:deep(.el-dialog__header) {
-    border-bottom: 1px solid var(--k-color-border) !important;
-}
+/* 抽屉/弹窗的头尾分隔线、页脚底色已由 theme.css 的
+   `.el-overlay .el-drawer__header/__footer`、`.el-overlay .el-dialog__header/__footer`
+   以同值声明提供，这里整段删除，避免同一份样式写两遍。
 
-:deep(.el-drawer__footer),
-:deep(.el-dialog__footer) {
-    border-top: 1px solid var(--k-color-border) !important;
-    background: var(--k-color-surface) !important;
-}
-
+   表单标签 / 单选按钮 / 卡片头的次要文字色：没有同权对手（theme.css 只对
+   `.el-overlay .el-dialog .el-form-item__label` 有强制优先级，且弹窗里本就被它盖过），
+   去掉强制优先级。 */
 :deep(.el-form-item__label),
-:deep(.el-radio-button__inner),
-:deep(.el-card__header) {
-    color: var(--k-color-text-secondary) !important;
+:deep(.el-radio-button__inner) {
+    color: var(--k-color-text-secondary);
 }
 
+/* 按钮皮肤必须保留强制优先级：theme.css 的 `.el-button--primary/--danger/…` 与
+   `.el-button.is-text` 都带强制优先级，普通声明压不住（theme.css 归 Lead 独占）。
+   但 border-radius / border-width 在 theme.css 里是普通声明，这里可以去掉。 */
 :deep(.el-button) {
     position: relative;
     overflow: hidden;
-    border-radius: 10px !important;
-    border-width: 1px !important;
+    border-radius: var(--k-radius-sm);
+    border-width: 1px;
     letter-spacing: 0.02em;
     font-weight: 600;
     background: linear-gradient(180deg,
@@ -2335,27 +2370,27 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 }
 
 :deep(.el-button--primary) {
-    color: #ffffff !important;
+    color: var(--k-color-text-inverse) !important;
     border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border)) !important;
     background: linear-gradient(135deg,
-            color-mix(in srgb, var(--k-color-primary) 80%, #ffffff) 0%,
+            color-mix(in srgb, var(--k-color-primary) 80%, var(--k-color-tint)) 0%,
             var(--k-color-primary) 58%,
-            color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
+            color-mix(in srgb, var(--k-color-primary) 78%, var(--k-color-shade)) 100%) !important;
 }
 
 :deep(.el-button--warning) {
-    color: #1d1300 !important;
+    color: var(--k-color-on-warning) !important;
     border-color: color-mix(in srgb, var(--k-color-warning) 62%, var(--k-color-border)) !important;
     background: linear-gradient(135deg,
-            color-mix(in srgb, var(--k-color-warning) 82%, #ffffff) 0%,
+            color-mix(in srgb, var(--k-color-warning) 82%, var(--k-color-tint)) 0%,
             var(--k-color-warning) 100%) !important;
 }
 
 :deep(.el-button--danger) {
-    color: #ffffff !important;
+    color: var(--k-color-text-inverse) !important;
     border-color: color-mix(in srgb, var(--k-color-danger) 62%, var(--k-color-border)) !important;
     background: linear-gradient(135deg,
-            color-mix(in srgb, var(--k-color-danger) 80%, #ffffff) 0%,
+            color-mix(in srgb, var(--k-color-danger) 80%, var(--k-color-tint)) 0%,
             var(--k-color-danger) 100%) !important;
 }
 
@@ -2364,7 +2399,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 :deep(.el-button--link) {
     border-color: transparent !important;
     background: transparent !important;
-    color: color-mix(in srgb, var(--k-color-primary) 86%, #ffffff) !important;
+    color: color-mix(in srgb, var(--k-color-primary) 86%, var(--k-color-tint)) !important;
     box-shadow: none !important;
 }
 
@@ -2387,47 +2422,51 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
     background: color-mix(in srgb, var(--k-color-primary) 16%, var(--k-color-surface-soft)) !important;
 }
 
+/* 单选按钮组：本组件里的 radio 只出现在抽屉（不是 .el-dialog）中，
+   theme.css 对它的强制优先级规则限定在 `.el-overlay .el-dialog` 内，不会命中；
+   其余对手都是 EP 自身 (0,1,0)~(0,3,0) 的基础规则，靠权重即可胜出，
+   因此整组去掉强制优先级（状态选择器 :checked / :disabled 权重也都低于这里）。 */
 :deep(.el-radio-button__inner) {
-    border-radius: 10px !important;
-    border-width: 1px !important;
+    border-radius: var(--k-radius-sm);
+    border-width: 1px;
     letter-spacing: 0.02em;
     font-weight: 600;
-    color: var(--k-color-text-secondary) !important;
+    color: var(--k-color-text-secondary);
     background: linear-gradient(180deg,
             color-mix(in srgb, var(--k-color-surface) 90%, var(--k-color-surface-soft)) 0%,
-            color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) 100%) !important;
-    border-color: color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border)) !important;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 14%, transparent) !important;
+            color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) 100%);
+    border-color: color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 14%, transparent);
     transition: transform 0.2s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
 }
 
 :deep(.el-radio-button__inner:hover) {
     transform: translateY(-1px);
-    color: var(--k-color-primary) !important;
-    border-color: color-mix(in srgb, var(--k-color-primary) 44%, var(--k-color-border)) !important;
+    color: var(--k-color-primary);
+    border-color: color-mix(in srgb, var(--k-color-primary) 44%, var(--k-color-border));
     background: linear-gradient(140deg,
             color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface-soft)) 0%,
-            color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
+            color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%);
 }
 
 :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
-    color: #ffffff !important;
-    border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border)) !important;
+    color: var(--k-color-text-inverse);
+    border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border));
     background: linear-gradient(135deg,
-            color-mix(in srgb, var(--k-color-primary) 80%, #ffffff) 0%,
+            color-mix(in srgb, var(--k-color-primary) 80%, var(--k-color-tint)) 0%,
             var(--k-color-primary) 58%,
-            color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
+            color-mix(in srgb, var(--k-color-primary) 78%, var(--k-color-shade)) 100%);
     box-shadow:
             0 0 0 1px color-mix(in srgb, var(--k-color-primary) 34%, transparent),
-            0 8px 20px color-mix(in srgb, var(--k-color-primary) 24%, transparent) !important;
+            0 8px 20px color-mix(in srgb, var(--k-color-primary) 24%, transparent);
 }
 
 :deep(.el-radio-button.is-disabled .el-radio-button__inner) {
     opacity: 0.62;
-    color: var(--k-color-text-secondary) !important;
-    background: color-mix(in srgb, var(--k-color-surface-soft) 84%, var(--k-color-surface)) !important;
-    border-color: var(--k-color-border) !important;
-    box-shadow: none !important;
+    color: var(--k-color-text-secondary);
+    background: color-mix(in srgb, var(--k-color-surface-soft) 84%, var(--k-color-surface));
+    border-color: var(--k-color-border);
+    box-shadow: none;
 }
 
 :deep(.el-form-item__content [style*='width: 240px']) {
@@ -2435,64 +2474,58 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
     max-width: 100% !important;
 }
 
+/* 抽屉壳层底色/描边/文字色：与 theme.css `.el-overlay .el-drawer*` 同值，
+   去掉强制优先级不会回退；`.el-overlay-dialog` 无同权对手。 */
 :deep(.el-drawer),
 :deep(.el-drawer__body),
 :deep(.el-drawer__header),
 :deep(.el-drawer__footer),
 :deep(.el-overlay-dialog) {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
+    background: var(--k-color-surface);
+    border-color: var(--k-color-border);
+    color: var(--k-color-text);
 }
 
+/* 标签的基础边框宽/线型与 EP 默认值一致，不需要强制优先级 */
 :deep(.el-table .config-type-tag),
 :deep(.config-type-tag) {
-    border-width: 1px !important;
-    border-style: solid !important;
+    border-width: 1px;
+    border-style: solid;
 }
 
-:deep(.config-type-tag-StructureRigConfig) {
-    background: color-mix(in srgb, #3b82f6 18%, var(--k-color-surface-soft)) !important;
-    border-color: color-mix(in srgb, #3b82f6 42%, var(--k-color-border)) !important;
-    color: color-mix(in srgb, #3b82f6 78%, var(--k-color-text)) !important;
-}
-
+/* 配置类型标签：与 industryPlanConfigFlowTable.vue 保持一致，收敛到 4 个色系
+   结构=主色 / 材料=成功色 / 规则参数=警示色 / 中性=灰
+   边框色保留强制优先级（theme.css 用 `html .el-tag` 统一标签边框色并在持续收敛权重，
+   保留强压可确保全局规则一收紧也不会把分组配色盖掉），背景与文字色没有对手，去掉。 */
+:deep(.config-type-tag-StructureRigConfig),
 :deep(.config-type-tag-StructureAssignConf) {
-    background: color-mix(in srgb, #22c55e 18%, var(--k-color-surface-soft)) !important;
-    border-color: color-mix(in srgb, #22c55e 42%, var(--k-color-border)) !important;
-    color: color-mix(in srgb, #22c55e 78%, var(--k-color-text)) !important;
+    background: color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface-soft));
+    border-color: color-mix(in srgb, var(--k-color-primary) 38%, var(--k-color-border)) !important;
+    color: color-mix(in srgb, var(--k-color-primary) 78%, var(--k-color-text));
 }
 
-:deep(.config-type-tag-MaterialTagConf) {
-    background: color-mix(in srgb, #f59e0b 18%, var(--k-color-surface-soft)) !important;
-    border-color: color-mix(in srgb, #f59e0b 42%, var(--k-color-border)) !important;
-    color: color-mix(in srgb, #f59e0b 78%, var(--k-color-text)) !important;
-}
-
-:deep(.config-type-tag-DefaultBlueprintConf) {
-    background: color-mix(in srgb, #ef4444 18%, var(--k-color-surface-soft)) !important;
-    border-color: color-mix(in srgb, #ef4444 42%, var(--k-color-border)) !important;
-    color: color-mix(in srgb, #ef4444 78%, var(--k-color-text)) !important;
-}
-
+:deep(.config-type-tag-MaterialTagConf),
 :deep(.config-type-tag-LoadAssetConf) {
-    background: color-mix(in srgb, #14b8a6 18%, var(--k-color-surface-soft)) !important;
-    border-color: color-mix(in srgb, #14b8a6 42%, var(--k-color-border)) !important;
-    color: color-mix(in srgb, #14b8a6 78%, var(--k-color-text)) !important;
+    background: color-mix(in srgb, var(--k-color-success) 16%, var(--k-color-surface-soft));
+    border-color: color-mix(in srgb, var(--k-color-success) 36%, var(--k-color-border)) !important;
+    color: color-mix(in srgb, var(--k-color-success) 74%, var(--k-color-text));
+}
+
+:deep(.config-type-tag-TaxConfig),
+:deep(.config-type-tag-DefaultBlueprintConf) {
+    background: color-mix(in srgb, var(--k-color-warning) 16%, var(--k-color-surface-soft));
+    border-color: color-mix(in srgb, var(--k-color-warning) 36%, var(--k-color-border)) !important;
+    color: color-mix(in srgb, var(--k-color-warning) 72%, var(--k-color-text));
 }
 
 :deep(.config-type-tag-MaxJobSplitCountConf) {
-    background: color-mix(in srgb, #8b5cf6 18%, var(--k-color-surface-soft)) !important;
-    border-color: color-mix(in srgb, #8b5cf6 42%, var(--k-color-border)) !important;
-    color: color-mix(in srgb, #8b5cf6 78%, var(--k-color-text)) !important;
+    background: var(--k-color-surface-soft);
+    border-color: var(--k-color-border) !important;
+    color: var(--k-color-text-secondary);
 }
 
-:deep(.config-type-tag-TaxConfig) {
-    background: color-mix(in srgb, #f97316 18%, var(--k-color-surface-soft)) !important;
-    border-color: color-mix(in srgb, #f97316 42%, var(--k-color-border)) !important;
-    color: color-mix(in srgb, #f97316 78%, var(--k-color-text)) !important;
-}
-
+/* 抽屉内的表格/表单文字色：theme.css 对表格只统一了背景与分隔线（未定 color），
+   这里靠权重即可生效。 */
 :deep(.el-drawer .el-table),
 :deep(.el-drawer .el-table .cell),
 :deep(.el-drawer .el-table td),
@@ -2505,7 +2538,7 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 :deep(.el-drawer .el-input__inner),
 :deep(.el-drawer .el-textarea__inner),
 :deep(.el-drawer .el-select__selected-item) {
-    color: var(--k-color-text) !important;
+    color: var(--k-color-text);
 }
 
 :deep(.el-drawer .el-table th .cell),
@@ -2515,5 +2548,17 @@ const configTypeColorMap = ref<{ [key: string]: string }>({
 :deep(.el-drawer [style*='color: #909399']),
 :deep(.el-drawer [style*='color:#909399']) {
     color: var(--k-color-text-secondary) !important;
+}
+
+/* ── P2-C ≤1280 窄屏兜底 ─────────────────────────────────
+   只降级布局，不动基础规则：1281+ 一个字都不变。
+   报表区在 1280 下约 330px，8 个圆形图标按钮排一行需要 ~326px，
+   原来 nowrap 会把最后一个按钮裁掉；这里允许折行 + 收紧间距，
+   够宽时仍是一行（flex-wrap 不影响放得下的情况）。 */
+@media (max-width: 1280px) {
+    .icon-buttons-container {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
 }
 </style>

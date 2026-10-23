@@ -1,4 +1,7 @@
 <script setup lang="ts">
+/* eslint-disable @typescript-eslint/no-explicit-any -- 劳动力数据沿用后端原始结构（历史 any 契约），P2 只做 KCard/KTable 收敛，未改数据契约 */
+import KTable from '@/components/k/KTable.vue'
+import KCard from '@/components/k/KCard.vue'
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
@@ -616,12 +619,7 @@ onUnmounted(() => {
 <template>
     <div class="labor-view">
         <!-- 工资配置区域 -->
-        <el-card shadow="never" class="config-card">
-            <template #header>
-                <div class="card-header">
-                    <span>工资配置（每天工资）</span>
-                </div>
-            </template>
+        <KCard class="config-card" title="工资配置（每天工资）">
             <el-form :inline="false">
                 <el-row :gutter="20">
                     <el-col :span="12">
@@ -650,16 +648,13 @@ onUnmounted(() => {
                     </el-col>
                 </el-row>
             </el-form>
-        </el-card>
+        </KCard>
 
         <!-- 工资表格 -->
-        <el-card shadow="never" class="table-card">
-            <template #header>
-                <div class="card-header">
-                    <span>劳动力工资汇总</span>
-                </div>
-            </template>
-            <el-table
+        <KCard class="table-card" title="劳动力工资汇总">
+            <KTable
+            show-summary
+            :summary-method="laborSummaryMethod"
                 :data="laborSummary"
                 border
                 max-height="400px">
@@ -685,7 +680,7 @@ onUnmounted(() => {
                         </div>
                     </template>
                 </el-table-column>
-                <el-table-column label="总工资" prop="total_salary" width="150">
+                <el-table-column label="总工资" prop="total_salary" width="150" align="right">
                     <template #default="{ row }">
                         <div 
                             class="copyable-cell" 
@@ -696,7 +691,7 @@ onUnmounted(() => {
                         </div>
                     </template>
                 </el-table-column>
-                <el-table-column label="工资" prop="salary_only" width="150">
+                <el-table-column label="工资" prop="salary_only" width="150" align="right">
                     <template #default="{ row }">
                         <div 
                             class="copyable-cell" 
@@ -707,7 +702,7 @@ onUnmounted(() => {
                         </div>
                     </template>
                 </el-table-column>
-                <el-table-column label="总成本" prop="total_cost" width="150">
+                <el-table-column label="总成本" prop="total_cost" width="150" align="right">
                     <template #default="{ row }">
                         <div 
                             class="copyable-cell" 
@@ -718,7 +713,7 @@ onUnmounted(() => {
                         </div>
                     </template>
                 </el-table-column>
-                <el-table-column label="总时长(秒)" prop="total_duration" width="150">
+                <el-table-column label="总时长(秒)" prop="total_duration" width="150" align="right">
                     <template #default="{ row }">
                         <div 
                             class="copyable-cell" 
@@ -729,7 +724,7 @@ onUnmounted(() => {
                         </div>
                     </template>
                 </el-table-column>
-                <el-table-column label="工资占比" prop="salary_percentage" width="120">
+                <el-table-column label="工资占比" prop="salary_percentage" width="120" align="right">
                     <template #default="{ row }">
                         <div 
                             class="copyable-cell" 
@@ -750,20 +745,20 @@ onUnmounted(() => {
                         </div>
                     </template>
                 </el-table-column>
-            </el-table>
-        </el-card>
+            </KTable>
+        </KCard>
 
         <!-- 图表区域 -->
         <el-row :gutter="20" class="charts-row">
             <el-col :span="12">
-                <el-card shadow="never" class="chart-card">
+                <KCard class="chart-card">
                     <div ref="salaryChartRef" class="chart-container"></div>
-                </el-card>
+                </KCard>
             </el-col>
             <el-col :span="12">
-                <el-card shadow="never" class="chart-card">
+                <KCard class="chart-card">
                     <div ref="costSalaryChartRef" class="chart-container"></div>
-                </el-card>
+                </KCard>
             </el-col>
         </el-row>
     </div>
@@ -779,32 +774,18 @@ onUnmounted(() => {
 .chart-card {
     margin-bottom: 20px;
     border-radius: 8px;
-    border: 1px solid #e4e7ed;
+    border: 1px solid var(--k-color-border);
 }
 
 .card-header {
     font-size: 16px;
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-text);
 }
 
 .copyable-cell {
     cursor: pointer;
     user-select: none;
-    padding: 4px 8px;
-    margin: -4px -8px;
-    border-radius: 4px;
-    transition: all 0.2s;
-}
-
-.copyable-cell:hover {
-    background-color: #f0f9ff;
-    color: #409eff;
-}
-
-.copyable-cell:active {
-    background-color: #e1f5ff;
-    transform: scale(0.98);
 }
 
 .activity-item {
@@ -814,12 +795,12 @@ onUnmounted(() => {
 
 .activity-name {
     font-weight: 600;
-    color: #606266;
+    color: var(--k-color-text-secondary);
     margin-right: 4px;
 }
 
 .activity-value {
-    color: #909399;
+    color: var(--k-color-text-secondary);
     margin-right: 8px;
 }
 
@@ -834,49 +815,5 @@ onUnmounted(() => {
 
 :deep(.el-form-item) {
     margin-bottom: 0;
-}
-
-/* Theme override */
-.labor-view,
-.config-card,
-.table-card,
-.chart-card {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
-}
-
-.card-header,
-.activity-name {
-    color: var(--k-color-text) !important;
-}
-
-.activity-value {
-    color: var(--k-color-text-secondary) !important;
-}
-
-.copyable-cell:hover {
-    background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
-    color: var(--k-color-primary) !important;
-}
-
-:deep(.el-card),
-:deep(.el-card__header),
-:deep(.el-card__body),
-:deep(.el-form-item__label),
-:deep(.el-input__wrapper),
-:deep(.el-input-number .el-input__wrapper),
-:deep(.el-input-number__decrease),
-:deep(.el-input-number__increase),
-:deep(.el-table),
-:deep(.el-table th.el-table__cell),
-:deep(.el-table td.el-table__cell) {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
-}
-
-:deep(.el-table th.el-table__cell) {
-    background: var(--k-color-surface-soft) !important;
 }
 </style>

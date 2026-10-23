@@ -3,6 +3,9 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { http } from '@/http'
 import { ElMessage } from 'element-plus'
+import KCard from '@/components/k/KCard.vue'
+import KTable from '@/components/k/KTable.vue'
+import KStat from '@/components/k/KStat.vue'
 
 // ======================= 类型定义 =====================
 interface EstimateItem {
@@ -415,14 +418,16 @@ onUnmounted(() => {
         </el-alert>
 
         <!-- 结果表格 -->
-        <el-card class="result-card">
-          <el-table
+        <KCard class="result-card" flush>
+          <KTable
             :data="estimateResult.items"
             :row-class-name="tableRowClassName"
             border
             stripe
             max-height="500"
             style="width: 100%"
+            empty-why="还没有可估价的物品"
+            empty-hint="上方粘贴内容后点「开始估算」"
           >
             <el-table-column
               v-for="col in tableColumns"
@@ -475,27 +480,28 @@ onUnmounted(() => {
                 </template>
               </template>
             </el-table-column>
-          </el-table>
-        </el-card>
+          </KTable>
+        </KCard>
 
         <!-- 汇总 -->
-        <el-card shadow="hover" class="statistics-card">
+        <KCard class="statistics-card">
           <el-row :gutter="16">
             <el-col :xs="24" :sm="12" :md="6" v-for="card in priceCards" :key="card.label" class="statistic-col">
-              <div class="statistic-item" :class="card.accent ? 'accent' : ''" @click="copyPrice(card.value)">
-                <el-statistic :value="card.display" suffix=" ISK">
-                  <template #title>
-                    <span class="statistic-title">{{ card.label }}</span>
-                  </template>
-                </el-statistic>
-              </div>
+              <KStat
+                class="statistic-item"
+                :class="card.accent ? 'accent' : ''"
+                :label="card.label"
+                :value="card.display"
+                unit="ISK"
+                @click="copyPrice(card.value)"
+              />
             </el-col>
           </el-row>
-        </el-card>
+        </KCard>
       </template>
 
       <!-- 输入区域 -->
-      <el-card class="input-card">
+      <KCard class="input-card">
         <div class="input-area">
           <el-input
             v-model="inputText"
@@ -530,7 +536,7 @@ onUnmounted(() => {
             </el-button>
           </div>
         </div>
-      </el-card>
+      </KCard>
     </el-main>
   </el-container>
 </template>
@@ -568,18 +574,10 @@ onUnmounted(() => {
 
 .input-card {
   margin-top: 16px;
-  background: var(--k-color-surface);
-  border: 1px solid var(--k-color-border);
-  border-radius: 12px;
-  box-shadow: var(--k-shadow-sm);
 }
 
 .result-card {
   margin-bottom: 16px;
-  background: var(--k-color-surface);
-  border: 1px solid var(--k-color-border);
-  border-radius: 12px;
-  box-shadow: var(--k-shadow-sm);
 }
 
 .input-area {
@@ -659,12 +657,6 @@ onUnmounted(() => {
 
 .statistics-card {
   margin-bottom: 16px;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.statistics-card :deep(.el-card__body) {
-  padding: 16px 20px;
 }
 
 .statistic-col {
@@ -673,16 +665,16 @@ onUnmounted(() => {
 
 .statistic-item {
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: var(--k-radius-sm);
   background: var(--k-color-surface-soft);
   border: 1px solid var(--k-color-border);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .statistic-item:hover {
   border-color: var(--k-color-primary);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  box-shadow: var(--k-shadow-sm);
 }
 
 .statistic-item.accent {
@@ -690,36 +682,18 @@ onUnmounted(() => {
   border-color: color-mix(in srgb, var(--k-color-primary) 20%, var(--k-color-border));
 }
 
-.statistic-title {
-  font-size: 13px;
-  color: var(--k-color-text-secondary);
-  font-weight: 500;
+/* 深色底上浅阴影几乎不可见，hover 抬升改用 token 阴影 */
+[data-theme='dark'] .statistic-item:hover {
+  box-shadow: var(--k-shadow-md);
 }
 
-/* el-statistic 数字 */
-.statistic-item :deep(.el-statistic__number) {
-  font-size: 20px;
-  font-weight: 700;
-  font-family: 'Consolas', 'Courier New', monospace;
+/* 表格行样式：k-report-table 的斑马纹/悬浮用强制声明写死了 td 底色，
+   行高亮必须同样用强制声明并落到 td 上，否则只有奇数行能看到底色。 */
+:deep(.row-unrecognized > td.el-table__cell) {
+  background: color-mix(in srgb, var(--k-color-danger) 8%, var(--k-color-surface)) !important;
 }
 
-.statistic-item :deep(.el-statistic__suffix) {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-/* Theme overrides */
-.estimator-view,
-.estimator-main {
-  background: var(--k-color-background) !important;
-}
-
-/* 表格行样式 */
-:deep(.row-unrecognized) {
-  background: color-mix(in srgb, var(--el-color-danger) 6%, transparent) !important;
-}
-
-:deep(.row-missing-cost) {
-  background: color-mix(in srgb, var(--el-color-warning) 6%, transparent) !important;
+:deep(.row-missing-cost > td.el-table__cell) {
+  background: color-mix(in srgb, var(--k-color-warning) 8%, var(--k-color-surface)) !important;
 }
 </style>

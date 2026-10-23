@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+/* eslint-disable @typescript-eslint/no-explicit-any -- Vue Flow 节点/边与后端产品结构沿用历史 any 契约，P2 只补 KEmpty 空态，未改数据契约 */
+import KEmpty from '@/components/k/KEmpty.vue'
+import { ref, onMounted } from 'vue'
 import { VueFlow } from '@vue-flow/core'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -39,12 +41,6 @@ const activePathIndex = ref(0)
 const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
 
-const visiblePaths = computed(() => {
-  if (!product.value) return []
-  const paths = product.value.all_paths || []
-  return paths.slice(0, 1) // defaultPath: 0
-})
-
 // ============ Formatting ============
 function formatMoney(n: number): string {
   if (Math.abs(n) >= 1_000_000_000) return (n / 1_000_000_000).toFixed(2) + 'B'
@@ -59,16 +55,6 @@ function marginColorClass(pct: number): string {
 }
 function typeIconUrl(typeId: number): string {
   return `https://imageserver.eveonline.com/Type/${typeId}_64.png`
-}
-function tierBorderColor(tier: number): string {
-  if (tier >= 4) return 'var(--k-color-danger)'
-  if (tier >= 3) return 'var(--k-color-warning)'
-  return 'var(--k-color-success)'
-}
-function tierBgColor(tier: number): string {
-  if (tier >= 4) return 'rgba(239,68,68,0.08)'
-  if (tier >= 3) return 'rgba(245,158,11,0.08)'
-  return 'rgba(22,163,74,0.08)'
 }
 
 // ============ Graph Builder ============
@@ -185,7 +171,14 @@ onMounted(async () => {
 
 <template>
   <div v-if="loading" class="loading">加载中...</div>
-  <div v-else-if="!currentPath" class="empty">未找到产品数据</div>
+  <div v-else-if="!currentPath">
+    <KEmpty
+      size="lg"
+      icon="search"
+      why="没有找到这个产品的生产路径"
+      hint="检查链接里的 type_id 是否正确，或换一个 PI 产品再试"
+    />
+  </div>
   <div v-else class="tree-page">
     <div class="tree-header">
       <span class="tree-title">{{ product?.name_zh }}</span>
@@ -205,13 +198,13 @@ onMounted(async () => {
           <div class="pi-flow-node" :class="'pi-fn-' + props.data.nodeType">
             <Handle v-if="props.data.nodeType !== 'leaf'" type="target" :position="Position.Top" />
             <template v-if="props.data.nodeType === 'leaf'">
-              <img :src="typeIconUrl(props.data.item.type_id)" class="pi-fn-icon" />
+              <img :src="typeIconUrl(props.data.item.type_id)" class="pi-fn-icon" alt="" />
               <div class="pi-fn-name">{{ props.data.item.name_zh }}</div>
               <div class="pi-fn-qty">×{{ props.data.item.quantity }}</div>
               <div class="pi-fn-price">{{ formatMoney(props.data.item.unit_price) }}</div>
             </template>
             <template v-if="props.data.nodeType === 'factory'">
-              <img :src="typeIconUrl(props.data.tierDetail.type_id)" class="pi-fn-icon" />
+              <img :src="typeIconUrl(props.data.tierDetail.type_id)" class="pi-fn-icon" alt="" />
               <div class="pi-fn-name">{{ props.data.tierDetail.name_zh }}</div>
               <div class="pi-fn-tier">P{{ props.data.tierDetail.tier }}</div>
               <div class="pi-fn-divider"></div>
@@ -222,7 +215,7 @@ onMounted(async () => {
               </div>
             </template>
             <template v-if="props.data.nodeType === 'output'">
-              <img :src="typeIconUrl(props.data.outputItem.type_id)" class="pi-fn-icon" />
+              <img :src="typeIconUrl(props.data.outputItem.type_id)" class="pi-fn-icon" alt="" />
               <div class="pi-fn-name">{{ props.data.outputItem.name_zh }}</div>
               <div class="pi-fn-tier">产出</div>
               <div class="pi-fn-divider"></div>
@@ -244,12 +237,12 @@ onMounted(async () => {
 .tree-desc { font-size: 14px; color: var(--k-color-text-secondary); }
 .tree-margin { font-weight: 700; padding: 2px 10px; border-radius: 4px; font-size: 14px; }
 .tree-profit { font-size: 14px; color: var(--k-color-primary); font-weight: 600; }
-.margin-high { color: #67c23a; background: rgba(103,194,58,0.1); }
-.margin-mid { color: #e6a23c; background: rgba(230,162,60,0.1); }
-.margin-low { color: #f56c6c; background: rgba(245,108,108,0.1); }
+.margin-high { color: var(--k-color-success); background: var(--k-color-success-soft); }
+.margin-mid { color: var(--k-color-warning); background: var(--k-color-warning-soft); }
+.margin-low { color: var(--k-color-danger); background: var(--k-color-danger-soft); }
 .vue-flow-wrapper { flex: 1; overflow: hidden; }
-.loading, .empty { display: flex; align-items: center; justify-content: center; height: 100vh; font-size: 18px; color: var(--k-color-text-secondary); }
-.pi-flow-node { background: var(--k-color-surface); border: 1px solid var(--k-color-border); border-radius: 8px; padding: 10px 12px; min-width: 120px; display: flex; flex-direction: column; align-items: center; gap: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.loading { display: flex; align-items: center; justify-content: center; height: 100vh; font-size: 18px; color: var(--k-color-text-secondary); }
+.pi-flow-node { background: var(--k-color-surface); border: 1px solid var(--k-color-border); border-radius: 8px; padding: 10px 12px; min-width: 120px; display: flex; flex-direction: column; align-items: center; gap: 3px; box-shadow: var(--k-shadow-xs); }
 .pi-fn-leaf { background: color-mix(in srgb, var(--k-color-surface-soft) 80%, transparent); }
 .pi-fn-factory { border-left: 4px solid var(--k-color-warning); min-width: 200px; }
 .pi-fn-output { border-left: 4px solid var(--k-color-primary); min-width: 200px; }
@@ -260,5 +253,10 @@ onMounted(async () => {
 .pi-fn-price { font-size: 12px; color: var(--k-color-text-secondary); }
 .pi-fn-divider { width: 100%; height: 1px; background: var(--k-color-border); margin: 2px 0; opacity: 0.5; }
 .pi-fn-detail { font-size: 12px; color: var(--k-color-text-secondary); }
-.pi-fn-profit { font-size: 13px; font-weight: 700; padding: 2px 6px; border-radius: 3px; margin-top: 2px; }
+.pi-fn-profit { font-size: 13px; font-weight: 700; padding: 2px 6px; border-radius: var(--k-radius-xs); margin-top: 2px; }
+
+/* 利润率档位原本只靠颜色区分，补一个方向符号作为非颜色线索 */
+.margin-high::before { content: '▲'; margin-right: 3px; font-weight: 700; }
+.margin-mid::before { content: '●'; margin-right: 3px; }
+.margin-low::before { content: '▼'; margin-right: 3px; font-weight: 700; }
 </style>

@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import KTable from '@/components/k/KTable.vue'
+import KTableDensitySwitch from '@/components/k/KTableDensitySwitch.vue'
 import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { ArrowRight, QuestionFilled, Close, Setting } from '@element-plus/icons-vue'
 import { http } from '@/http'
 import { VueDraggable } from 'vue-draggable-plus'
@@ -8,9 +11,16 @@ import IndustryPlanPlanTable from './components/industryPlanPlanTable.vue'
 import IndustryPlanConfigFlow from './components/industryPlanConfigFlow.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useEdition } from '@/composables/useEdition'
+import { storeToRefs } from 'pinia'
+import { useTableDensityStore } from '@/stores/tableDensity'
+import { onBeforeRouteLeave } from 'vue-router'
 
 const authStore = useAuthStore()
 const { isEnterprise } = useEdition()
+// 卡片密度统一走全站表格密度偏好（工业类页面默认紧凑），不再单独存一份
+const densityStore = useTableDensityStore()
+const { density } = storeToRefs(densityStore)
+const cardStyleMode = computed<'normal' | 'compact'>(() => (density.value === 'compact' ? 'compact' : 'normal'))
 const haveAlphaRole = computed(() => {
   return authStore.user?.roles.includes('vip_alpha') || false
 })
@@ -201,6 +211,7 @@ const getPlanTableData = async () => {
       localStorage.removeItem(STORAGE_KEY)
       currentPlanProducts.value = []
       flatPlanProducts.value = []
+      planDirty.value = false
       console.log("selectedPlan not found", selectedPlan.value)
       return
     }
@@ -226,6 +237,7 @@ const getPlanTableData = async () => {
       }
       // #endregion
       flatPlanProducts.value = flat
+      planDirty.value = false // 载入即干净态
       currentPlanProducts.value = plan.products || []
       current_plan_settings.value = plan.plan_settings || {
         name: '',
@@ -314,6 +326,14 @@ const handleCancel = () => {
 
 const IndustryPlanTableData = ref<PlanTableData[]>([])
 const marketRootTreeRef = ref() // 添加表格引用
+// 市场树行：可见的「添加产品」按钮只依赖这两列
+interface MarketTreeRow {
+  type_id?: number | string
+  can_add_plan?: boolean
+  [key: string]: unknown
+}
+// 市场树当前选中行（供「添加产品」按钮判定可用性）
+const selectedMarketRow = ref<MarketTreeRow | null>(null)
 const resetPlanModify = async () => {
   getPlanTableData()
 }
@@ -323,6 +343,11 @@ const handleRowClick = (row: any) => {
   if (marketRootTreeRef.value) {
     marketRootTreeRef.value.toggleRowExpansion(row)
   }
+}
+
+// 市场树选中行变化（highlight-current-row 配套）
+const handleMarketRowCurrentChange = (row: MarketTreeRow | null) => {
+  selectedMarketRow.value = row
 }
 
 const addPlanDialogVisible = ref(false)
@@ -394,6 +419,28 @@ const handleAddPlan = (command: string) => {
   getPlanTableData()
   addPlanDialogForm.value.plan_list = IndustryPlanTableData.value
   addPlanDialogForm.value.get_plan_loading = false
+}
+
+// 「添加产品」可见入口：与右键菜单走同一套 handleAddPlan 流程
+const isSelectedMarketRowAddable = computed(() => {
+  const row = selectedMarketRow.value
+  if (!row) return false
+  return row.type_id != null && row.can_add_plan === true
+})
+
+// 空串表示按钮可用。权限门槛与后端对齐：/EVE/industry/addPlanProduct 只有 @auth_required，
+// 不校验 Omega，所以这里不按会员等级禁用（批量添加仍由后端 savePlanProducts 之外的产品规则控制）。
+const addProductDisabledReason = computed(() => {
+  if (!isSelectedMarketRowAddable.value) return '请先在左侧市场树选择可添加的产品'
+  return ''
+})
+
+const handleAddPlanFromSelected = () => {
+  const row = selectedMarketRow.value
+  if (addProductDisabledReason.value || !row || row.type_id == null) return
+  // handleAddPlanConfirm 从 contextMenuRow 取产品名，这里复用同一行
+  contextMenuRow.value = row
+  handleAddPlan(String(row.type_id))
 }
 
 // 获取当前选中计划的组列表（用于添加产品弹窗）
@@ -754,6 +801,7 @@ const handleAddPlanConfirm = async () => {
 const handle_update_current_plan_products = (newList: PlanRow[]) => {
   console.log("handle_update_current_plan_products", newList)
   flatPlanProducts.value = newList
+  planDirty.value = true // 子组件推送 = 有本地改动
   // 同步更新嵌套结构（用于保存）
   currentPlanProducts.value = nestProducts(newList)
   console.log("flatPlanProducts", flatPlanProducts.value)
@@ -807,6 +855,8 @@ const addProductToPlan = (
 const currentPlanProducts = ref<PlanProductTableData[]>([])
 // 扁平化的产品列表（用于拖拽）
 const flatPlanProducts = ref<PlanRow[]>([])
+// 计划是否有未保存的本地改动（载入/保存/重置后清零）
+const planDirty = ref(false)
 
 // 数据转换：嵌套 → 扁平化
 function flattenProducts(nested: PlanProductTableData[]): PlanRow[] {
@@ -939,18 +989,9 @@ function nestProducts(flat: PlanRow[]): PlanProductTableData[] {
   return nested
 }
 
-// 卡片样式模式：'normal' | 'compact'
-const STORAGE_KEY_PLAN_CARD_STYLE = 'industry_plan_card_style_mode'
-const getInitialCardStyleMode = (): 'normal' | 'compact' => {
-  const saved = localStorage.getItem(STORAGE_KEY_PLAN_CARD_STYLE)
-  return (saved === 'compact' ? 'compact' : 'normal') as 'normal' | 'compact'
-}
-const cardStyleMode = ref<'normal' | 'compact'>(getInitialCardStyleMode())
+// 卡片样式模式由全站表格密度偏好推导（见文件顶部 cardStyleMode），
+// 旧版本单独存 industry_plan_card_style_mode 的开关已删除，避免两套偏好互相打架。
 
-// 切换紧凑视图模式并保存
-watch(cardStyleMode, (newValue) => {
-  localStorage.setItem(STORAGE_KEY_PLAN_CARD_STYLE, newValue)
-})
 const handlePlanChange = (value: string) => {
   console.log("handlePlanChange", value)
   selectedPlan.value = value
@@ -995,6 +1036,7 @@ const handlePlanChange = (value: string) => {
     flatPlanProducts.value = []
     currentPlanProducts.value = []
   }
+  planDirty.value = false // 切换计划 = 载入
   console.log("current_plan_settings", current_plan_settings.value)
 
 }
@@ -1031,6 +1073,7 @@ const saveCurrentPlan = async () => {
     return
   }
   ElMessage.success("保存成功")
+  planDirty.value = false // 已落库
   getPlanTableData()
 }
 
@@ -1666,6 +1709,22 @@ onMounted(() => {
   getPlanTableData()
 })
 
+// 有未保存改动时，离开页面前确认（vue-router 4：返回 false 阻止导航）
+onBeforeRouteLeave(async () => {
+  if (!planDirty.value) return true
+  try {
+    await ElMessageBox.confirm('当前计划有未保存的修改，离开后将丢失。确定离开吗？', '未保存的修改', {
+      type: 'warning',
+      confirmButtonText: '离开',
+      cancelButtonText: '留在本页'
+    })
+    return true
+  } catch {
+    // 用户选择留在本页
+    return false
+  }
+})
+
 onUnmounted(() => {
   // 清理事件监听器
   document.removeEventListener('mousemove', handleLeftResizeMove)
@@ -1683,7 +1742,8 @@ onUnmounted(() => {
       <!-- 左侧市场树区域 -->
       <div class="market-root-tree-container" :style="{ width: `${leftPanelWidth}%` }">
         <el-scrollbar :height="`calc(${containerHeight} - 2vh)`">
-          <el-table ref="marketRootTreeRef" @row-click="handleRowClick" @row-contextmenu="handleRowContextMenu"
+          <KTable ref="marketRootTreeRef" @row-click="handleRowClick" @row-contextmenu="handleRowContextMenu"
+            @current-change="handleMarketRowCurrentChange" highlight-current-row
             class="market-root-tree-table" :data="marketRootTree" lazy row-key="row_id" :load="loadChildTree">
             <el-table-column prop="name" label="名称">
               <template #header>
@@ -1696,7 +1756,7 @@ onUnmounted(() => {
                 </span>
               </template>
             </el-table-column>
-          </el-table>
+          </KTable>
 
           <!-- 右键菜单 -->
           <div v-if="contextMenuVisible" class="context-menu" :style="contextMenuStyle" @click.stop>
@@ -1734,31 +1794,47 @@ onUnmounted(() => {
                   @change="handlePlanChange" />
               </div>
               <div class="plan-buttons-row">
+                <!-- 计划级操作：全部直出，一步可达 -->
+                <el-button size="small" type="primary" @click="openCreatePlanDialog">
+                  <el-icon><Plus /></el-icon>
+                  新建计划
+                </el-button>
                 <el-button size="small" @click="saveCurrentPlan">
                   保存计划
                 </el-button>
                 <el-button size="small" @click="resetPlanModify">
                   重置修改
                 </el-button>
-                <el-button size="small" @click="openCreatePlanDialog">
-                  新建计划
-                </el-button>
-                <el-button size="small" @click="openDeletePlanDialog">
+                <el-button size="small" class="danger-ghost" @click="openDeletePlanDialog">
                   删除计划
+                </el-button>
+              </div>
+
+              <div class="plan-buttons-row row-secondary">
+                <!-- 结构级操作 -->
+                <el-button size="small" @click="addGroup">
+                  添加分组
+                </el-button>
+                <!-- 可见的「添加产品」入口：与右键菜单同流程 -->
+                <el-tooltip :disabled="!addProductDisabledReason" :content="addProductDisabledReason" placement="top">
+                  <span class="add-product-trigger">
+                    <el-button size="small" type="primary" plain :disabled="!!addProductDisabledReason"
+                      @click="handleAddPlanFromSelected">
+                      添加产品
+                    </el-button>
+                  </span>
+                </el-tooltip>
+                <el-button v-if="haveOmegaRole" size="small" @click="openBatchAddDialog">
+                  批量添加
                 </el-button>
                 <el-button size="small" @click="openModifyPlanDialog">
                   修改计划设置
                 </el-button>
-                <el-button size="small" @click="addGroup">
-                  添加分组
-                </el-button>
-                <el-button v-if="haveOmegaRole" size="small" @click="openBatchAddDialog">
-                  批量添加
-                </el-button>
-                <el-radio-group v-model="cardStyleMode" size="small" style="margin-left: 8px;">
-                   <el-radio-button value="normal">普通</el-radio-button>
-                   <el-radio-button value="compact">紧凑</el-radio-button>
-                </el-radio-group>
+
+                <!-- 密度走全站偏好：与其它页面共用同一份选择，不再维护局部状态 -->
+                <div class="density-switch">
+                  <KTableDensitySwitch label="卡片密度" />
+                </div>
               </div>
             </div>
             <div class="product-table-wrapper">
@@ -2147,12 +2223,12 @@ onUnmounted(() => {
           </span>
         </div>
       </div>
-      <el-table ref="searchResultsTableRef" :data="searchResults" max-height="400px" stripe border
+      <KTable ref="searchResultsTableRef" :data="searchResults" max-height="400px" stripe border
         @selection-change="handleSearchSelectionChange">
         <el-table-column type="selection" width="55" />
         <el-table-column prop="type_id" label="Type ID" width="120" />
         <el-table-column prop="type_name_zh" label="物品名称" />
-      </el-table>
+      </KTable>
     </div>
 
     <template #footer>
@@ -2274,11 +2350,11 @@ onUnmounted(() => {
 
 /* 左侧市场树容器 */
 .market-root-tree-container {
-  background-color: #f5f7fa;
+  background-color: var(--k-color-surface-soft);
   min-width: 200px;
   max-width: 50%;
   padding: 10px;
-  border-radius: 10px;
+  border-radius: var(--k-radius-sm);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2305,11 +2381,11 @@ onUnmounted(() => {
 
 /* 产品列表区域 */
 .industry-plan-table-product-list {
-  background-color: #f5f7fa;
+  background-color: var(--k-color-surface-soft);
   min-width: 300px;
   max-width: 70%;
   padding: 10px;
-  border-radius: 10px;
+  border-radius: var(--k-radius-sm);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2319,10 +2395,10 @@ onUnmounted(() => {
 /* 计划控制面板 */
 .plan-control-panel {
   padding: 10px;
-  background-color: #ffffff;
-  border-radius: 8px;
+  background-color: var(--k-color-surface);
+  border-radius: var(--k-radius-sm);
   margin-bottom: 10px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--k-shadow-xs);
 }
 
 .plan-select-row {
@@ -2334,7 +2410,7 @@ onUnmounted(() => {
 
 .plan-label {
   font-weight: 500;
-  color: #606266;
+  color: var(--k-color-text-secondary);
   white-space: nowrap;
 }
 
@@ -2346,7 +2422,40 @@ onUnmounted(() => {
 .plan-buttons-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 两行按「计划级 / 结构级」分组，而不是让 7 个按钮随便折行 */
+.plan-buttons-row.row-secondary {
+  margin-top: 6px;
+}
+
+/* disabled 按钮不触发事件，tooltip 需要包一层可命中的元素 */
+.add-product-trigger {
+  display: inline-flex;
+}
+
+/* 按钮全部直出，靠「分组 + 主次样式」区分，而不是藏进下拉 */
+.plan-buttons-row :deep(.el-button) {
+  padding: 4px 9px;
+}
+
+.plan-buttons-row :deep(.danger-ghost) {
+  color: var(--k-color-danger) !important;
+}
+
+.plan-buttons-row :deep(.danger-ghost:hover) {
+  border-color: color-mix(in srgb, var(--k-color-danger) 52%, var(--k-color-border)) !important;
+  background: var(--k-color-danger-soft) !important;
+}
+
+/* 密度切换靠右，和左侧的动作按钮分开 */
+.density-switch {
+  display: flex;
+  align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .product-table-wrapper {
@@ -2358,11 +2467,11 @@ onUnmounted(() => {
 
 /* 配置流程区域 */
 .industry-plan-table-config-flow {
-  background-color: #f5f7fa;
+  background-color: var(--k-color-surface-soft);
   min-width: 300px;
   max-width: 70%;
   padding: 10px;
-  border-radius: 10px;
+  border-radius: var(--k-radius-sm);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2372,7 +2481,8 @@ onUnmounted(() => {
 
 /* 可拖拽分割线 */
 .resize-handle {
-  background-color: #e4e7ed;
+  /* 分栏拖拽条：跟随主题，深色下不再是刺眼的白条 */
+  background-color: var(--k-color-border);
   cursor: col-resize;
   user-select: none;
   flex-shrink: 0;
@@ -2387,11 +2497,11 @@ onUnmounted(() => {
 }
 
 .resize-handle:hover {
-  background-color: #409eff;
+  background-color: var(--k-color-primary);
 }
 
 .resize-handle.resizing {
-  background-color: #409eff;
+  background-color: var(--k-color-primary);
 }
 
 .resize-handle::before {
@@ -2407,10 +2517,10 @@ onUnmounted(() => {
 .context-menu {
   position: fixed;
   z-index: 9999;
-  background: white;
-  border: 1px solid #e4e7ed;
+  background: var(--k-color-surface);
+  border: 1px solid var(--k-color-border);
   border-radius: 4px;
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  box-shadow: var(--k-shadow-md);
   min-width: 120px;
 }
 
@@ -2445,7 +2555,7 @@ onUnmounted(() => {
   align-items: flex-start;
   margin-bottom: 24px;
   padding-bottom: 20px;
-  border-bottom: 2px solid #f0f2f5;
+  border-bottom: 2px solid var(--k-color-border-subtle);
 }
 
 .item-title-section {
@@ -2456,14 +2566,14 @@ onUnmounted(() => {
   margin: 0 0 8px 0;
   font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  color: var(--k-color-text);
   line-height: 1.4;
 }
 
 .item-name-en {
   margin: 0;
   font-size: 14px;
-  color: #909399;
+  color: var(--k-color-text-secondary);
   line-height: 1.4;
 }
 
@@ -2479,22 +2589,22 @@ onUnmounted(() => {
 }
 
 .item-descriptions :deep(.el-descriptions__label) {
-  background-color: #fafafa;
+  background-color: var(--k-color-surface-soft);
   font-weight: 600;
 }
 
 .item-descriptions :deep(.el-descriptions__content) {
-  background-color: #ffffff;
+  background-color: var(--k-color-surface);
 }
 
 .item-value {
   font-size: 14px;
-  color: #303133;
+  color: var(--k-color-text);
   word-break: break-word;
 }
 
 .item-value.highlight {
-  color: #409eff;
+  color: var(--k-color-primary);
   font-weight: 500;
 }
 
@@ -2517,19 +2627,19 @@ onUnmounted(() => {
 
 .item-name-zh.copyable:hover,
 .item-name-en.copyable:hover {
-  color: #409eff;
+  color: var(--k-color-primary);
   text-decoration: underline;
 }
 
 .item-id-tag.copyable:hover {
-  background-color: #ecf5ff;
-  border-color: #b3d8ff;
+  background-color: var(--k-color-primary-soft);
+  border-color: color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-surface));
   transform: scale(1.05);
 }
 
 .item-value.copyable:hover {
-  color: #409eff;
-  background-color: #f0f9ff;
+  color: var(--k-color-primary);
+  background-color: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface));
   padding: 2px 4px;
   border-radius: 4px;
   margin: -2px -4px;
@@ -2538,11 +2648,11 @@ onUnmounted(() => {
 .meta-level.copyable:hover {
   opacity: 0.9;
   transform: scale(1.05);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--k-shadow-sm);
 }
 
 .item-value.market-group {
-  color: #606266;
+  color: var(--k-color-text-secondary);
   line-height: 1.6;
 }
 
@@ -2557,27 +2667,27 @@ onUnmounted(() => {
 }
 
 .meta-level-high {
-  background-color: #fef0f0;
-  color: #f56c6c;
-  border: 1px solid #fde2e2;
+  background-color: var(--k-color-danger-soft);
+  color: var(--k-color-danger);
+  border: 1px solid var(--k-color-danger-soft-border);
 }
 
 .meta-level-medium {
-  background-color: #fdf6ec;
-  color: #e6a23c;
-  border: 1px solid #faecd8;
+  background-color: var(--k-color-warning-soft);
+  color: var(--k-color-warning);
+  border: 1px solid var(--k-color-warning-soft-border);
 }
 
 .meta-level-low {
-  background-color: #f0f9ff;
-  color: #67c23a;
-  border: 1px solid #d9ecff;
+  background-color: var(--k-color-success-soft);
+  color: var(--k-color-success);
+  border: 1px solid var(--k-color-success-soft-border);
 }
 
 .meta-level-default {
-  background-color: #f4f4f5;
-  color: #909399;
-  border: 1px solid #e4e7ed;
+  background-color: var(--k-color-surface-soft);
+  color: var(--k-color-text-secondary);
+  border: 1px solid var(--k-color-border);
 }
 
 /* 市场组链样式 - 面包屑导航风格 */
@@ -2592,22 +2702,22 @@ onUnmounted(() => {
 .market-group-text {
   display: inline-block;
   padding: 4px 12px;
-  background: linear-gradient(135deg, #f5f7fa 0%, #f0f2f5 100%);
-  color: #606266;
-  border-radius: 6px;
+  background: linear-gradient(135deg, var(--k-color-surface-soft) 0%, var(--k-color-surface-strong) 100%);
+  color: var(--k-color-text-secondary);
+  border-radius: var(--k-radius-sm);
   font-size: 13px;
   transition: all 0.2s ease;
-  border: 1px solid #e4e7ed;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--k-color-border);
+  box-shadow: var(--k-shadow-xs);
   position: relative;
 }
 
 .market-group-text:hover {
-  background: linear-gradient(135deg, #e4e7ed 0%, #d3d4d6 100%);
-  color: #303133;
-  border-color: #c0c4cc;
+  background: linear-gradient(135deg, var(--k-color-surface-strong) 0%, color-mix(in srgb, var(--k-color-border) 70%, var(--k-color-surface)) 100%);
+  color: var(--k-color-text);
+  border-color: var(--k-color-border);
   transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--k-shadow-sm);
 }
 
 .market-group-text.copyable {
@@ -2615,22 +2725,22 @@ onUnmounted(() => {
 }
 
 .market-group-text.copyable:hover {
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
-  color: #ffffff;
-  border-color: #409eff;
+  background: linear-gradient(135deg, var(--k-color-primary) 0%, color-mix(in srgb, var(--k-color-primary) 72%, var(--k-color-shade)) 100%);
+  color: var(--k-color-text-inverse);
+  border-color: var(--k-color-primary);
   transform: translateY(-2px) scale(1.05);
-  box-shadow: 0 4px 8px rgba(64, 158, 255, 0.3);
+  box-shadow: 0 4px 8px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
 }
 
 .market-group-text.copyable:active {
   transform: translateY(0) scale(1.02);
-  box-shadow: 0 2px 4px rgba(64, 158, 255, 0.2);
+  box-shadow: 0 2px 4px color-mix(in srgb, var(--k-color-primary) 20%, transparent);
 }
 
 .market-group-separator {
   display: inline-flex;
   align-items: center;
-  color: #c0c4cc;
+  color: var(--k-color-text-tertiary);
   margin: 0 2px;
   font-size: 14px;
   flex-shrink: 0;
@@ -2643,7 +2753,7 @@ onUnmounted(() => {
 
 .item-info-dialog :deep(.el-dialog__footer) {
   padding: 16px 24px;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid var(--k-color-border-subtle);
 }
 
 /* 响应式设计 */
@@ -2665,9 +2775,9 @@ onUnmounted(() => {
 .auxiliary-condition-group {
   margin-bottom: 15px;
   padding: 15px;
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--k-color-border);
   border-radius: 4px;
-  background-color: #f5f7fa;
+  background-color: var(--k-color-surface-soft);
   position: relative;
 }
 
@@ -2677,12 +2787,12 @@ onUnmounted(() => {
   align-items: center;
   margin-bottom: 10px;
   padding-bottom: 10px;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--k-color-border-subtle);
 }
 
 .auxiliary-condition-title {
   font-weight: 500;
-  color: #606266;
+  color: var(--k-color-text-secondary);
   font-size: 14px;
 }
 
@@ -2693,7 +2803,7 @@ onUnmounted(() => {
 .results-header {
   margin-bottom: 10px;
   font-weight: 500;
-  color: #606266;
+  color: var(--k-color-text-secondary);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2707,7 +2817,7 @@ onUnmounted(() => {
 }
 
 .selected-count {
-  color: #409eff;
+  color: var(--k-color-primary);
 }
 
 @media (max-width: 768px) {
@@ -2758,7 +2868,11 @@ onUnmounted(() => {
   }
 }
 
-/* Theme override */
+/* Theme override
+   这一段都是本文件自有容器类：要么取值与 theme.css 的 legacy 覆盖
+   （.industry-plan-table-product-list / .industry-plan-table-config-flow /
+   .product-table-wrapper）完全一致，要么在同文件里有同权声明写在后面，
+   去掉强制优先级不会改变最终取值。 */
 .industry-plan-layout,
 .industry-plan-table-main,
 .industry-plan-table-product-list,
@@ -2768,9 +2882,9 @@ onUnmounted(() => {
 .market-root-tree-container,
 .search-results,
 .auxiliary-condition-group {
-  background: var(--k-color-surface) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text) !important;
+  background: var(--k-color-surface);
+  border-color: var(--k-color-border);
+  color: var(--k-color-text);
 }
 
 .market-root-tree-container,
@@ -2786,7 +2900,7 @@ onUnmounted(() => {
       color-mix(in srgb, var(--k-color-primary) 3%, var(--k-color-surface)) 100%) !important;
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 10%, transparent),
-    0 8px 24px color-mix(in srgb, #0b1120 16%, transparent);
+    0 8px 24px color-mix(in srgb, var(--k-color-shade) 16%, transparent);
 }
 
 .market-root-tree-container::before,
@@ -2838,17 +2952,19 @@ onUnmounted(() => {
 .auxiliary-condition-title,
 .results-header,
 .market-group-separator {
-  color: var(--k-color-text-secondary) !important;
+  color: var(--k-color-text-secondary);
 }
 
+/* 面包屑胶囊：`.market-group-text` 的渐变底在下面被统一成 surface-soft，
+   同文件后写的同权声明即可覆盖，不需要强制优先级。 */
 .market-group-text {
-  background: var(--k-color-surface-soft) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text) !important;
+  background: var(--k-color-surface-soft);
+  border-color: var(--k-color-border);
+  color: var(--k-color-text);
 }
 
 .market-group-text:hover {
-  background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+  background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft));
 }
 
 .splitter {
@@ -2868,8 +2984,8 @@ onUnmounted(() => {
 .market-root-tree-container :deep(.el-button) {
   position: relative;
   overflow: hidden;
-  border-radius: 10px !important;
-  border-width: 1px !important;
+  border-radius: var(--k-radius-sm);
+  border-width: 1px;
   letter-spacing: 0.02em;
   font-weight: 600;
   background: linear-gradient(180deg,
@@ -2899,27 +3015,27 @@ onUnmounted(() => {
 }
 
 .industry-plan-main-container :deep(.el-button--primary) {
-  color: #ffffff !important;
+  color: var(--k-color-text-inverse) !important;
   border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border)) !important;
   background: linear-gradient(135deg,
-      color-mix(in srgb, var(--k-color-primary) 80%, #ffffff) 0%,
+      color-mix(in srgb, var(--k-color-primary) 80%, var(--k-color-tint)) 0%,
       var(--k-color-primary) 58%,
-      color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
+      color-mix(in srgb, var(--k-color-primary) 78%, var(--k-color-shade)) 100%) !important;
 }
 
 .industry-plan-main-container :deep(.el-button--warning) {
-  color: #1d1300 !important;
+  color: var(--k-color-on-warning) !important;
   border-color: color-mix(in srgb, var(--k-color-warning) 62%, var(--k-color-border)) !important;
   background: linear-gradient(135deg,
-      color-mix(in srgb, var(--k-color-warning) 82%, #ffffff) 0%,
+      color-mix(in srgb, var(--k-color-warning) 82%, var(--k-color-tint)) 0%,
       var(--k-color-warning) 100%) !important;
 }
 
 .industry-plan-main-container :deep(.el-button--danger) {
-  color: #ffffff !important;
+  color: var(--k-color-text-inverse) !important;
   border-color: color-mix(in srgb, var(--k-color-danger) 62%, var(--k-color-border)) !important;
   background: linear-gradient(135deg,
-      color-mix(in srgb, var(--k-color-danger) 80%, #ffffff) 0%,
+      color-mix(in srgb, var(--k-color-danger) 80%, var(--k-color-tint)) 0%,
       var(--k-color-danger) 100%) !important;
 }
 
@@ -2928,7 +3044,7 @@ onUnmounted(() => {
 .industry-plan-main-container :deep(.el-button--link) {
   border-color: transparent !important;
   background: transparent !important;
-  color: color-mix(in srgb, var(--k-color-primary) 86%, #ffffff) !important;
+  color: color-mix(in srgb, var(--k-color-primary) 86%, var(--k-color-tint)) !important;
   box-shadow: none !important;
 }
 
@@ -2936,98 +3052,111 @@ onUnmounted(() => {
   border-radius: 999px !important;
 }
 
+/* 单选按钮组（卡片密度）：页面里的 radio 不在弹窗内，theme.css 对 radio 的强制优先级
+   规则限定 `.el-overlay .el-dialog`，不会命中；其余对手是 EP 基础规则，靠权重即可，
+   整组去掉强制优先级。 */
 .industry-plan-main-container :deep(.el-radio-button__inner) {
-  border-radius: 10px !important;
-  border-width: 1px !important;
+  border-radius: var(--k-radius-sm);
+  border-width: 1px;
   letter-spacing: 0.02em;
   font-weight: 600;
-  color: var(--k-color-text-secondary) !important;
+  color: var(--k-color-text-secondary);
   background: linear-gradient(180deg,
       color-mix(in srgb, var(--k-color-surface) 90%, var(--k-color-surface-soft)) 0%,
-      color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) 100%) !important;
-  border-color: color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border)) !important;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 14%, transparent) !important;
+      color-mix(in srgb, var(--k-color-surface-soft) 88%, var(--k-color-surface)) 100%);
+  border-color: color-mix(in srgb, var(--k-color-primary) 28%, var(--k-color-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 14%, transparent);
   transition: transform 0.2s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease, color 0.22s ease;
 }
 
 .industry-plan-main-container :deep(.el-radio-button__inner:hover) {
   transform: translateY(-1px);
-  color: var(--k-color-primary) !important;
-  border-color: color-mix(in srgb, var(--k-color-primary) 44%, var(--k-color-border)) !important;
+  color: var(--k-color-primary);
+  border-color: color-mix(in srgb, var(--k-color-primary) 44%, var(--k-color-border));
   background: linear-gradient(140deg,
       color-mix(in srgb, var(--k-color-primary) 14%, var(--k-color-surface-soft)) 0%,
-      color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%) !important;
+      color-mix(in srgb, var(--k-color-primary) 6%, var(--k-color-surface)) 100%);
 }
 
 .industry-plan-main-container :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
-  color: #ffffff !important;
-  border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border)) !important;
+  color: var(--k-color-text-inverse);
+  border-color: color-mix(in srgb, var(--k-color-primary) 65%, var(--k-color-border));
   background: linear-gradient(135deg,
-      color-mix(in srgb, var(--k-color-primary) 80%, #ffffff) 0%,
+      color-mix(in srgb, var(--k-color-primary) 80%, var(--k-color-tint)) 0%,
       var(--k-color-primary) 58%,
-      color-mix(in srgb, var(--k-color-primary) 78%, #0b1120) 100%) !important;
+      color-mix(in srgb, var(--k-color-primary) 78%, var(--k-color-shade)) 100%);
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--k-color-primary) 34%, transparent),
-    0 8px 20px color-mix(in srgb, var(--k-color-primary) 24%, transparent) !important;
+    0 8px 20px color-mix(in srgb, var(--k-color-primary) 24%, transparent);
 }
 
 .industry-plan-main-container :deep(.el-radio-button.is-disabled .el-radio-button__inner) {
   opacity: 0.62;
-  color: var(--k-color-text-secondary) !important;
-  background: color-mix(in srgb, var(--k-color-surface-soft) 84%, var(--k-color-surface)) !important;
-  border-color: var(--k-color-border) !important;
-  box-shadow: none !important;
+  color: var(--k-color-text-secondary);
+  background: color-mix(in srgb, var(--k-color-surface-soft) 84%, var(--k-color-surface));
+  border-color: var(--k-color-border);
+  box-shadow: none;
 }
 
+/* Meta 等级配色：这几条与上面同名的规则取值完全相同（high/medium/low/default 的
+   文字色），只是写在后面；背景/描边也没有同权对手，去掉强制优先级。 */
 .meta-level-high,
 .meta-level-medium,
 .meta-level-low,
 .meta-level-default {
-  background-color: color-mix(in srgb, var(--k-color-surface-soft) 75%, var(--k-color-surface)) !important;
-  border-color: var(--k-color-border) !important;
+  background-color: color-mix(in srgb, var(--k-color-surface-soft) 75%, var(--k-color-surface));
+  border-color: var(--k-color-border);
 }
 
 .meta-level-high {
-  color: var(--k-color-danger) !important;
+  color: var(--k-color-danger);
 }
 
 .meta-level-medium {
-  color: var(--k-color-warning) !important;
+  color: var(--k-color-warning);
 }
 
 .meta-level-low {
-  color: var(--k-color-success) !important;
+  color: var(--k-color-success);
 }
 
 .meta-level-default {
-  color: var(--k-color-text-secondary) !important;
+  color: var(--k-color-text-secondary);
 }
 
 .market-group-text.copyable:hover {
-  background: color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface-soft)) !important;
-  color: var(--k-color-primary) !important;
-  border-color: color-mix(in srgb, var(--k-color-primary) 38%, var(--k-color-border)) !important;
-  box-shadow: var(--k-shadow-sm) !important;
+  background: color-mix(in srgb, var(--k-color-primary) 18%, var(--k-color-surface-soft));
+  color: var(--k-color-primary);
+  border-color: color-mix(in srgb, var(--k-color-primary) 38%, var(--k-color-border));
+  box-shadow: var(--k-shadow-sm);
 }
 
+/* 弹窗页脚必须保留强制优先级：theme.css 的 `.el-overlay .el-dialog__footer`
+   带强制优先级（背景/描边），普通声明压不住。 */
 .item-info-dialog :deep(.el-dialog__footer) {
   border-top-color: var(--k-color-border) !important;
   background: var(--k-color-surface) !important;
 }
 
 .auxiliary-condition-header {
-  border-bottom-color: var(--k-color-border) !important;
+  border-bottom-color: var(--k-color-border);
 }
 
 .selected-count {
-  color: var(--k-color-primary) !important;
+  color: var(--k-color-primary);
 }
 
+/* 内联 `color: #e6a23c` 必须靠强制优先级才压得住；与 theme.css 中
+   `.el-dialog [style*='color: #e6a23c']` 这条同值规则互相冗余，故本条去掉
+   强制优先级后仍由 theme.css 保证同样的取色。 */
 :deep(.el-dialog [style*='color: #e6a23c']),
 :deep(.el-dialog [style*='color:#e6a23c']) {
-  color: var(--k-color-warning) !important;
+  color: var(--k-color-warning);
 }
 
+/* 控件底色/描边/文字色：这些选择器权重 (0,3,0) 已高于 EP 自身规则 (0,1,0)，
+   且 theme.css 只对禁用态输入框有强制优先级，不冲突；
+   仅在 input-number 内部（.el-input-number .el-input__wrapper）需要保留高权重即可。 */
 .market-root-tree-container :deep(.el-input__wrapper),
 .market-root-tree-container :deep(.el-select__wrapper),
 .plan-select :deep(.el-select__wrapper),
@@ -3036,15 +3165,15 @@ onUnmounted(() => {
 .plan-control-panel :deep(.el-input-number .el-input__wrapper),
 .plan-control-panel :deep(.el-input-number__decrease),
 .plan-control-panel :deep(.el-input-number__increase) {
-  background: var(--k-color-surface-soft) !important;
-  border-color: var(--k-color-border) !important;
-  color: var(--k-color-text) !important;
+  background: var(--k-color-surface-soft);
+  border-color: var(--k-color-border);
+  color: var(--k-color-text);
 }
 
 .plan-control-panel :deep(.el-input__inner),
 .plan-control-panel :deep(.el-input-number .el-input__inner),
 .market-root-tree-container :deep(.el-input__inner) {
-  color: var(--k-color-text) !important;
+  color: var(--k-color-text);
 }
 
 .market-root-tree-container :deep(.el-tree),
@@ -3066,5 +3195,29 @@ onUnmounted(() => {
 .market-root-tree-container :deep([style*='color: gray']),
 .market-root-tree-container :deep([style*='color:gray']) {
   color: var(--k-color-text-secondary) !important;
+}
+
+/* ── P2-C ≤1280 窄屏兜底 ─────────────────────────────────
+   只降级布局，不动基础规则：1281+ 一个字都不变。
+   min-width 护栏：1200 以下由既有的 1200 块接管按钮竖排，768 以下由既有
+   768 块把三栏改成上下布局（那里用 !important 拉满宽度），这里不参与，
+   避免与既有断点抢同一个属性。 */
+@media (min-width: 769px) and (max-width: 1280px) {
+
+  /* 产品树只是目录：让出 6% 宽度，计划面板与报表区各宽出约 30px。
+     宽度本身由行内 style 给到 30%，这里只压上限，不写在行内打架。 */
+  .market-root-tree-container {
+    max-width: 24%;
+  }
+
+  /* 控制面板收紧内边距，把宽度留给工具栏折行判定 */
+  .plan-control-panel {
+    padding: 8px;
+  }
+
+  /* 按钮间距收紧后，「计划级 / 结构级」两组各少折一行 */
+  .plan-buttons-row {
+    gap: 4px;
+  }
 }
 </style>

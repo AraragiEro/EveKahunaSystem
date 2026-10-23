@@ -22,11 +22,16 @@ import { useHelpStore } from '@/stores/help'
 import { useEdition } from '@/composables/useEdition'
 import { useThemeStore, type ThemeMode } from '@/stores/theme'
 import smallSideBar from './components/sideBar/smallSideBar.vue'
+import PageContainer from './components/layout/PageContainer.vue'
+import AppFooter from './components/AppFooter.vue'
 import HelpDrawer from './components/HelpDrawer.vue'
 import RouteProgressBar from './components/global/RouteProgressBar.vue'
 import VipPricingDialog from './components/VipPricingDialog.vue'
 import githubIcon from '@/assets/github-mark.svg'
-import aifadianLogo from '@/assets/横版-白底-透明背景.png'
+// 爱发电：只取官方标里的方形图标。原来的 464×240 横版字标压到 24px 高时，
+// 图标和字标各只剩约 12px，细节全糊；文字改由页面字体渲染，与「仓库」「指南」按钮一致。
+import aifadianIcon from '@/assets/afdian-icon.png'
+import { GITHUB_REPO_URL, SITE_NAME_EN, APP_VERSION } from '@/config/site'
 
 const router = useRouter()
 const route = useRoute()
@@ -35,8 +40,8 @@ const helpStore = useHelpStore()
 const themeStore = useThemeStore()
 const { isEnterprise } = useEdition()
 
-const GITHUB_REPO_URL = 'https://github.com/AraragiEro/EveKahunaSystem.git'
-const publicPages = ['login', 'landing', 'announcements', 'forbidden', 'characterAuthClose', 'publicStorage', 'publicWorkflow', 'allianceContract', 'priceEstimator', 'piProfit']
+const publicPages = ['login', 'landing', 'announcements', 'forbidden', 'notFound', 'characterAuthClose', 'publicStorage', 'publicWorkflow', 'allianceContract', 'priceEstimator', 'piProfit']
+const headerTitle = `${SITE_NAME_EN} ${APP_VERSION}`
 
 const donateLink = computed(() => import.meta.env.VITE_DONATE_LINK as string | undefined)
 const showDonateButton = computed(() => !!donateLink.value)
@@ -257,9 +262,9 @@ onUnmounted(() => {
 
       <el-container class="main-container">
         <el-header class="main-header">
-          <div class="header-content">
+          <PageContainer class="header-content" flush>
             <div class="header-title">
-              <h2>Kahuna-System V1.6.1</h2>
+              <h2>{{ headerTitle }}</h2>
               <el-tag :type="isEnterprise ? 'success' : 'info'" size="small" class="edition-tag">
                 {{ isEnterprise ? '企业版' : '社区版' }}
               </el-tag>
@@ -297,7 +302,8 @@ onUnmounted(() => {
               </el-button>
 
               <el-button v-if="showDonateButton" @click="openDonate" title="支持作者" class="header-action-btn donate-button">
-                <img :src="aifadianLogo" alt="爱发电" class="donate-icon" />
+                <img :src="aifadianIcon" alt="爱发电" class="donate-icon" />
+                <span class="btn-label">爱发电</span>
               </el-button>
 
               <el-button @click="openGitHub" title="打开 GitHub 仓库" class="header-action-btn github-btn">
@@ -325,18 +331,18 @@ onUnmounted(() => {
                 </el-dropdown>
               </div>
             </div>
-          </div>
+          </PageContainer>
         </el-header>
 
         <el-main class="main-content">
-          <div class="main-scroll">
-            <router-view />
-          </div>
+          <PageContainer class="main-page" fill flush>
+            <div class="main-scroll">
+              <router-view />
+            </div>
+          </PageContainer>
         </el-main>
 
-        <el-footer class="main-footer">
-          <span>© 2026 Kahuna System</span>
-        </el-footer>
+        <AppFooter variant="compact" />
       </el-container>
     </el-container>
 
@@ -375,13 +381,20 @@ onUnmounted(() => {
 }
 
 .main-container {
-  margin-left: 60px;
+  /* 图标轨宽度进入版心居中公式：PageContainer 会扣掉半个 --k-rail-w。
+     这里只按**收起态**的 60px 让位；hover 展开是浮层覆盖（P2-e），
+     内容区宽度不随之变化，所以不要再写 transition: margin-left。 */
+  margin-left: var(--k-rail-w, 60px);
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: transparent;
 }
+
+/* 注：图标轨 hover 展开（60 → 148px）是**浮层覆盖**，不再改内容区的 margin-left。
+   P1-C2 曾在这里把展开宽度计入居中公式，代价是展开瞬间内容区窄 88px、表格列宽重算；
+   P2-e 按「浮层覆盖，内容不动」改回固定 60px。想再加回来先看 PageContainer 的注释。 */
 
 .main-header {
   height: auto;
@@ -418,30 +431,32 @@ onUnmounted(() => {
   border-color: var(--k-color-border);
 }
 
+/* .header-title[data-v] .edition-tag 的权重 (0,3,0) 已经压过 EP 的
+   .el-tag.el-tag--success (0,2,0)，spec 上不需要 !important。 */
 .header-title :deep(.edition-tag) {
-  background: var(--k-color-surface-soft) !important;
-  color: var(--k-color-text-secondary) !important;
-  border-color: var(--k-color-border) !important;
+  background: var(--k-color-surface-soft);
+  color: var(--k-color-text-secondary);
+  border-color: var(--k-color-border);
 }
 
 .header-title :deep(.edition-tag.el-tag--success) {
-  background: color-mix(in srgb, var(--k-color-success) 16%, var(--k-color-surface-soft)) !important;
-  color: var(--k-color-success) !important;
+  background: color-mix(in srgb, var(--k-color-success) 16%, var(--k-color-surface-soft));
+  color: var(--k-color-success);
 }
 
 .header-title :deep(.edition-tag.el-tag--warning) {
-  background: color-mix(in srgb, var(--k-color-warning) 16%, var(--k-color-surface-soft)) !important;
-  color: var(--k-color-warning) !important;
+  background: color-mix(in srgb, var(--k-color-warning) 16%, var(--k-color-surface-soft));
+  color: var(--k-color-warning);
 }
 
 .header-title :deep(.edition-tag.el-tag--danger) {
-  background: color-mix(in srgb, var(--k-color-danger) 16%, var(--k-color-surface-soft)) !important;
-  color: var(--k-color-danger) !important;
+  background: color-mix(in srgb, var(--k-color-danger) 16%, var(--k-color-surface-soft));
+  color: var(--k-color-danger);
 }
 
 .header-title :deep(.edition-tag.el-tag--info) {
-  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft)) !important;
-  color: var(--k-color-primary) !important;
+  background: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-surface-soft));
+  color: var(--k-color-primary);
 }
 
 .get-vip-button {
@@ -479,8 +494,8 @@ onUnmounted(() => {
 }
 
 .donate-icon {
-  width: auto;
-  height: 24px;
+  width: 16px;
+  height: 16px;
   display: block;
 }
 
@@ -522,18 +537,11 @@ onUnmounted(() => {
   border-radius: var(--k-radius-lg);
 }
 
-.main-footer {
-  height: 42px;
-  flex-shrink: 0;
-  border-top: 1px solid var(--k-color-border);
-  color: var(--k-color-text-secondary);
-  background: color-mix(in srgb, var(--k-color-surface) 96%, transparent);
-}
-
 .global-theme-switch {
   position: fixed;
   right: 14px;
-  bottom: 14px;
+  /* 抬到页脚之上，避免悬浮按钮压住页脚右下角的版权/协议文字 */
+  bottom: 62px;
   z-index: 3000;
 }
 
@@ -547,10 +555,7 @@ onUnmounted(() => {
 }
 
 @media (max-width: 900px) {
-  .main-container {
-    margin-left: 60px;
-  }
-
+  /* 窄屏不再需要给展开态预留 148px：轨道是浮层，内容区始终只让位 60px（见 .main-container） */
   .main-content {
     padding: 10px;
   }
@@ -562,5 +567,317 @@ onUnmounted(() => {
   .username {
     display: none;
   }
+}
+
+/* ── P2-C ≤640：页头不要吃掉半个屏幕 ─────────────────────────────────
+   375 下页头实测 ~200px（标题两行 + 3 个标签 + 4 个动作按钮竖排），
+   内容区只剩 400px。这里只压缩留白与字号，不隐藏任何信息
+   （版本/订阅标签、动作按钮全部保留），1280 及以上不受影响。 */
+@media (max-width: 640px) {
+  .main-header {
+    min-height: 0;
+    padding: 8px 10px;
+  }
+
+  .main-content {
+    padding: 8px;
+  }
+
+  .header-title h2 {
+    font-size: 17px;
+  }
+
+  .header-title {
+    gap: 6px;
+  }
+
+  .header-actions {
+    gap: 6px;
+  }
+
+  .header-action-btn {
+    padding: 5px 8px;
+  }
+}
+</style>
+
+<!-- ─────────────────────────────────────────────────────────────────────
+     全局 Element Plus 桥接（P1-C3）：独立的非 scoped style 块，必须放在
+     scoped 块之后。三个原因：
+       1. EP 的 message / message-box / notification / dialog 都 teleport 到
+          body，scoped 选择器根本选不到；
+       2. :global() 在 scoped 块里会丢类选择器（见 kahuna-lessons 深色模式）；
+       3. 要压过 element-plus/dist/index.css 的默认值，只能靠「后导入 + 同权重」，
+          App.vue 在 main.ts 里晚于 theme.css 求值。
+     本块只补 theme.css 的缺口，不重复它已有的规则：
+       · EP 派生色（*-light-N / *-dark-2）按 --k-* 品牌色重算；
+       · message / message-box / notification / alert / skeleton / switch /
+         checkbox 六个组件此前 0 选择器，深色下是白底或浅灰底。
+     ───────────────────────────────────────────────────────────────────── -->
+<style>
+/* ── 1. 派生色：EP 的浅底/浅描边全靠 light-N ──────────────────────────────
+   EP 默认的 light-N 是按它自己的蓝色算出来的（比品牌蓝更浅的几个 EP 固定档），浅色下
+   tag、plain 按钮、message、alert 会整片发蓝。深色那边 theme.css 已按品牌色
+   重算过 primary，这里只补浅色 primary，避免覆盖已有的深色观感。 */
+:root {
+  --el-color-primary-light-3: color-mix(in srgb, var(--k-color-primary) 70%, var(--k-color-tint));
+  --el-color-primary-light-5: color-mix(in srgb, var(--k-color-primary) 50%, var(--k-color-tint));
+  --el-color-primary-light-7: color-mix(in srgb, var(--k-color-primary) 30%, var(--k-color-tint));
+  --el-color-primary-light-8: color-mix(in srgb, var(--k-color-primary) 20%, var(--k-color-tint));
+  --el-color-primary-light-9: color-mix(in srgb, var(--k-color-primary) 10%, var(--k-color-tint));
+  --el-color-primary-dark-2: color-mix(in srgb, var(--k-color-primary) 80%, var(--k-color-shade));
+}
+
+/* success / warning / danger / error / info 的派生色：EP 里 danger 与 error 是两套
+   变量名（部分组件只读 --el-color-error），必须一起桥。混合基色取
+   --k-color-surface，浅色得到浅底、深色得到暗底，一条声明同时成立，不必再写
+   [data-theme] 分支。info 没有品牌色，用次级文字色承担「中性提示」。 */
+:root,
+html[data-theme='dark'] {
+  --el-color-info: var(--k-color-text-secondary);
+
+  --el-color-success-light-3: color-mix(in srgb, var(--k-color-success) 70%, var(--k-color-surface));
+  --el-color-success-light-5: color-mix(in srgb, var(--k-color-success) 50%, var(--k-color-surface));
+  --el-color-success-light-7: var(--k-color-success-soft-border);
+  --el-color-success-light-8: color-mix(in srgb, var(--k-color-success) 20%, var(--k-color-surface));
+  --el-color-success-light-9: var(--k-color-success-soft);
+  --el-color-success-dark-2: color-mix(in srgb, var(--k-color-success) 80%, var(--k-color-shade));
+
+  --el-color-warning-light-3: color-mix(in srgb, var(--k-color-warning) 70%, var(--k-color-surface));
+  --el-color-warning-light-5: color-mix(in srgb, var(--k-color-warning) 50%, var(--k-color-surface));
+  --el-color-warning-light-7: var(--k-color-warning-soft-border);
+  --el-color-warning-light-8: color-mix(in srgb, var(--k-color-warning) 20%, var(--k-color-surface));
+  --el-color-warning-light-9: var(--k-color-warning-soft);
+  --el-color-warning-dark-2: color-mix(in srgb, var(--k-color-warning) 80%, var(--k-color-shade));
+
+  --el-color-danger-light-3: color-mix(in srgb, var(--k-color-danger) 70%, var(--k-color-surface));
+  --el-color-danger-light-5: color-mix(in srgb, var(--k-color-danger) 50%, var(--k-color-surface));
+  --el-color-danger-light-7: var(--k-color-danger-soft-border);
+  --el-color-danger-light-8: color-mix(in srgb, var(--k-color-danger) 20%, var(--k-color-surface));
+  --el-color-danger-light-9: var(--k-color-danger-soft);
+  --el-color-danger-dark-2: color-mix(in srgb, var(--k-color-danger) 80%, var(--k-color-shade));
+
+  --el-color-error-light-3: color-mix(in srgb, var(--k-color-danger) 70%, var(--k-color-surface));
+  --el-color-error-light-5: color-mix(in srgb, var(--k-color-danger) 50%, var(--k-color-surface));
+  --el-color-error-light-7: var(--k-color-danger-soft-border);
+  --el-color-error-light-8: color-mix(in srgb, var(--k-color-danger) 20%, var(--k-color-surface));
+  --el-color-error-light-9: var(--k-color-danger-soft);
+  --el-color-error-dark-2: color-mix(in srgb, var(--k-color-danger) 80%, var(--k-color-shade));
+
+  --el-color-info-light-3: color-mix(in srgb, var(--k-color-text-secondary) 70%, var(--k-color-surface));
+  --el-color-info-light-5: color-mix(in srgb, var(--k-color-text-secondary) 50%, var(--k-color-surface));
+  --el-color-info-light-7: color-mix(in srgb, var(--k-color-text-secondary) 30%, var(--k-color-surface));
+  --el-color-info-light-8: color-mix(in srgb, var(--k-color-text-secondary) 20%, var(--k-color-surface));
+  --el-color-info-light-9: color-mix(in srgb, var(--k-color-text-secondary) 12%, var(--k-color-surface));
+
+  /* 浮层/分割线：EP 深色默认是近黑（比本项目 surface 更黑一档）与中性灰描边，与本项目紫色系不搭；
+     浅色默认是纯白浮层与浅灰分割线。 */
+  --el-bg-color-overlay: var(--k-color-surface);
+  --el-border-color-lighter: var(--k-color-border-subtle);
+  --el-fill-color-darker: var(--k-color-surface-strong);
+}
+
+/* ── 2. message（716 处 ElMessage 调用，最高频） ─────────────────────────
+   深色下的浅底来自 --el-color-info-light-9（EP 深色变量在 html.dark 上才生效，
+   本项目同时挂了 data-theme，两条路径都要能兜住，派生色已在上面统一桥接）。 */
+.el-message {
+  --el-message-border-color: var(--k-color-border-subtle);
+  box-shadow: var(--k-shadow-sm);
+}
+
+.el-message.is-plain {
+  background-color: var(--k-color-surface);
+  border-color: var(--k-color-border);
+}
+
+.el-message__content {
+  color: var(--k-color-text);
+}
+
+.el-message .el-message__closeBtn {
+  color: var(--k-color-text-secondary);
+}
+
+.el-message .el-message__closeBtn:hover {
+  color: var(--k-color-text);
+}
+
+/* ── 3. message-box（68 处 ElMessageBox，删除确认等） ────────────────────
+   EP 这里读 --el-bg-color（已桥接），但标题/正文/关闭按钮仍是 EP 的灰阶，
+   深色下正文是 EP 的中灰（压在深色 card 上勉强能看）、关闭按钮几乎看不见。 */
+.el-message-box {
+  background-color: var(--k-color-surface);
+  border: 1px solid var(--k-color-border);
+  box-shadow: var(--k-shadow-md);
+}
+
+.el-message-box__title {
+  color: var(--k-color-text);
+}
+
+.el-message-box__content {
+  color: var(--k-color-text-secondary);
+}
+
+.el-message-box__headerbtn .el-message-box__close {
+  color: var(--k-color-text-secondary);
+}
+
+.el-message-box__headerbtn:hover .el-message-box__close,
+.el-message-box__headerbtn:focus .el-message-box__close {
+  color: var(--k-color-primary);
+}
+
+/* 删除确认里写死的内联告警色（模板里 style="color:#e6a23c"，scoped/变量都够不到） */
+.el-message-box [style*='color: #e6a23c'],
+.el-message-box [style*='color:#e6a23c'] {
+  color: var(--k-color-warning) !important;
+}
+
+/* ── 4. notification（深色下 EP 用 --el-bg-color-overlay 的近黑底） ─────── */
+.el-notification {
+  background-color: var(--k-color-surface);
+  border-color: var(--k-color-border);
+  box-shadow: var(--k-shadow-md);
+}
+
+.el-notification__title {
+  color: var(--k-color-text);
+}
+
+.el-notification__content {
+  color: var(--k-color-text-secondary);
+}
+
+.el-notification .el-notification__closeBtn {
+  color: var(--k-color-text-secondary);
+}
+
+/* ── 5. alert（基础规则写死 background:var(--el-color-white)，无 type 时纯白） */
+.el-alert:not([class*='el-alert--']) {
+  background-color: var(--k-color-surface-soft);
+  color: var(--k-color-text);
+}
+
+.el-alert.is-light .el-alert__close-btn {
+  color: var(--k-color-text-secondary);
+}
+
+.el-alert.is-light .el-alert__close-btn:hover {
+  color: var(--k-color-text);
+}
+
+/* ── 6. skeleton（骨架色取自 --el-fill-color，浅色是 EP 自带的浅灰） ────── */
+.el-skeleton {
+  --el-skeleton-color: var(--k-color-surface-soft);
+  --el-skeleton-to-color: var(--k-color-surface-strong);
+}
+
+.el-skeleton__first-line,
+.el-skeleton__paragraph {
+  background: var(--k-color-surface-soft);
+}
+
+/* ── 7. switch（off 轨道默认取 --el-border-color，未选中态偏白） ─────────── */
+.el-switch {
+  --el-switch-on-color: var(--k-color-primary);
+  --el-switch-off-color: color-mix(in srgb, var(--k-color-border) 76%, var(--k-color-surface));
+}
+
+.el-switch__label {
+  color: var(--k-color-text);
+}
+
+.el-switch__label.is-active {
+  color: var(--k-color-primary);
+}
+
+.el-switch__core .el-switch__action {
+  background-color: var(--k-color-text-inverse);
+}
+
+/* ── 8. checkbox（勾选框底取 --el-fill-color-blank，深色下会漏成透明/白） ── */
+.el-checkbox {
+  --el-checkbox-text-color: var(--k-color-text-secondary);
+  --el-checkbox-bg-color: var(--k-color-surface);
+  --el-checkbox-input-border: 1px solid var(--k-color-border);
+}
+
+.el-checkbox__label {
+  color: var(--k-color-text);
+}
+
+.el-checkbox__inner {
+  background-color: var(--k-color-surface);
+  border-color: var(--k-color-border);
+}
+
+.el-checkbox__input.is-checked .el-checkbox__inner,
+.el-checkbox__input.is-indeterminate .el-checkbox__inner {
+  background-color: var(--k-color-primary);
+  border-color: var(--k-color-primary);
+}
+
+.el-checkbox__input.is-checked .el-checkbox__inner::after {
+  border-color: var(--k-color-text-inverse);
+}
+
+.el-checkbox__input.is-checked + .el-checkbox__label {
+  color: var(--k-color-text);
+}
+
+.el-checkbox.is-bordered {
+  border-color: var(--k-color-border);
+}
+
+.el-checkbox__input.is-disabled .el-checkbox__inner {
+  background-color: var(--k-color-surface-soft);
+  border-color: var(--k-color-border-subtle);
+}
+
+.el-checkbox__input.is-disabled + span.el-checkbox__label {
+  color: var(--k-color-text-secondary);
+  opacity: 0.6;
+}
+
+/* ── 9. 模板内联颜色的兜底救援 ────────────────────────────────────────────
+   有些颜色写在 template 的 :label-style / style 里（P1-C3 只改 style 块，
+   不动 template），内联样式必须用 !important 才压得住。theme.css 已对
+   dialog / drawer 做过同类救援，这里补 descriptions 与 message-box。 */
+.el-descriptions [style*='color: #606266'],
+.el-descriptions [style*='color:#606266'] {
+  color: var(--k-color-text-secondary) !important;
+}
+
+.el-descriptions [style*='color: #303133'],
+.el-descriptions [style*='color:#303133'] {
+  color: var(--k-color-text) !important;
+}
+
+/* ── 10. effect="dark" 的实底标签：白字压在亮绿/亮橙上只有 2.2~2.3:1 ──────
+   EP 的 dark effect 直接 `color: var(--el-color-white)` 铺在语义色上；
+   本项目的 success/warning 在深色下是亮绿/亮橙，白字几乎糊成一片。
+   深色下改成「同色系暗底 + 语义色文字」，与全站其他标签观感一致。
+   primary / danger 的白字对比度本身够（3.8:1 以上），不动。 */
+html[data-theme='dark'] .el-tag--success.el-tag--dark {
+  background-color: color-mix(in srgb, var(--k-color-success) 20%, var(--k-color-surface));
+  border-color: color-mix(in srgb, var(--k-color-success) 38%, var(--k-color-surface));
+  color: var(--k-color-success);
+}
+
+html[data-theme='dark'] .el-tag--warning.el-tag--dark {
+  background-color: color-mix(in srgb, var(--k-color-warning) 20%, var(--k-color-surface));
+  border-color: color-mix(in srgb, var(--k-color-warning) 38%, var(--k-color-surface));
+  color: var(--k-color-warning);
+}
+
+/* ── 11. dev-only：Vue DevTools 浮层不要压住页脚 ───────────────────────────
+   vite-plugin-vue-devtools 在开发模式下会挂一个 fixed 浮层，默认贴着视口底部
+   24px、水平居中——1440×900 下正好盖在页脚中间的「QQ群 979335885」上。
+   它自己用内联 top/left 定位（top = 视口高 - 24），所以只能用 !important 顶上去。
+   只命中它自己的类名，生产构建里没有这个节点，不会影响真实页面。 */
+.vue-devtools__anchor {
+  /* 72px = 页脚 48px + 浮层自身约 30px/2 的余量，保证 pill 整体落在页脚上方 */
+  top: calc(100vh - 72px) !important;
 }
 </style>

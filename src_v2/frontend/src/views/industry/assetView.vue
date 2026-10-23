@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import KTable from '@/components/k/KTable.vue'
 import { onMounted, onUnmounted, ref, computed, watch } from 'vue'
 import { Setting, SuccessFilled, CircleCloseFilled, Plus, CloseBold, Delete, Refresh, VideoPlay, QuestionFilled } from '@element-plus/icons-vue'
 import { http } from '@/http'
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '@/stores/auth'
 import AssetViewIndustrypermision from './components/AssetViewIndustrypermision.vue'
 import AssetViewViewList from './components/AssetViewViewList.vue'
@@ -27,6 +28,8 @@ type Mission = {
   step_name?: string
   is_indeterminate?: boolean
   user_name?: string  // 任务创建者（管理员可见）
+  can_pull?: boolean  // 后端下发的拉取权限（角色任务=创建者，公司任务=同公司成员）
+  can_delete?: boolean  // 后端下发的删除权限（角色任务=创建者，公司任务=同公司总监）
   is_abnormal?: boolean  // 主体已不存在或token已失效
   abnormal_reason?: string  // 异常原因详情
 }
@@ -374,6 +377,21 @@ const handlePullMission = async (row: Mission) => {
 }
 
 const handleDeleteMission = async (row: Mission) => {
+  // 删除前二次确认，取消则直接返回
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除拉取任务“${row.subject_name}”吗？删除后该任务不再自动拉取资产，此操作不可撤销。`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
   try {
     const res = await http.delete(`/EVE/asset/deleteAssetPullMission`, {
       asset_owner_type: row.subject_type,
@@ -605,7 +623,7 @@ onUnmounted(() => {
           新增拉取任务
         </el-button>
       </div>
-      <el-table :data="missions" v-loading="missionsLoading" size="small" border>
+      <KTable :data="missions" v-loading="missionsLoading" size="small" border>
         <el-table-column label="主体类型" prop="subject_type" width="100">
           <template #default="{ row }">
             <el-tag type="info" v-if="row.subject_type === 'character'">character</el-tag>
@@ -646,16 +664,16 @@ onUnmounted(() => {
           <template #default="{ row }">
             <!-- 立刻拉取：异常任务禁用 -->
             <el-tooltip
-              :content="row.is_abnormal ? (row.abnormal_reason || '主体已不存在，无法拉取') : (canPullNow(row) ? '可以立刻拉取' : (isPulling(row) ? '正在拉取中...' : formatRemainingTime(getRemainingSeconds(row.last_pull_time))))"
+              :content="row.can_pull === false ? '无权操作该任务（仅创建者或同公司成员可拉取）' : (row.is_abnormal ? (row.abnormal_reason || '主体已不存在，无法拉取') : (canPullNow(row) ? '可以立刻拉取' : (isPulling(row) ? '正在拉取中...' : formatRemainingTime(getRemainingSeconds(row.last_pull_time)))))"
               placement="top">
-              <el-button size="small" type="primary" plain :disabled="row.is_abnormal" @click="handlePullMission(row)">
+              <el-button size="small" type="primary" plain :disabled="row.is_abnormal || row.can_pull === false" @click="handlePullMission(row)">
                 <el-icon style="margin-right:4px">
                   <Refresh />
                 </el-icon>
                 立刻拉取
               </el-button>
             </el-tooltip>
-            <el-button size="small" type="danger" plain @click="handleDeleteMission(row)">
+            <el-button size="small" type="danger" plain :disabled="row.can_delete === false" @click="handleDeleteMission(row)">
               <el-icon style="margin-right:4px">
                 <Delete />
               </el-icon>
@@ -663,7 +681,7 @@ onUnmounted(() => {
             </el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </KTable>
 
       <el-dialog v-model="createDialogVisible" title="新增拉取任务" width="420px">
         <el-form :model="createForm" label-width="96px">

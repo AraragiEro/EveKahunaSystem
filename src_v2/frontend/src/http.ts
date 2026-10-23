@@ -128,7 +128,11 @@ class HttpService {
 
           authStore.logout()
         } else if (status === 403) {
-          window.location.href = '/forbidden'
+          // 资产模块的 403 是业务权限不足（如公司任务归属），由页面提示，不做整页跳转
+          const reqUrl = response.config?.url || ''
+          if (!reqUrl.startsWith('/EVE/asset/')) {
+            window.location.href = '/forbidden'
+          }
         }
 
         return response

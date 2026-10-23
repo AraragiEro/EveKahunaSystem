@@ -1,8 +1,13 @@
 <script setup lang="ts">
+/* eslint-disable @typescript-eslint/no-explicit-any -- 压缩矿石求解结果沿用后端原始结构（历史 any 契约），P2 只做 KCard/KTable/KStat/KEmpty 替换，未改数据契约 */
+import KEmpty from '@/components/k/KEmpty.vue'
+import KCard from '@/components/k/KCard.vue'
+import KTable from '@/components/k/KTable.vue'
+import KStat from '@/components/k/KStat.vue'
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { http } from '@/http'
 import { ElMessage } from 'element-plus'
-import { DocumentCopy, Check, Delete, CirclePlus, Setting } from '@element-plus/icons-vue'
+import { DocumentCopy, Delete, CirclePlus, Setting } from '@element-plus/icons-vue'
 import { useOreBlacklist } from '@/composables/useOreBlacklist'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
@@ -51,7 +56,7 @@ const blacklistSearchText = ref('') // 黑名单搜索文本
 const { blacklist, blacklistedIdArray, addToBlacklist, removeFromBlacklist, isBlacklisted } = useOreBlacklist()
 
 // 自动补全：搜索矿石名称
-const fetchOreSuggestions = async (queryString: string, cb: Function) => {
+const fetchOreSuggestions = async (queryString: string, cb: (suggestions: Array<{ value: string }>) => void) => {
     if (!queryString) {
         cb([])
         return
@@ -136,7 +141,7 @@ const saveToLocalStorage = () => {
         if (existingDataStr) {
             try {
                 existingData = JSON.parse(existingDataStr)
-            } catch (e) {
+            } catch {
                 // 如果解析失败，使用空对象
                 existingData = {}
             }
@@ -340,6 +345,7 @@ const getCompressedAsteroidData = async () => {
         }
         
         compressedAsteroidData.value = data.data || null
+
         // 保存数据到本地存储
         saveToLocalStorage()
         // 根据是否为空数据显示不同的消息
@@ -441,7 +447,7 @@ const producedMinerals = computed(() => {
     }> = {}
     
     // 遍历所有矿石的矿物产出
-    Object.entries(compressedAsteroidData.value.mineral_yields).forEach(([oreId, minerals]) => {
+    Object.entries(compressedAsteroidData.value.mineral_yields).forEach(([, minerals]) => {
         Object.entries(minerals).forEach(([mineralId, [yieldQuantity]]) => {
             if (!summary[mineralId]) {
                 summary[mineralId] = {
@@ -466,6 +472,33 @@ const shortageMinerals = computed(() => {
     return compressedAsteroidData.value?.shortage_minerals_res || {}
 })
 
+// ── 价格趋势：由求解接口随结果一起下发（data.price_trends），前端不需要再请求 ──
+const priceTrends = computed<Record<string, any>>(() => (compressedAsteroidData.value as any)?.price_trends || {})
+
+const trendSparkPaths = (s: any) => {
+    const W = 70, H = 22, PAD = 1.5
+    const pts = ((s?.spark || []) as number[]).filter(v => Number.isFinite(v) && v > 0)
+    if (pts.length < 2) return { line: '', band: '' }
+    const lo = Math.min(s?.min_low || Math.min(...pts), Math.min(...pts))
+    const hi = Math.max(s?.max_high || Math.max(...pts), Math.max(...pts))
+    const span = Math.max(hi - lo, 1)
+    const x = (i: number) => PAD + (i * (W - PAD * 2)) / (pts.length - 1)
+    const y = (v: number) => H - PAD - ((v - lo) / span) * (H - PAD * 2)
+    const line = pts.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(v).toFixed(2)}`).join(' ')
+    const band = `M${PAD},${y(hi).toFixed(2)} L${(W - PAD).toFixed(2)},${y(hi).toFixed(2)} ` +
+        `L${(W - PAD).toFixed(2)},${y(lo).toFixed(2)} L${PAD},${y(lo).toFixed(2)} Z`
+    return { line, band }
+}
+
+const trendCellData = (row: any) => {
+    const summary = priceTrends.value[String(row?.type_id)] || null
+    return {
+        summary,
+        state: summary ? 'ok' : 'missing',
+        pct: summary?.pct || 0,
+        paths: trendSparkPaths(summary),
+    }
+}
 // 矿石采购表数据（将 purcheses_res 转为数组）
 const orePurchaseTableData = computed(() => {
     if (!compressedAsteroidData.value?.purcheses_res) {
@@ -662,14 +695,6 @@ const totalCostDiscountRatio = computed(() => {
         return 0
     }
     return (totalCostWithShipping.value / totalRequiredValue.value) * 100
-})
-
-// 多余价值占产出价值百分比
-const excessValuePercentage = computed(() => {
-    if (totalProducedValue.value === 0) {
-        return 0
-    }
-    return (totalExcessValue.value / totalProducedValue.value) * 100
 })
 
 // 矿物对比表数据（合并需求、产出、多余矿物、不足矿物）
@@ -1182,6 +1207,7 @@ watch(
 )
 
 onMounted(() => {
+
     cleanupThemeWatcher = onThemeTokenChange(() => {
         updateSankeyChart()
     })
@@ -1397,7 +1423,7 @@ const parseImportText = async () => {
                         found = true
                         break
                     }
-                } catch (error) {
+                } catch {
                     // 继续尝试下一个名称片段
                     continue
                 }
@@ -1459,194 +1485,135 @@ const openImportDialog = () => {
     importText.value = ''
 }
 
+// 上次获取时间：把后端返回的 ISO 串转成本地可读格式
+const lastFetchText = computed(() => {
+    const raw = lastFetchTime.value
+    if (!raw) return ''
+    const d = new Date(raw)
+    if (Number.isNaN(d.getTime())) return raw
+    return d.toLocaleString('zh-CN', { hour12: false })
+})
 </script>
 
 <template>
     <div>
-        <div class="control-row">
-            <div class="control-item">
-                <label>化矿率：</label>
-                <el-input-number
-                    v-model="refinementRate"
-                    :min="0"
-                    :max="100"
-                    :step="0.1"
-                    :precision="1"
-                    controls-position="right"
-                    style="width: 150px;"
-                />
-                <span class="unit">%</span>
-            </div>
-            <div class="control-item">
-                <label>多余矿物惩罚：</label>
-                <el-input-number
-                    v-model="wastePenalty"
-                    :min="0"
-                    :max="100"
-                    :step="0.1"
-                    :precision="2"
-                    controls-position="right"
-                    style="width: 150px;"
-                />
-            </div>
-            <div class="control-item">
-                <label>产出价值奖励：</label>
-                <el-input-number
-                    v-model="outputValueRewardRate"
-                    :min="0"
-                    :max="wastePenalty"
-                    :step="0.01"
-                    :precision="2"
-                    controls-position="right"
-                    style="width: 150px;"
-                />
-                <span class="hint-text" style="margin-left: 10px;">
-                    不能超过多余矿物惩罚，越大越倾向选择高产出矿石
-                </span>
-            </div>
-            <!-- <div class="control-item">
-                <label>不足矿物惩罚：</label>
-                <el-input-number
-                    v-model="shortagePenalty"
-                    :min="0"
-                    :max="100"
-                    :step="0.1"
-                    :precision="2"
-                    controls-position="right"
-                    style="width: 150px;"
-                />
-            </div> -->
-            <div class="control-item">
-                <label>运费设置：</label>
-                <el-input-number
-                    v-model="shippingCostPerVolume"
-                    :min="0"
-                    :step="1"
-                    :precision="0"
-                    controls-position="right"
-                    style="width: 150px;"
-                />
-                <span class="unit">isk/m³</span>
-            </div>
-            <div class="control-item" v-if="purchaseMode === '收单'">
-                <label>收单流动性溢价：</label>
-                <el-input-number
-                    v-model="liquidityImpact"
-                    :min="0"
-                    :max="100"
-                    :step="0.01"
-                    :precision="2"
-                    controls-position="right"
-                    style="width: 150px;"
-                />
-                <span class="hint-text" style="margin-left: 10px;">
-                    仅在收单模式生效，0 为关闭，建议 0.1～5.0
-                </span>
-            </div>
-            <div class="control-item" v-if="purchaseMode === '收单'">
-                <label>采购时间上限：</label>
-                <el-input-number
-                    v-model="purchaseTimeLimit"
-                    :min="1"
-                    :max="30"
-                    :step="1"
-                    :precision="0"
-                    controls-position="right"
-                    style="width: 150px;"
-                />
-                <span class="unit">天</span>
-                <span class="hint-text" style="margin-left: 10px;">
-                    用于流动性检查，基于30天平均交易量计算预期交易量
-                </span>
-            </div>
-            <div class="control-item" v-if="purchaseMode === '扫单'">
-                <label>市场供给比例：</label>
-                <el-input-number
-                    v-model="marketSupplyRatio"
-                    :min="1"
-                    :max="100"
-                    :step="1"
-                    :precision="0"
-                    controls-position="right"
-                    style="width: 150px;"
-                />
-                <span class="unit">%</span>
-                <span class="hint-text" style="margin-left: 10px;">
-                    将市场挂单总量乘以此比例作为购买上限，避免实际抢购时供应不足
-                </span>
-            </div>
-            <div class="control-item">
-                <label>采购模式：</label>
-                <el-switch
-                    v-model="purchaseMode"
-                    active-value="扫单"
-                    inactive-value="收单"
-                    active-text="扫单"
-                    inactive-text="收单"
-                />
-            </div>
-            <div class="control-item">
-                <label>数量模式：</label>
-                <el-switch
-                    v-model="quantityMode"
-                    active-value="缺失"
-                    inactive-value="全部"
-                    active-text="缺失"
-                    inactive-text="全部"
-                    :disabled="useCustomData"
-                />
-            </div>
-            <div class="control-item">
-                <label>使用自定义数据：</label>
-                <el-switch
-                    v-model="useCustomData"
-                    active-text="是"
-                    inactive-text="否"
-                />
-            </div>
-            <div class="control-item">
-                <label>允许直接购买矿物：</label>
-                <el-switch
-                    v-model="allowDirectMineralPurchase"
-                    active-text="是"
-                    inactive-text="否"
-                />
-                <span class="hint-text" style="margin-left: 10px;">
-                    关闭后求解器仅通过矿石化矿获取矿物
-                </span>
-            </div>
-            <el-button 
-                v-if="useCustomData" 
-                @click="openImportDialog"
-                type="primary"
-           >
-                导入自定义清单
-            </el-button>
-            <el-button 
-                @click="blacklistDialogVisible = true"
-                type="warning"
-                plain
-            >
-                <el-icon :size="16"><Setting /></el-icon> 黑名单管理
-            </el-button>
-            <el-button @click="getCompressedAsteroidData" :loading="loading" type="primary">
-                <el-icon :size="18"><Cpu /></el-icon> 求解
-            </el-button>
-            <div v-if="lastFetchTime" class="control-item">
-                <label>上次获取时间：</label>
-                <span class="fetch-time">{{ lastFetchTime }}</span>
+        <!-- 参数面板：按用途分组，字段统一「标签在上 / 控件固定宽 / 单位后缀 / 说明小字」 -->
+        <div class="param-panel">
+            <section class="param-group">
+                <header class="param-group-title">换算与价值</header>
+                <div class="param-grid">
+                    <div class="param-field">
+                        <span class="param-label">化矿率</span>
+                        <div class="param-control">
+                            <el-input-number v-model="refinementRate" :min="0" :max="100" :step="0.1" :precision="1"
+                                controls-position="right" size="small" class="param-input" />
+                            <span class="param-unit">%</span>
+                        </div>
+                    </div>
+                    <div class="param-field">
+                        <span class="param-label">多余矿物惩罚</span>
+                        <div class="param-control">
+                            <el-input-number v-model="wastePenalty" :min="0" :max="100" :step="0.1" :precision="2"
+                                controls-position="right" size="small" class="param-input" />
+                        </div>
+                    </div>
+                    <div class="param-field">
+                        <span class="param-label">产出价值奖励</span>
+                        <div class="param-control">
+                            <el-input-number v-model="outputValueRewardRate" :min="0" :max="wastePenalty" :step="0.01"
+                                :precision="2" controls-position="right" size="small" class="param-input" />
+                        </div>
+                        <span class="param-hint">不能超过多余矿物惩罚，越大越倾向高产出矿石</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="param-group">
+                <header class="param-group-title">运费与流动性</header>
+                <div class="param-grid">
+                    <div class="param-field">
+                        <span class="param-label">运费设置</span>
+                        <div class="param-control">
+                            <el-input-number v-model="shippingCostPerVolume" :min="0" :step="1" :precision="0"
+                                controls-position="right" size="small" class="param-input" />
+                            <span class="param-unit">isk/m³</span>
+                        </div>
+                    </div>
+                    <div v-if="purchaseMode === '收单'" class="param-field">
+                        <span class="param-label">收单流动性溢价</span>
+                        <div class="param-control">
+                            <el-input-number v-model="liquidityImpact" :min="0" :max="100" :step="0.01" :precision="2"
+                                controls-position="right" size="small" class="param-input" />
+                        </div>
+                        <span class="param-hint">仅收单模式生效，0 为关闭，建议 0.1～5.0</span>
+                    </div>
+                    <div v-if="purchaseMode === '收单'" class="param-field">
+                        <span class="param-label">采购时间上限</span>
+                        <div class="param-control">
+                            <el-input-number v-model="purchaseTimeLimit" :min="1" :max="30" :step="1" :precision="0"
+                                controls-position="right" size="small" class="param-input" />
+                            <span class="param-unit">天</span>
+                        </div>
+                        <span class="param-hint">用于流动性检查，按 30 天平均交易量估算</span>
+                    </div>
+                    <div v-if="purchaseMode === '扫单'" class="param-field">
+                        <span class="param-label">市场供给比例</span>
+                        <div class="param-control">
+                            <el-input-number v-model="marketSupplyRatio" :min="1" :max="100" :step="1" :precision="0"
+                                controls-position="right" size="small" class="param-input" />
+                            <span class="param-unit">%</span>
+                        </div>
+                        <span class="param-hint">挂单总量乘以此比例作为购买上限</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="param-group">
+                <header class="param-group-title">采购策略</header>
+                <div class="param-grid">
+                    <div class="param-field">
+                        <span class="param-label">采购模式</span>
+                        <el-switch v-model="purchaseMode" active-value="扫单" inactive-value="收单" active-text="扫单"
+                            inactive-text="收单" />
+                    </div>
+                    <div class="param-field">
+                        <span class="param-label">数量模式</span>
+                        <el-switch v-model="quantityMode" active-value="缺失" inactive-value="全部" active-text="缺失"
+                            inactive-text="全部" :disabled="useCustomData" />
+                    </div>
+                    <div class="param-field">
+                        <span class="param-label">使用自定义数据</span>
+                        <el-switch v-model="useCustomData" active-text="是" inactive-text="否" />
+                    </div>
+                    <div class="param-field">
+                        <span class="param-label">允许直接购买矿物</span>
+                        <el-switch v-model="allowDirectMineralPurchase" active-text="是" inactive-text="否" />
+                        <span class="param-hint">关闭后求解器仅通过矿石化矿获取矿物</span>
+                    </div>
+                </div>
+            </section>
+
+            <div class="param-actions">
+                <el-button v-if="useCustomData" type="primary" plain size="small" @click="openImportDialog">
+                    导入自定义清单
+                </el-button>
+                <el-button type="warning" plain size="small" @click="blacklistDialogVisible = true">
+                    <el-icon :size="14"><Setting /></el-icon> 黑名单管理
+                </el-button>
+                <el-button type="primary" size="small" :loading="loading" @click="getCompressedAsteroidData">
+                    <el-icon :size="16"><Cpu /></el-icon> 求解
+                </el-button>
+                <span v-if="lastFetchTime" class="param-fetch-time">上次获取：{{ lastFetchText }}</span>
             </div>
         </div>
         
         <!-- 矿物需求表格（未获取数据时显示） -->
         <div v-if="!compressedAsteroidData && requiredMinerals.length> 0" class="required-minerals-container">
-            <el-card shadow="never">
-                <template #header>
-                    <span>矿物需求</span>
-                </template>
-                <el-table
+            <KCard title="矿物需求">
+                <KTable
+                    density="compact"
                     :data="requiredMinerals"
-                    border
+
                     max-height="100%" style="font-size: 14px;"
                >
                     <el-table-column label="类型" width="70">
@@ -1671,151 +1638,81 @@ const openImportDialog = () => {
                             {{ formatAccounting(row.quantity) }}
                         </template>
                     </el-table-column>
-                </el-table>
-            </el-card>
+                </KTable>
+            </KCard>
         </div>
         
         <!-- 无缺失矿物提示 -->
         <div v-if="compressedAsteroidData?.is_empty" class="empty-minerals-container">
-            <el-card shadow="hover" class="empty-minerals-card">
-                <div class="empty-minerals-content">
-                    <el-icon class="empty-icon" :size="64">
-                        <Check />
-                    </el-icon>
-                    <h3 class="empty-title">无缺失矿物</h3>
-                    <p class="empty-description">当前计划中所有矿物需求已满足，无需采购压缩矿石</p>
-                </div>
-            </el-card>
+            <KEmpty
+                size="lg"
+                icon="info"
+                why="无缺失矿物"
+                hint="当前计划中所有矿物需求已满足，无需采购压缩矿石"
+            />
         </div>
         
         <!-- 统计卡片 -->
         <div v-if="compressedAsteroidData && !compressedAsteroidData.is_empty" class="statistics-container">
-            <el-card shadow="hover" class="statistics-card">
-                <el-row :gutter="20">
-                    <el-col :xs="24" :sm="12" :md="8" :lg="8" :xl="8" class="statistic-col">
-                        <div class="statistic-item statistic-item-volume">
-                            <el-statistic 
-                                :value="totalVolume" 
-                                :precision="2"
-                                suffix=" m³"
-                           >
-                                <template #title>
-                                    <div class="statistic-title">
-                                        <span class="statistic-icon">📦</span>
-                                        采购总体积
-                                    </div>
-                                </template>
-                            </el-statistic>
-                            <div class="volume-details">
-                                <div>矿石: {{ formatAccounting(totalOreVolume) }} m³</div>
-                                <div>矿物: {{ formatAccounting(totalMineralVolume) }} m³</div>
-                                <div class="volume-total">总计: {{ formatAccounting(totalVolume) }} m³</div>
-                            </div>
+            <KCard>
+                <!-- 主指标：总成本。全屏只允许这一个 lg 量级的数字 -->
+                <div class="solve-hero">
+                    <KStat
+                        size="lg"
+                        label="总成本"
+                        :value="formatAccounting(totalCostWithShipping)"
+                        unit="ISK"
+                    />
+                    <div class="solve-hero-aside">
+                        <div class="solve-hero-aside-label">折扣比例</div>
+                        <div class="solve-hero-aside-value">
+                            {{ formatAccounting(totalCostDiscountRatio) }}<span class="solve-hero-aside-unit">%</span>
                         </div>
-                    </el-col>
-                    <el-col :xs="24" :sm="12" :md="8" :lg="8" :xl="8" class="statistic-col">
-                        <div class="statistic-item statistic-item-purchase">
-                            <el-statistic 
-                                :value="totalPurchaseCost" 
-                                :precision="2"
-                                suffix=" ISK"
-                           >
-                                <template #title>
-                                    <div class="statistic-title">
-                                        <span class="statistic-icon">🛒</span>
-                                        采购总价值
-                                    </div>
-                                </template>
-                            </el-statistic>
-                            <div class="purchase-details">
-                                <div>矿石: {{ formatAccounting(totalCost) }} ISK</div>
-                                <div>矿物: {{ formatAccounting(totalMineralCost) }} ISK</div>
-                                <div class="purchase-total">总计: {{ formatAccounting(totalPurchaseCost) }} ISK</div>
-                            </div>
+                        <div class="solve-hero-foot">
+                            <span>采购 {{ formatAccounting(totalPurchaseCost) }} ISK</span>
+                            <span class="solve-hero-sep">·</span>
+                            <span>运费 {{ formatAccounting(estimatedShippingCost) }} ISK</span>
                         </div>
-                    </el-col>
-                    <el-col :xs="24" :sm="12" :md="8" :lg="8" :xl="8" class="statistic-col">
-                        <div class="statistic-item statistic-item-required">
-                            <el-statistic 
-                                :value="totalRequiredValue" 
-                                :precision="2"
-                                suffix=" ISK"
-                           >
-                                <template #title>
-                                    <div class="statistic-title">
-                                        <span class="statistic-icon">🎯</span>
-                                        需求总价值
-                                    </div>
-                                </template>
-                            </el-statistic>
-                        </div>
-                    </el-col>
-                    <el-col :xs="24" :sm="12" :md="8" :lg="8" :xl="8" class="statistic-col">
-                        <div class="statistic-item statistic-item-shipping">
-                            <el-statistic 
-                                :value="estimatedShippingCost" 
-                                :precision="2"
-                                suffix=" ISK"
-                           >
-                                <template #title>
-                                    <div class="statistic-title">
-                                        <span class="statistic-icon">🚚</span>
-                                        预估运费
-                                    </div>
-                                </template>
-                            </el-statistic>
-                        </div>
-                    </el-col>
-                    
-                    <el-col :xs="24" :sm="12" :md="8" :lg="8" :xl="8" class="statistic-col">
-                        <div class="statistic-item statistic-item-produced">
-                            <el-statistic 
-                                :value="totalProducedValue" 
-                                :precision="2"
-                                suffix=" ISK"
-                           >
-                                <template #title>
-                                    <div class="statistic-title">
-                                        <span class="statistic-icon">✨</span>
-                                        矿物产出总价值
-                                    </div>
-                                </template>
-                            </el-statistic>
-                            <div class="produced-details">
-                                <div class="discount-ratio">多余价值: {{ formatAccounting(totalExcessValue) }} </div>
-                            </div>
-                            <div class="produced-details">
-                                <div class="discount-ratio">多余比例: {{ formatAccounting(totalExcessValue / totalProducedValue * 100) }}% </div>
-                            </div>
-                            <div class="produced-details">
-                                <div class="discount-ratio">折扣比例: {{ formatAccounting(discountRatio) }}%</div>
-                            </div>
-                        </div>
-                    </el-col>
-                    <el-col :xs="24" :sm="12" :md="8" :lg="8" :xl="8" class="statistic-col">
-                        <div class="statistic-item statistic-item-total-cost">
-                            <el-statistic 
-                                :value="totalCostWithShipping" 
-                                :precision="2"
-                                suffix=" ISK"
-                           >
-                                <template #title>
-                                    <div class="statistic-title">
-                                        <span class="statistic-icon">💳</span>
-                                        总成本
-                                    </div>
-                                </template>
-                            </el-statistic>
-                            <div class="total-cost-details">
-                                <div>采购: {{ formatAccounting(totalPurchaseCost) }} ISK</div>
-                                <div>运费: {{ formatAccounting(estimatedShippingCost) }} ISK</div>
-                                <div class="total-cost-total">总计: {{ formatAccounting(totalCostWithShipping) }} ISK</div>
-                                <div class="total-cost-discount">折扣比例: {{ formatAccounting(totalCostDiscountRatio) }}%</div>
-                            </div>
-                        </div>
-                    </el-col>
-                </el-row>
-            </el-card>
+                    </div>
+                </div>
+
+                <!-- 次指标：五个 md 量级，一行排开；明细各收成一行 -->
+                <div class="solve-metrics">
+                    <KStat
+                        size="md"
+                        label="采购总体积"
+                        :value="formatAccounting(totalVolume)"
+                        unit="m³"
+                        :hint="`矿石 ${formatAccounting(totalOreVolume)} m³ · 矿物 ${formatAccounting(totalMineralVolume)} m³`"
+                    />
+                    <KStat
+                        size="md"
+                        label="采购总价值"
+                        :value="formatAccounting(totalPurchaseCost)"
+                        unit="ISK"
+                        :hint="`矿石 ${formatAccounting(totalCost)} ISK · 矿物 ${formatAccounting(totalMineralCost)} ISK`"
+                    />
+                    <KStat
+                        size="md"
+                        label="需求总价值"
+                        :value="formatAccounting(totalRequiredValue)"
+                        unit="ISK"
+                    />
+                    <KStat
+                        size="md"
+                        label="预估运费"
+                        :value="formatAccounting(estimatedShippingCost)"
+                        unit="ISK"
+                    />
+                    <KStat
+                        size="md"
+                        label="矿物产出总价值"
+                        :value="formatAccounting(totalProducedValue)"
+                        unit="ISK"
+                        :hint="`多余 ${formatAccounting(totalExcessValue)} ISK · 折扣 ${formatAccounting(discountRatio)}%`"
+                    />
+                </div>
+            </KCard>
         </div>
         
         <div v-if="compressedAsteroidData && !compressedAsteroidData.is_empty" class="compressed-asteroid-container">
@@ -1824,11 +1721,9 @@ const openImportDialog = () => {
                 <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12" class="layout-item">
                     <!-- 矿物对比表格 -->
                     <div class="mineral-comparison">
-                <el-card shadow="never">
-                    <template #header>
-                        <span>矿物对比</span>
-                    </template>
-                    <el-table
+                <KCard title="矿物对比">
+                    <KTable
+                        density="compact"
                         :data="mineralComparisonTableData"
                         border
                         max-height="600" style="font-size: 14px;"
@@ -1850,7 +1745,29 @@ const openImportDialog = () => {
                                 {{ row.type_name_zh || row.type_name }}
                             </template>
                         </el-table-column>
-                        <el-table-column label="需求数量" prop="required_quantity" width="120">
+                                            <el-table-column label="价格趋势" width="170">
+                        <template #default="{ row }">
+                            <div class="trend-cell">
+                                <template v-if="trendCellData(row).state === 'ok'">
+                                    <svg class="trend-spark" viewBox="0 0 70 22" preserveAspectRatio="none">
+                                        <path :d="trendCellData(row).paths.band" class="spark-band" />
+                                        <path :d="trendCellData(row).paths.line" class="spark-line" />
+                                    </svg>
+                                    <span class="trend-pct" :class="trendCellData(row).pct >= 8 ? 'num-danger' : trendCellData(row).pct <= -8 ? 'num-good' : 'num-muted'">
+                                        {{ (trendCellData(row).pct >= 0 ? '+' : '') + trendCellData(row).pct.toFixed(1) + '%' }}
+                                    </span>
+                                    <el-popover trigger="hover" placement="left" :width="300" :show-after="160" popper-class="price-trend-pop">
+                                        <template #reference>
+                                            <el-icon class="trend-icon"><TrendCharts /></el-icon>
+                                        </template>
+                                        <PriceTrendCard :summary="trendCellData(row).summary" :label="row?.type_name_zh || row?.type_name" :days="30" />
+                                    </el-popover>
+                                </template>
+                                <span v-else-if="trendCellData(row).state === 'collecting'" class="trend-state">采集…</span>
+                                <span v-else class="trend-state">数据缺失</span>
+                            </div>
+                        </template>
+                    </el-table-column>                    <el-table-column label="需求数量" prop="required_quantity" width="120">
                             <template #default="{ row }">
                                 {{ formatAccounting(row.required_quantity) }}
                             </template>
@@ -1893,19 +1810,17 @@ const openImportDialog = () => {
                                 </span>
                             </template>
                         </el-table-column>
-                    </el-table>
-                </el-card>
+                    </KTable>
+                </KCard>
                     </div>
                 </el-col>
                 
                 <el-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12" class="layout-item">
                     <!-- 矿石采购表格 -->
                     <div class="ore-purchase">
-                <el-card shadow="never">
-                    <template #header>
-                        <span>矿石采购表</span>
-                    </template>
-                    <el-table
+                <KCard title="矿石采购表">
+                    <KTable
+                        density="compact"
                         :data="orePurchaseTableData"
                         border
                         max-height="600" style="font-size: 14px;"
@@ -1954,7 +1869,29 @@ const openImportDialog = () => {
                                 </span>
                             </template>
                         </el-table-column>
-                        <el-table-column label="平均价格" prop="avrprice" width="180">
+                                            <el-table-column label="价格趋势" width="170">
+                        <template #default="{ row }">
+                            <div class="trend-cell">
+                                <template v-if="trendCellData(row).state === 'ok'">
+                                    <svg class="trend-spark" viewBox="0 0 70 22" preserveAspectRatio="none">
+                                        <path :d="trendCellData(row).paths.band" class="spark-band" />
+                                        <path :d="trendCellData(row).paths.line" class="spark-line" />
+                                    </svg>
+                                    <span class="trend-pct" :class="trendCellData(row).pct >= 8 ? 'num-danger' : trendCellData(row).pct <= -8 ? 'num-good' : 'num-muted'">
+                                        {{ (trendCellData(row).pct >= 0 ? '+' : '') + trendCellData(row).pct.toFixed(1) + '%' }}
+                                    </span>
+                                    <el-popover trigger="hover" placement="left" :width="300" :show-after="160" popper-class="price-trend-pop">
+                                        <template #reference>
+                                            <el-icon class="trend-icon"><TrendCharts /></el-icon>
+                                        </template>
+                                        <PriceTrendCard :summary="trendCellData(row).summary" :label="row?.name_zh || row?.name" :days="30" />
+                                    </el-popover>
+                                </template>
+                                <span v-else-if="trendCellData(row).state === 'collecting'" class="trend-state">采集…</span>
+                                <span v-else class="trend-state">数据缺失</span>
+                            </div>
+                        </template>
+                    </el-table-column>                    <el-table-column label="平均价格" prop="avrprice" width="180">
                             <template #default="{ row }">
                                 <div>
                                     <div>{{ formatAccounting(row.avrprice) }}</div>
@@ -2002,8 +1939,8 @@ const openImportDialog = () => {
                                 </el-button>
                             </template>
                         </el-table-column>
-                    </el-table>
-                </el-card>
+                    </KTable>
+                </KCard>
                     </div>
                 </el-col>
                 
@@ -2018,15 +1955,12 @@ const openImportDialog = () => {
                >
                     <!-- 桑吉图 -->
                     <div class="sankey-chart">
-                <el-card shadow="never">
-                    <template #header>
-                        <span>矿石产出矿物关系图</span>
-                    </template>
+                <KCard title="矿石产出矿物关系图">
                     <div 
                         ref="sankeyChartRef" 
                         style="width: 100%; height: 600px;"
                    ></div>
-                </el-card>
+                </KCard>
                     </div>
                 </el-col>
 
@@ -2041,11 +1975,9 @@ const openImportDialog = () => {
                >
                     <!-- 矿物采购表格 -->
                     <div class="mineral-purchase">
-                <el-card shadow="never">
-                    <template #header>
-                        <span>矿物采购表</span>
-                    </template>
-                    <el-table
+                <KCard title="矿物采购表">
+                    <KTable
+                        density="compact"
                         :data="mineralPurchaseTableData"
                         border
                         max-height="600" style="font-size: 14px;"
@@ -2107,8 +2039,8 @@ const openImportDialog = () => {
                                 {{ formatAccounting(row.total_price) }}
                             </template>
                         </el-table-column>
-                    </el-table>
-                </el-card>
+                    </KTable>
+                </KCard>
                     </div>
                 </el-col>
                 
@@ -2164,7 +2096,7 @@ const openImportDialog = () => {
                     @select="handleBlacklistSelect"
                 />
             </div>
-            <el-table :data="blacklist" border max-height="400" v-if="blacklist.length > 0">
+            <KTable density="compact" :data="blacklist" border max-height="400" v-if="blacklist.length > 0">
                 <el-table-column label="矿石名称" prop="name_zh" />
                 <el-table-column label="Type ID" prop="type_id" width="100" />
                 <el-table-column label="操作" width="80" fixed="right">
@@ -2174,12 +2106,13 @@ const openImportDialog = () => {
                             type="danger"
                             :icon="Delete"
                             circle
+                            aria-label="移出黑名单" title="移出黑名单"
                             @click="removeFromBlacklist(row.type_id)"
                         />
                     </template>
                 </el-table-column>
-            </el-table>
-            <el-empty v-else description="暂无黑名单矿石" />
+            </KTable>
+            <KEmpty v-else why="还没有拉黑任何矿石" hint="在上方搜索矿石名称即可加入黑名单，求解时会跳过这些矿石" />
             <template #footer>
                 <el-button @click="blacklistDialogVisible = false">关闭</el-button>
             </template>
@@ -2226,310 +2159,161 @@ const openImportDialog = () => {
     margin-bottom: 20px;
 }
 
-.empty-minerals-card {
-    border-radius: 8px;
-    overflow: hidden;
-}
-
-.empty-minerals-card :deep(.el-card__body) {
-    padding: 60px 40px;
-}
-
-.empty-minerals-content {
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 20px;
-}
-
-.empty-icon {
-    color: var(--el-color-success);
-    margin-bottom: 10px;
-}
-
-.empty-title {
-    font-size: 24px;
-    font-weight: 600;
-    color: var(--el-text-color-primary);
-    margin: 0;
-}
-
-.empty-description {
-    font-size: 16px;
-    color: var(--el-text-color-regular);
-    margin: 0;
-    line-height: 1.6;
-}
-
 .statistics-container {
     margin-top: 20px;
     margin-bottom: 20px;
 }
 
-.statistics-card {
-    border-radius: 8px;
-    overflow: hidden;
-}
-
-.statistics-card :deep(.el-card__body) {
-    padding: 24px;
-}
-
-.statistics-card :deep(.el-row) {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: stretch;
-}
-
-.statistic-col {
+.metric-col {
     margin-bottom: 20px;
     display: flex;
-    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px 16px;
+    border-radius: var(--k-radius-sm);
+    border: 1px solid var(--k-color-border-subtle);
+    background: var(--k-color-surface-soft);
 }
 
-.statistic-col:last-child,
-.statistic-col:nth-last-child(2) {
+.metric-col:last-child,
+.metric-col:nth-last-child(2) {
     margin-bottom: 0;
 }
 
-.statistic-item {
-    padding: 28px 24px;
-    text-align: center;
-    border-radius: 8px;
-    background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
-    border: 1px solid var(--el-border-color-lighter);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    min-height: 140px;
+/* 化矿求解 · 指标区（A 方案：1 主 + 5 次）
+   为什么这么排：这 6 个数是同一组求解结果，"总成本"是结论，其余是拆解。
+   全屏只允许一个 lg 量级，避免 6 个 68px 数字互相抢注意力。 */
+.solve-hero {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: end;
+    gap: var(--k-space-6);
+    padding-bottom: var(--k-space-4);
+    margin-bottom: var(--k-space-4);
+    border-bottom: 1px solid var(--k-color-border-subtle);
+}
+
+/* 右侧：结论性指标（折扣比例）+ 分项，作为左侧 lg 数字的解释 */
+.solve-hero-aside {
+    min-width: 0;
+    text-align: right;
+}
+
+.solve-hero-aside-label {
+    font-size: var(--k-font-xs);
+    color: var(--k-color-text-secondary);
+    line-height: 1.4;
+}
+
+.solve-hero-aside-value {
+    margin-top: var(--k-space-1);
+    font-size: var(--k-font-2xl);
+    font-weight: 650;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    color: var(--k-color-text);
+    font-variant-numeric: tabular-nums;
+}
+
+.solve-hero-aside-unit {
+    margin-left: 2px;
+    font-size: var(--k-font-sm);
+    font-weight: 400;
+    color: var(--k-color-text-secondary);
+}
+
+.solve-hero-foot {
     display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
-    align-items: center;
-    position: relative;
-    overflow: hidden;
-    box-sizing: border-box;
-    width: 100%;
-    flex: 1;
-    height: 100%;
+    justify-content: flex-end;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--k-space-2);
+    margin-top: var(--k-space-2);
+    font-size: var(--k-font-xs);
+    color: var(--k-color-text-secondary);
+    font-variant-numeric: tabular-nums;
 }
 
-.statistic-item::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, var(--el-color-primary), var(--el-color-primary-light-3));
-    opacity: 0;
-    transition: opacity 0.3s;
+.solve-hero-sep {
+    color: var(--k-color-border);
 }
 
-.statistic-item:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-    border-color: var(--el-color-primary-light-5);
-    background: linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%);
+.solve-metrics {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: var(--k-space-5);
 }
 
-.statistic-item:hover::before {
-    opacity: 1;
+@media (max-width: 1600px) {
+    .solve-metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
 }
 
-.statistic-item-volume {
-    border-top-color: #409eff;
+@media (max-width: 1100px) {
+    .solve-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
-.statistic-item-volume .volume-details {
-    font-size: 12px;
-    margin-top: auto;
-    padding-top: 12px;
-    text-align: left;
-    line-height: 1.6;
-    width: 100%;
+@media (max-width: 640px) {
+    .solve-metrics {
+        grid-template-columns: 1fr;
+    }
 }
 
-.statistic-item-volume .volume-total {
+/* 指标下方的明细行（矿石/矿物/总计等），不属于指标块本身 */
+.metric-details {
+    font-size: var(--k-font-xs);
+    line-height: 1.7;
+    color: var(--k-color-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.metric-total {
     font-weight: 600;
     color: var(--k-color-text);
     margin-top: 4px;
 }
 
-.statistic-item :deep(.el-statistic) {
-    flex: 0 0 auto;
-}
-
-.statistic-item :deep(.el-statistic__head) {
-    margin-bottom: 12px;
-}
-
-.statistic-item-cost {
-    border-top-color: #67c23a;
-}
-
-.statistic-item-mineral-cost {
-    border-top-color: #409eff;
-}
-
-.statistic-item-shipping {
-    border-top-color: #e6a23c;
-}
-
-.statistic-item-produced {
-    border-top-color: #909399;
-}
-
-.statistic-item-percentage {
-    border-top-color: #f56c6c;
-}
-
-.statistic-item-purchase {
-    border-top-color: #f093fb;
-}
-
-.statistic-item-required {
-    border-top-color: #4facfe;
-}
-
-.statistic-item-total-cost {
-    border-top-color: #9c27b0;
-}
-
-.statistic-item-total-cost .total-cost-details {
-    font-size: 12px;
-    margin-top: auto;
-    padding-top: 12px;
-    text-align: left;
-    line-height: 1.6;
-    width: 100%;
-}
-
-.statistic-item-total-cost .total-cost-total {
-    font-weight: 600;
-    color: var(--k-color-text);
-    margin-top: 4px;
-}
-
-.statistic-item-total-cost .total-cost-discount {
+.metric-discount {
     font-weight: 600;
     color: var(--k-color-primary);
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--el-border-color-lighter);
-}
-
-.statistic-item-purchase .purchase-details {
-    font-size: 12px;
-    margin-top: auto;
-    padding-top: 12px;
-    text-align: left;
-    line-height: 1.6;
-    width: 100%;
-}
-
-.statistic-item-purchase .purchase-total {
-    font-weight: 600;
-    color: var(--k-color-text);
-    margin-top: 4px;
-}
-
-.statistic-item-produced .produced-details {
-    font-size: 12px;
-    margin-top: auto;
-    padding-top: 12px;
-    text-align: left;
-    line-height: 1.6;
-    width: 100%;
-}
-
-.statistic-item-produced .discount-ratio {
-    font-weight: 600;
-    color: var(--k-color-text);
-}
-
-.statistic-title {
-    font-size: 14px;
-    color: var(--el-text-color-regular);
-    margin-bottom: 12px;
-    font-weight: 500;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    line-height: 1.5;
-}
-
-.statistic-icon {
-    font-size: 18px;
-    display: inline-block;
-}
-
-.statistic-item :deep(.el-statistic__head) {
-    margin-bottom: 12px;
-}
-
-.statistic-item :deep(.el-statistic__number) {
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--el-color-primary);
-    line-height: 1.2;
-    letter-spacing: -0.5px;
-}
-
-.statistic-item :deep(.el-statistic__suffix) {
-    font-size: 18px;
-    color: var(--el-text-color-secondary);
-    margin-left: 4px;
-    font-weight: 500;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--k-color-border-subtle);
 }
 
 /* 响应式优化 */
 @media (max-width: 768px) {
-    .statistics-card :deep(.el-card__body) {
-        padding: 16px;
-    }
-    
-    .statistic-col {
+    .metric-col {
         margin-bottom: 16px;
+        padding: 16px 12px;
     }
-    
-    .statistic-col:last-child {
+
+    .metric-col:last-child {
         margin-bottom: 0;
-    }
-    
-    .statistic-item {
-        padding: 20px 16px;
-        min-height: 120px;
-    }
-    
-    .statistic-item :deep(.el-statistic__number) {
-        font-size: 24px;
-    }
-    
-    .statistic-title {
-        font-size: 13px;
     }
 }
 
 @media (min-width: 769px) and (max-width: 991px) {
-    .statistic-col {
+    .metric-col {
         margin-bottom: 16px;
     }
-    
-    .statistic-col:nth-child(3),
-    .statistic-col:nth-child(6) {
+
+    .metric-col:nth-child(3),
+    .metric-col:nth-child(6) {
         margin-bottom: 0;
     }
 }
 
 @media (min-width: 992px) {
-    .statistic-col {
+    .metric-col {
         margin-bottom: 20px;
     }
-    
-    .statistic-col:nth-child(3),
-    .statistic-col:nth-child(6) {
+
+    .metric-col:nth-child(3),
+    .metric-col:nth-child(6) {
         margin-bottom: 0;
     }
 }
@@ -2566,50 +2350,98 @@ const openImportDialog = () => {
     font-size: 14px;
 }
 
-/* Theme override */
-.compressed-asteroid-container,
-.layout-item,
-.statistics-card,
-.statistic-item {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
+/* ── 参数面板：分组卡片 + 统一字段栅格 ─────────────────────────────── */
+.param-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.statistic-item {
-    box-shadow: var(--k-shadow-sm) !important;
+.param-group {
+  border: 1px solid var(--k-color-border-subtle);
+  border-radius: var(--k-radius-sm);
+  background: var(--k-color-surface);
+  box-shadow: var(--k-shadow-section);
+  padding: 10px 14px 14px;
 }
 
-.statistic-item:hover {
-    box-shadow: var(--k-shadow-md) !important;
-    background: color-mix(in srgb, var(--k-color-primary) 8%, var(--k-color-surface-soft)) !important;
+.param-group-title {
+  font-size: var(--k-font-xs);
+  font-weight: 600;
+  color: var(--k-color-text-secondary);
+  letter-spacing: 0.02em;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--k-color-border-subtle);
 }
 
-.statistic-item-volume .volume-details,
-.statistic-item-total-cost .total-cost-details,
-.statistic-item-purchase .purchase-details,
-.statistic-item-produced .produced-details {
-    color: var(--k-color-text-secondary) !important;
+.param-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px 20px;
 }
 
-:deep(.el-card),
-:deep(.el-card__header),
-:deep(.el-card__body),
-:deep(.el-form-item__label),
-:deep(.el-input__wrapper),
-:deep(.el-input-number .el-input__wrapper),
-:deep(.el-input-number__decrease),
-:deep(.el-input-number__increase),
-:deep(.el-table),
-:deep(.el-table th.el-table__cell),
-:deep(.el-table td.el-table__cell),
-:deep(.el-tabs__content) {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
+.param-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
-:deep(.el-table th.el-table__cell) {
-    background: var(--k-color-surface-soft) !important;
+.param-label {
+  font-size: var(--k-font-xs);
+  color: var(--k-color-text-secondary);
 }
+
+.param-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.param-input {
+  width: 132px;
+}
+
+.param-unit {
+  font-size: var(--k-font-xs);
+  color: var(--k-color-text-secondary);
+  white-space: nowrap;
+}
+
+.param-hint {
+  font-size: var(--k-font-xs);
+  color: var(--k-color-text-secondary);
+  opacity: 0.75;
+  line-height: 1.4;
+}
+
+.param-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.param-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+.param-fetch-time {
+  margin-left: auto;
+  font-size: var(--k-font-xs);
+  color: var(--k-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 表内迷你趋势（与流程/材料视图一致） */
+.trend-cell { display: flex; align-items: center; gap: 6px; }
+.trend-spark { width: 70px; height: 22px; flex: 0 0 auto; }
+.spark-band { fill: color-mix(in srgb, var(--k-color-primary) 16%, transparent); stroke: none; }
+.spark-line { fill: none; stroke: color-mix(in srgb, var(--k-color-primary) 80%, transparent); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.trend-pct { font-size: var(--k-font-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.trend-icon { flex: 0 0 auto; cursor: pointer; color: var(--k-color-text-secondary); opacity: 0.6; }
+.trend-icon:hover { color: var(--k-color-primary); opacity: 1; }
+.trend-state { font-size: var(--k-font-xs); color: var(--k-color-text-secondary); opacity: 0.7; }
 </style>

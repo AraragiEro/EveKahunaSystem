@@ -189,7 +189,7 @@ const setQuantity = (value: number) => {
 .task-name {
     font-size: 16px;
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-text);
     margin-bottom: 8px;
 }
 
@@ -212,7 +212,7 @@ const setQuantity = (value: number) => {
 
 .status-label {
     font-size: 14px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
     white-space: nowrap;
 }
 
@@ -246,12 +246,12 @@ const setQuantity = (value: number) => {
 
 .input-label {
     font-size: 14px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .unit {
     font-size: 14px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .quick-buttons {

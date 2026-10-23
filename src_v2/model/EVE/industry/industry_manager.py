@@ -1,4 +1,4 @@
-# 标准库导入
+﻿# 标准库导入
 import asyncio
 import json
 import multiprocessing
@@ -331,6 +331,67 @@ class IndustryManager(metaclass=SingletonMeta):
 
         return killed_count, cleaned_type_ids
 
+    @staticmethod
+    def _batch_timeout_seconds() -> int:
+        """批次等待子进程的超时时间（秒）。
+
+        可通过 config.toml 的 [APP] BATCH_TIMEOUT 覆盖，默认 300 秒。
+        大型舰船（勒维亚坦 372 条待算关系）实测需要 160~200 秒。
+        """
+        try:
+            return max(30, config.getint("APP", "BATCH_TIMEOUT", fallback=300))
+        except Exception:
+            return 300
+
+    @staticmethod
+    async def _close_process_pool(
+        process_pool: ProcessPoolExecutor,
+        running_type: list = None,
+        futures_map: dict = None,
+        force: bool = False,
+        wait_workers: bool = False,
+        cleanup_timeout: float = 15.0,
+    ):
+        """关闭批次进程池——**绝不允许在事件循环线程上做同步阻塞等待**。
+
+        2026-10-19 事故复盘：子进程在成本计算中卡死，`finally` 里的
+        `ProcessPoolExecutor.shutdown(wait=True)` 在事件循环线程上无限期等待
+        worker 退出，导致主线程停在 futex、整个 Web 服务（含 /api/health）
+        失联 65 分钟。因此这里：
+          1. force kill / shutdown 全部用 asyncio.to_thread 挪到线程里执行
+             （`_force_kill_process_pool` 内部还有 time.sleep(0.5)，同样是同步阻塞）；
+          2. 外面再套 wait_for 兜底，超时就放弃等待——宁可遗留一个清理线程，
+             也绝不能让事件循环被锁死。
+        返回 (killed_count, cleaned_type_ids)，供进度文案使用。
+        """
+        stats = {"killed": 0, "cleaned": []}
+
+        def _sync_close():
+            if force and futures_map is not None:
+                try:
+                    killed, cleaned = IndustryManager._force_kill_process_pool(
+                        process_pool, running_type or [], futures_map)
+                    stats["killed"], stats["cleaned"] = killed, cleaned
+                except Exception as e:
+                    logger.error(f"[batch] 强制kill进程池时出错: {e}")
+            try:
+                process_pool.shutdown(wait=wait_workers, cancel_futures=True)
+            except RuntimeError:
+                # 进程池已经关闭，忽略
+                pass
+            except Exception as e:
+                logger.debug(f"[batch] shutdown进程池时出错（可能已关闭）: {e}")
+
+        try:
+            await asyncio.wait_for(asyncio.to_thread(_sync_close), timeout=cleanup_timeout)
+        except asyncio.TimeoutError:
+            logger.error(
+                f"[batch] 关闭进程池超过 {cleanup_timeout} 秒仍未返回，已放弃等待"
+                "（避免锁死事件循环；残留 worker 交由后续 kill 或容器重启处理）")
+        except Exception as e:
+            logger.warning(f"[batch] 关闭进程池时出现异常: {e}")
+        return stats["killed"], stats["cleaned"]
+
     @classmethod
     async def calculate_cost(cls, op: ConfigFlowOperateCenter, type_id_list, market_id: int = None):
         """
@@ -378,7 +439,13 @@ class IndustryManager(metaclass=SingletonMeta):
                         "process_future": process_future, "type_id": type_id}
                 asyncio_future = asyncio.wrap_future(process_future)
                 try:
-                    result = await asyncio_future
+                    # 兜底超时：即使外层等待逻辑出问题，也不能让协程永远挂在子进程上。
+                    # 注意 wait_for 超时只会取消 asyncio 侧 future，子进程仍在跑，
+                    # 由批次结束时的 _close_process_pool(force=True) 负责收尸。
+                    result = await asyncio.wait_for(
+                        asyncio_future,
+                        timeout=IndustryManager._batch_timeout_seconds() + 30,
+                    )
                 finally:
                     # 确保从 running_type 中移除
                     if type_id in running_type:
@@ -452,7 +519,11 @@ class IndustryManager(metaclass=SingletonMeta):
             # 等待当前批次完成
             if market_id is not None and progress_key:
                 # 有market_id的情况，使用asyncio.wait实时更新进度，并设置超时防止阻塞
-                batch_timeout = 180  # 批次超时时间：5分钟
+                # 批次超时（秒）：可通过 config.toml 的 [APP] BATCH_TIMEOUT 覆盖。
+                # 原值 180 秒对大型舰船（如勒维亚坦：148 节点 / 546 关系 / 372 条待算关系）
+                # 偏紧，实测子进程算到 180 秒仍在「整理节点」，会被强杀导致返回
+                # 「没有成本计算结果」且不写骨架缓存，因此默认放宽到 300 秒。
+                batch_timeout = config.getint("APP", "BATCH_TIMEOUT", fallback=300)
                 remaining_futures = set(futures)
                 start_time = asyncio.get_event_loop().time()
 
@@ -465,16 +536,11 @@ class IndustryManager(metaclass=SingletonMeta):
                                 f"批次超时（{batch_timeout}秒），强制kill进程并清理 {len(remaining_futures)} 个未完成任务")
 
                             # 最激进的清理策略：直接kill进程池中的所有进程
+                            # kill + shutdown 全部挪到线程里执行，避免 time.sleep(0.5)
+                            # 与 shutdown 阻塞事件循环（2026-10-19 事故）
                             logger.warning(f"强制kill进程池中的所有进程，释放资源")
-                            killed_count, _ = IndustryManager._force_kill_process_pool(
-                                batch_process_pool, running_type, batch_futures_map)
-
-                            # 尝试shutdown进程池（可能已经部分关闭）
-                            try:
-                                batch_process_pool.shutdown(
-                                    wait=False, cancel_futures=True)
-                            except Exception as e:
-                                logger.debug(f"shutdown进程池时出错（可能已关闭）: {e}")
+                            killed_count, _ = await cls._close_process_pool(
+                                batch_process_pool, running_type, batch_futures_map, force=True)
 
                             # 取消所有未完成的asyncio任务
                             cancelled_count = 0
@@ -514,16 +580,11 @@ class IndustryManager(metaclass=SingletonMeta):
                                 f"批次超时（{batch_timeout}秒），强制kill进程并清理 {len(pending)} 个未完成任务")
 
                             # 最激进的清理策略：直接kill进程池中的所有进程
+                            # kill + shutdown 全部挪到线程里执行，避免 time.sleep(0.5)
+                            # 与 shutdown 阻塞事件循环（2026-10-19 事故）
                             logger.warning(f"强制kill进程池中的所有进程，释放资源")
-                            killed_count, _ = IndustryManager._force_kill_process_pool(
-                                batch_process_pool, running_type, batch_futures_map)
-
-                            # 尝试shutdown进程池（可能已经部分关闭）
-                            try:
-                                batch_process_pool.shutdown(
-                                    wait=False, cancel_futures=True)
-                            except Exception as e:
-                                logger.debug(f"shutdown进程池时出错（可能已关闭）: {e}")
+                            killed_count, _ = await cls._close_process_pool(
+                                batch_process_pool, running_type, batch_futures_map, force=True)
 
                             # 取消所有未完成的asyncio任务
                             cancelled_count = 0
@@ -593,15 +654,10 @@ class IndustryManager(metaclass=SingletonMeta):
                 except Exception as e:
                     logger.error(f"[batch] 批次处理异常: {str(e)[:100]}", exc_info=True)
                     has_error = True
-                    # 最激进的清理策略：直接kill进程池中的所有进程
+                    # 最激进的清理策略：直接kill进程池中的所有进程（在线程里执行）
                     logger.warning(f"[batch] 批次处理异常，强制kill进程池中的所有进程")
-                    killed_count, _ = IndustryManager._force_kill_process_pool(
-                        batch_process_pool, running_type, batch_futures_map)
-                    try:
-                        batch_process_pool.shutdown(
-                            wait=False, cancel_futures=True)
-                    except Exception as shutdown_err:
-                        logger.debug(f"shutdown进程池时出错（可能已关闭）: {shutdown_err}")
+                    killed_count, _ = await cls._close_process_pool(
+                        batch_process_pool, running_type, batch_futures_map, force=True)
                     # 取消所有未完成的任务
                     for future in remaining_futures:
                         if not future.done():
@@ -620,48 +676,48 @@ class IndustryManager(metaclass=SingletonMeta):
                         "current_step": f"批次处理异常: {str(e)}，已kill {killed_count} 个进程"
                     })
                 finally:
-                    # 确保进程池被清理，即使正常完成也要关闭
-                    try:
-                        # 使用shutdown的返回值或异常来判断是否已关闭
-                        batch_process_pool.shutdown(wait=True)
-                        logger.debug(f"批次进程池已正常关闭")
-                    except RuntimeError:
-                        # 进程池已经关闭，忽略
-                        pass
-                    except Exception as cleanup_err:
-                        logger.warning(f"[batch] 清理批次进程池时出错: {cleanup_err}")
+                    # 确保进程池被清理，即使正常完成也要关闭。
+                    # ⚠️ 禁止在这里同步调用 shutdown(wait=True)：子进程卡死时会
+                    # 永久阻塞事件循环，把整个 Web 服务（含 /api/health）一起拖死
+                    # （2026-10-19 事故）。统一走 _close_process_pool（线程内 + 超时兜底），
+                    # 正常完成时用 wait_workers=True 保持「等 worker 退出」的原语义。
+                    await cls._close_process_pool(
+                        batch_process_pool, running_type, batch_futures_map,
+                        wait_workers=True)
             else:
-                # 没有market_id的情况，使用asyncio.gather
+                # 没有market_id的情况：用 asyncio.wait_for 给整批加时限，
+                # 避免子进程卡死时协程永远挂在这里
+                batch_timeout = cls._batch_timeout_seconds()
                 try:
-                    results = await asyncio.gather(*futures)
+                    results = await asyncio.wait_for(
+                        asyncio.gather(*futures), timeout=batch_timeout)
                     for result in results:
                         cost_dict[result[0]] = result[1]
                         completed_count += 1
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"[batch] 批次计算超过 {batch_timeout} 秒未完成，强制清理进程池")
+                    has_error = True
+                    for pending_task in futures:
+                        if not pending_task.done():
+                            pending_task.cancel()
+                    await cls._close_process_pool(
+                        batch_process_pool, running_type, batch_futures_map, force=True)
+                    completed_count += len(batch_type_ids)
                 except Exception as e:
                     logger.error(f"[batch] 批次计算任务失败: {str(e)[:100]}", exc_info=True)
                     has_error = True
-                    # 最激进的清理策略：直接kill进程池中的所有进程
+                    # 最激进的清理策略：直接kill进程池中的所有进程（在线程里执行）
                     logger.warning(f"[batch] 批次计算失败，强制kill进程池中的所有进程")
-                    killed_count, _ = IndustryManager._force_kill_process_pool(
-                        batch_process_pool, running_type, batch_futures_map)
-                    try:
-                        batch_process_pool.shutdown(
-                            wait=False, cancel_futures=True)
-                    except Exception as shutdown_err:
-                        logger.debug(f"shutdown进程池时出错（可能已关闭）: {shutdown_err}")
+                    await cls._close_process_pool(
+                        batch_process_pool, running_type, batch_futures_map, force=True)
                     # 对于失败的批次，仍然增加计数
                     completed_count += len(batch_type_ids)
                 finally:
-                    # 确保进程池被清理
-                    try:
-                        # 使用shutdown的返回值或异常来判断是否已关闭
-                        batch_process_pool.shutdown(wait=True)
-                        logger.debug(f"批次进程池已正常关闭")
-                    except RuntimeError:
-                        # 进程池已经关闭，忽略
-                        pass
-                    except Exception as cleanup_err:
-                        logger.warning(f"[batch] 清理批次进程池时出错: {cleanup_err}")
+                    # 确保进程池被清理（禁止同步 shutdown(wait=True)，见 _close_process_pool）
+                    await cls._close_process_pool(
+                        batch_process_pool, running_type, batch_futures_map,
+                        wait_workers=True)
 
             # 清理当前批次的futures
             futures.clear()
@@ -1631,6 +1687,48 @@ async def _async_calculation_worker(type_id: int, plan_data: dict):
         get_new_redis_manager,
     )
     from src_v2.model.EVE.sde.sde_builder.database_manager import get_new_sde_database_manager
+
+    # 诊断钩子（内联实现，无额外 import）：卡死时
+    # `docker exec kahunasystem kill -USR1 <子进程pid>` 打印所有协程栈到日志。
+    # 注：fork 后重置继承管理器那套已回滚——实测根因是计算链路里的 ESI 价格刷新
+    # 持锁（见 plan_configflow_operate.get_type_adjust_price），与 fork 无关。
+        # 诊断钩子（内联实现，避免额外模块在子进程里被循环导入拦掉）：
+        # 卡死时 `docker exec kahunasystem kill -USR1 <子进程pid>` 会把所有协程栈写进日志
+    try:
+        def _dump_asyncio_tasks(signum, frame):
+            try:
+                loop = asyncio.get_event_loop_policy().get_event_loop()
+                tasks = asyncio.all_tasks(loop)
+                out = [f"\n=== asyncio task dump pid={os.getpid()} tasks={len(tasks)} ===\n"]
+                for t in tasks:
+                    out.append(f"--- task {t.get_name()}\n")
+                    # 沿 cr_await 链把整条 await 路径打出来（get_stack() 只有一层）
+                    try:
+                        coro = t.get_coro()
+                    except Exception:
+                        coro = None
+                    depth = 0
+                    while coro is not None and depth < 40:
+                        cframe = getattr(coro, "cr_frame", None) or getattr(coro, "gi_frame", None)
+                        if cframe is not None:
+                            fname = cframe.f_code.co_filename.split("/")[-1]
+                            out.append(f"    {fname}:{cframe.f_lineno} {cframe.f_code.co_name}\n")
+                        nxt = getattr(coro, "cr_await", None) or getattr(coro, "gi_yieldfrom", None)
+                        if nxt is None:
+                            waiter = getattr(t, "_fut_waiter", None)
+                            if waiter is not None:
+                                out.append(f"    >> waiting on {type(waiter).__name__}: {waiter!r}\n")
+                            break
+                        coro = nxt
+                        depth += 1
+                logger.error("".join(out))
+            except Exception as dump_err:
+                logger.error(f"asyncio task dump 失败: {dump_err}")
+
+        signal.signal(signal.SIGUSR1, _dump_asyncio_tasks)
+        logger.info(f"已安装协程栈 dump 钩子: kill -USR1 {os.getpid()}")
+    except Exception as e:
+        logger.warning(f"安装协程栈 dump 钩子失败: {e}")
 
     ndm = get_new_neo4j_manager()
     pdm = get_new_postgres_manager()

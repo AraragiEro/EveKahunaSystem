@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Aim, Connection, Tickets, Money, ShoppingCart } from '@element-plus/icons-vue'
+import KCard from '@/components/k/KCard.vue'
 
 interface UtilityItem {
   name: string
@@ -73,7 +74,7 @@ const isExternal = (url: string): boolean => url.startsWith('http')
             rel="noopener noreferrer"
             class="card-link"
           >
-            <el-card class="utils-card" shadow="never">
+            <KCard class="utils-card" padding="none">
               <div class="card-inner">
                 <div class="icon-wrap">
                   <el-icon :size="40" class="card-icon">
@@ -83,7 +84,7 @@ const isExternal = (url: string): boolean => url.startsWith('http')
                 <h3 class="card-title">{{ item.name }}</h3>
                 <p class="card-desc">{{ item.description }}</p>
               </div>
-            </el-card>
+            </KCard>
           </a>
 
           <router-link
@@ -91,7 +92,7 @@ const isExternal = (url: string): boolean => url.startsWith('http')
             :to="item.url"
             class="card-link"
           >
-            <el-card class="utils-card" shadow="never">
+            <KCard class="utils-card" padding="none">
               <div class="card-inner">
                 <div class="icon-wrap">
                   <el-icon :size="40" class="card-icon">
@@ -101,7 +102,7 @@ const isExternal = (url: string): boolean => url.startsWith('http')
                 <h3 class="card-title">{{ item.name }}</h3>
                 <p class="card-desc">{{ item.description }}</p>
               </div>
-            </el-card>
+            </KCard>
           </router-link>
         </template>
       </div>
@@ -161,7 +162,7 @@ const isExternal = (url: string): boolean => url.startsWith('http')
   border-radius: 2px;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--k-color-primary) 90%, #fff) 0%,
+    color-mix(in srgb, var(--k-color-primary) 90%, var(--k-color-tint)) 0%,
     var(--k-color-primary) 100%
   );
   box-shadow: 0 0 10px color-mix(in srgb, var(--k-color-primary) 45%, transparent);
@@ -231,12 +232,7 @@ const isExternal = (url: string): boolean => url.startsWith('http')
 
 /* Card */
 .utils-card {
-  --el-card-padding: 0;
   height: 180px;
-  border-radius: var(--k-radius-md);
-  background: var(--k-color-surface);
-  border: 1px solid var(--k-color-border);
-  box-shadow: var(--k-shadow-sm);
   transition:
     transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
     box-shadow 0.35s ease,

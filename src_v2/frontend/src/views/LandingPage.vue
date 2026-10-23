@@ -14,9 +14,11 @@ import {
 } from '@element-plus/icons-vue'
 import VipPricingPlans from '@/components/VipPricingPlans.vue'
 import LandingTrustBar from '@/components/LandingTrustBar.vue'
+import AppFooter from '@/components/AppFooter.vue'
 import mainViewImage from '@/assets/landing-page-mainView.png'
 import githubIconWhite from '@/assets/github-mark-white.svg'
-import aifadianLogo from '@/assets/横版-黑底-透明背景.png'
+// 爱发电：与顶栏一样只用方形图标 + 页面字体文字，横版字标缩到 30px 会糊
+import aifadianIcon from '@/assets/afdian-icon.png'
 import industryPlanImage from '@/assets/landing-page-工业规划.png'
 import marketAnalysisImage from '@/assets/landing-page-市场与利润分析.png'
 import costCalculationImage from '@/assets/landing-page-成本计算.png'
@@ -118,7 +120,8 @@ const features = [
             </el-button>
             <el-button size="large" class="ghost-btn" @click="goToAnnouncements">公告</el-button>
             <el-button v-if="showDonateButton" size="large" class="ghost-btn donate" @click="openDonate">
-              <img :src="aifadianLogo" alt="爱发电" class="donate-icon" />
+              <img :src="aifadianIcon" alt="爱发电" class="donate-icon" />
+              爱发电
             </el-button>
           </div>
           <p v-if="showQQGroupButton" class="qq-tip">邀请码获取请加入 QQ 交流群：{{ qqGroupNumber }}</p>
@@ -145,13 +148,15 @@ const features = [
                 :key="imgIndex"
                 type="button"
                 class="feature-image-btn"
+                :aria-label="`查看大图：${feature.title} 第 ${imgIndex + 1} 张`"
                 @click="openPreview(feature.images, imgIndex)"
               >
                 <img :src="img" :alt="`${feature.title}-${imgIndex + 1}`" loading="lazy" />
                 <span class="zoom-layer"><el-icon><ZoomIn /></el-icon></span>
               </button>
             </div>
-            <button v-else type="button" class="feature-image-btn" @click="openPreview(feature.image, 0)">
+            <button v-else type="button" class="feature-image-btn" :aria-label="`查看大图：${feature.title}`"
+              @click="openPreview(feature.image, 0)">
               <img :src="feature.image" :alt="feature.title" loading="lazy" />
               <span class="zoom-layer"><el-icon><ZoomIn /></el-icon></span>
             </button>
@@ -173,20 +178,7 @@ const features = [
       <VipPricingPlans />
     </section>
 
-    <footer class="landing-footer">
-      <div class="footer-links">
-        <a :href="GITHUB_REPO_URL" target="_blank" rel="noopener">GitHub</a>
-        <span class="footer-sep">·</span>
-        <router-link to="/announcements">公告</router-link>
-        <span v-if="showQQGroupButton" class="footer-sep">·</span>
-        <span v-if="showQQGroupButton">QQ群 {{ qqGroupNumber }}</span>
-        <template v-if="showDonateButton">
-          <span class="footer-sep">·</span>
-          <a :href="donateLink" target="_blank" rel="noopener">支持作者</a>
-        </template>
-      </div>
-      <div class="footer-copy">© 2026 Kahuna System</div>
-    </footer>
+    <AppFooter variant="landing" />
 
     <el-dialog v-model="previewVisible" width="88%" top="6vh" class="image-preview-dialog">
       <div class="preview-wrap">
@@ -303,8 +295,8 @@ const features = [
 }
 
 .donate-icon {
-  height: 30px;
-  width: auto;
+  width: 18px;
+  height: 18px;
 }
 
 .qq-tip {
@@ -425,42 +417,6 @@ const features = [
 
 .pricing-section {
   padding-bottom: 64px;
-}
-
-.landing-footer {
-  text-align: center;
-  padding: 28px 20px 24px;
-  border-top: 1px solid var(--k-color-border);
-  color: var(--k-color-text-secondary);
-}
-
-.footer-links {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
-  font-size: 14px;
-}
-
-.footer-links a {
-  color: var(--k-color-text-secondary);
-  text-decoration: none;
-  transition: color 0.2s;
-}
-
-.footer-links a:hover {
-  color: var(--k-color-primary);
-}
-
-.footer-sep {
-  color: var(--k-color-border);
-  margin: 0 4px;
-}
-
-.footer-copy {
-  font-size: 12px;
 }
 
 .preview-wrap {

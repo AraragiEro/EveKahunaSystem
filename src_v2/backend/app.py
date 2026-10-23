@@ -41,7 +41,7 @@ if enable_api_docs:
         swagger_ui_path=api_docs_path,
         info=Info(
             title="KahunaBot API",
-            version="1.6.1",
+            version="1.6.3",
             description="KahunaBot API 接口文档 - EVE Online 工业规划与资产管理系统",
         ),
         security_schemes={

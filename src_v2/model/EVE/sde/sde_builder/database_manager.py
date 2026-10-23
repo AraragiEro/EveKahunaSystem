@@ -207,13 +207,32 @@ class SDEDatabaseManager:
         logger.info("SDE PostgreSQL 数据库初始化完成")
     
     @asynccontextmanager
+    async def _semaphore_guard(self, timeout: float = 15.0):
+        """带超时的信号量守卫。
+
+        ⚠️ 2026-10-19 事故：子进程 SDE 池只有 pool_size=2 + max_overflow=4，
+        而计算阶段有 20 并发；一旦信号量被占满，`async with self.semaphore`
+        会**无超时地永久等待**，整个计算协程静默卡死（事件循环 idle、CPU≈0、
+        不报错、不打日志）。这里改成带超时获取，宁可抛错也不要无声死等。
+        """
+        try:
+            await asyncio.wait_for(self.semaphore.acquire(), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                f"等待数据库连接超过 {timeout} 秒（连接池可能已耗尽）")
+        try:
+            yield
+        finally:
+            self.semaphore.release()
+
+    @asynccontextmanager
     async def get_session(self):
         """获取新的数据库会话（异步上下文管理器）"""
         if not self._session_maker:
             raise RuntimeError("数据库未初始化，请先调用 init() 方法")
         
-        # 使用信号量限制并发连接数，防止连接池耗尽
-        async with self.semaphore:
+        # 使用信号量限制并发连接数，防止连接池耗尽（带超时，避免永久静默）
+        async with self._semaphore_guard():
             session = self._session_maker()
             try:
                 yield session
@@ -243,7 +262,7 @@ class SDEDatabaseManager:
             raise RuntimeError("数据库未初始化，请先调用 init() 方法")
         
         # 使用信号量限制并发连接数，防止连接池耗尽
-        async with self.semaphore:
+        async with self._semaphore_guard():
             session = self._session_maker()
             try:
                 # 对于只读查询，不需要事务，直接执行
@@ -278,3 +297,25 @@ def get_sde_database_manager():
 
 def get_new_sde_database_manager():
     return SDEDatabaseManager()
+
+
+async def reset_inherited_sde_manager():
+    """fork 出的子进程必须调用一次：丢弃从父进程继承的 SDE 单例连接。
+
+    继承来的引擎绑在父进程的事件循环上，子进程复用会静默卡在连接池
+    check-out（无 TCP 连接、无异常）。2026-10-19 成本计算静默卡死根因之一。
+    """
+    global _sde_database_manager
+    mgr = _sde_database_manager
+    if mgr is not None:
+        engine = getattr(mgr, "engine", None)
+        if engine is not None:
+            try:
+                await engine.dispose()
+            except Exception:
+                pass
+        try:
+            await mgr.close()
+        except Exception:
+            pass
+    _sde_database_manager = None

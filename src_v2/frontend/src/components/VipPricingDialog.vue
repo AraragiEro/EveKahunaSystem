@@ -47,7 +47,7 @@ const dialogVisible = computed({
 
 .pricing-subtitle {
   font-size: 18px;
-  color: #64748b;
+  color: var(--k-color-text-secondary);
   margin: 0 0 12px 0;
 }
 

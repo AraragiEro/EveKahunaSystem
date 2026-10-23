@@ -68,6 +68,13 @@ def check_csrf(f):
         csrf_header = request.headers.get('X-CSRF-Token')
 
         if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+            # 诊断留痕：403 不属于异常，默认不会出现在任何日志里，
+            # 线上"概率性 403"排查时这一行是唯一线索。只记存在性与路径，不记 token 值。
+            logger.warning(
+                f"[csrf] 校验失败 path={request.path} method={request.method} "
+                f"has_cookie={bool(csrf_cookie)} has_header={bool(csrf_header)} "
+                f"match={csrf_cookie == csrf_header if (csrf_cookie and csrf_header) else False}"
+            )
             response = jsonify({'error': 'CSRF validation failed'})
             response.status_code = 403
             return response
@@ -100,6 +107,12 @@ def register_csrf_protection(blueprint):
         csrf_header = request.headers.get('X-CSRF-Token')
 
         if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+            # 诊断留痕：同 check_csrf，只记存在性与路径，不记 token 值。
+            logger.warning(
+                f"[csrf] 校验失败 path={request.path} method={request.method} "
+                f"has_cookie={bool(csrf_cookie)} has_header={bool(csrf_header)} "
+                f"match={csrf_cookie == csrf_header if (csrf_cookie and csrf_header) else False}"
+            )
             response = jsonify({'error': 'CSRF validation failed'})
             response.status_code = 403
             return response

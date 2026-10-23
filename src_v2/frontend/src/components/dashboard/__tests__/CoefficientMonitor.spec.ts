@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 
 /* ── Mock setup (hoisted by vitest) ── */
@@ -194,6 +195,8 @@ const mountComponent = () => {
 describe('CoefficientMonitor', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // KTable 未显式传 density 时读 stores/tableDensity，需要激活 Pinia
+    setActivePinia(createPinia())
   })
 
   /* ─── 1. Empty state ─── */

@@ -250,9 +250,23 @@ class BPManager:
             return 0
         return max(1, 86400 // production_time)  # 86400秒 = 1天
 
+    _activity_id_locks: dict = {}
+
+    @classmethod
+    async def get_activity_id_by_product_typeid(cls, product_typeid: int, pdm = None) -> Optional[int]:
+        """对外入口：同一 type_id 的并发请求只真正查询一次（single-flight）。
+
+        2026-10-19 事故：371 条关系计算时，20 个并发任务同时查同一个 key，
+        每个都穿透缓存直打数据库，把子进程的小连接池占满后永久静默。
+        """
+        import asyncio
+        lock = cls._activity_id_locks.setdefault(product_typeid, asyncio.Lock())
+        async with lock:
+            return await cls._get_activity_id_by_product_typeid_cached(product_typeid, pdm=pdm)
+
     @classmethod
     @cached(ttl=3600, serializer=PickleSerializer())
-    async def get_activity_id_by_product_typeid(cls, product_typeid: int, pdm = None) -> Optional[int]:
+    async def _get_activity_id_by_product_typeid_cached(cls, product_typeid: int, pdm = None) -> Optional[int]:
         from src_v2.core.log import logger
         logger.debug(f"[cache] get_activity_id_by_product_typeid MISS: type={product_typeid}")
         if pdm:

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import KTable from '@/components/k/KTable.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
+import KCard from '@/components/k/KCard.vue'
 import { ref, computed, onMounted } from 'vue'
 import { http } from '@/http'
 import { ElMessage } from 'element-plus'
@@ -137,23 +140,21 @@ onMounted(() => {
     <!-- Header -->
     <div class="page-header">
       <div class="header-content">
-        <div class="header-accent" />
-        <h1>LP 商店价值评估</h1>
+        <div class="header-title-row">
+          <span class="header-accent" aria-hidden="true" />
+          <h1>LP 商店价值评估</h1>
+        </div>
         <p v-if="snapshotDate" class="header-subtitle">快照日期：{{ snapshotDate }}</p>
       </div>
       <div class="header-glow" />
     </div>
 
     <!-- Empty State -->
-    <el-empty
-      v-if="!loading && corpList.length === 0"
-      description="暂无 LP 快照数据"
-      :image-size="160"
-    />
+    <KEmpty why="暂无 LP 快照数据" v-if="!loading && corpList.length === 0" size="lg" />
 
     <!-- Table -->
-    <el-card v-else shadow="never" class="table-card">
-      <el-table
+    <KCard v-else class="table-card">
+      <KTable
         v-loading="loading"
         :data="corpList"
         row-key="corporation_id"
@@ -166,8 +167,8 @@ onMounted(() => {
         <!-- Rank -->
         <el-table-column label="排名" type="index" width="70" align="center" />
 
-        <!-- Corporation Name -->
-        <el-table-column label="军团名称" width="200" show-overflow-tooltip>
+        <!-- Corporation Name：用 min-width 让这一列吸收多余宽度，表格才不会右侧留一大片空白 -->
+        <el-table-column label="军团名称" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="corp-name-cell" style="cursor: pointer">
               <span class="corp-name-zh">{{ row.corporation_name_zh || row.corporation_name }}</span>
@@ -206,8 +207,8 @@ onMounted(() => {
             <span class="offer-count">{{ row.evaluated_offers }} / {{ row.total_offers }}</span>
           </template>
         </el-table-column>
-      </el-table>
-    </el-card>
+      </KTable>
+    </KCard>
 
     <!-- Detail Dialog -->
     <el-dialog
@@ -217,7 +218,7 @@ onMounted(() => {
       top="3vh"
       destroy-on-close
     >
-      <el-table
+      <KTable
         v-loading="dialogLoading"
         :data="evaluatedItems"
         size="small"
@@ -258,13 +259,13 @@ onMounted(() => {
             <span :class="{ 'is-top': row.is_in_top }" class="lp-sell-value">{{ formatLp(row.lp_sell_value) }}</span>
           </template>
         </el-table-column>
-      </el-table>
+      </KTable>
 
       <!-- Excluded items -->
       <el-divider v-if="excludedItems.length" />
       <el-collapse v-if="excludedItems.length">
         <el-collapse-item :title="`已排除物品 (${excludedItems.length})`">
-          <el-table :data="excludedItems" size="small" style="width: 100%" max-height="300">
+          <KTable :data="excludedItems" size="small" style="width: 100%" max-height="300">
             <el-table-column label="物品名" min-width="160">
               <template #default="{ row }">{{ row.type_name_zh || row.type_name_en }}</template>
             </el-table-column>
@@ -277,7 +278,7 @@ onMounted(() => {
               </template>
             </el-table-column>
             <el-table-column label="LP消耗" prop="lp_cost" width="100" align="right" />
-          </el-table>
+          </KTable>
         </el-collapse-item>
       </el-collapse>
     </el-dialog>
@@ -305,17 +306,33 @@ onMounted(() => {
   z-index: 1;
 }
 
+/* 标题行：竖条与标题垂直居中，不再让竖条单独占一行 */
+.header-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-title-row h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--k-color-text);
+}
+
 .header-accent {
+  flex: 0 0 4px;
   width: 4px;
-  height: 28px;
+  height: 24px;
   border-radius: 2px;
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--k-color-primary) 90%, #fff) 0%,
+    color-mix(in srgb, var(--k-color-primary) 90%, var(--k-color-tint)) 0%,
     var(--k-color-primary) 100%
   );
   box-shadow: 0 0 10px color-mix(in srgb, var(--k-color-primary) 45%, transparent);
-  margin-bottom: 8px;
 }
 
 .page-header h1 {
@@ -362,13 +379,9 @@ onMounted(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border-radius: var(--k-radius-md);
-  border: 1px solid var(--k-color-border);
-  background: var(--k-color-surface);
-  box-shadow: var(--k-shadow-sm);
 }
 
-.table-card :deep(.el-card__body) {
+.table-card :deep(.k-card__body) {
   flex: 1;
   overflow: auto;
   padding: 0;

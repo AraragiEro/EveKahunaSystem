@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import KEmpty from '@/components/k/KEmpty.vue'
+import KCard from '@/components/k/KCard.vue'
+import KStat from '@/components/k/KStat.vue'
 import { computed } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 
@@ -83,16 +86,18 @@ const handleRefresh = () => {
                 </div>
             </div>
             
-            <div v-if="!loading && assetView.length === 0" class="empty-state">
-            <el-empty description="暂无数据" />
-            </div>
+            <KEmpty
+                v-if="!loading && assetView.length === 0"
+                size="lg"
+                why="还没有资产数据"
+                hint="先在资产列表刷新一次角色资产，这里会按物品列出数量"
+            />
             <!-- 资产网格 -->
             <div class="asset-grid" v-else>
-            <el-card 
+            <KCard 
                 v-for="asset in assetView" 
                 :key="asset.type_id" 
                 class="asset-item-card"
-                shadow="hover"
             >
                 <div class="asset-item-content">
                     <el-avatar 
@@ -104,10 +109,16 @@ const handleRefresh = () => {
                     <div class="asset-info">
                         <div class="asset-name-zh">{{ asset.type_name_zh || asset.type_name }}</div>
                         <div class="asset-name-en">{{ asset.type_name }}</div>
-                        <el-tag type="success" class="asset-quantity" size="large">{{ asset.quantity }} 个</el-tag>
+                        <KStat
+                            label="数量"
+                            :value="asset.quantity"
+                            unit="个"
+                            align="center"
+                            tone="success"
+                        />
                     </div>
                 </div>
-                </el-card>
+                </KCard>
             </div>
         </div>
     </div>
@@ -115,13 +126,6 @@ const handleRefresh = () => {
 
 <style scoped>
 .asset-view-dialog-content {
-    min-height: 400px;
-}
-
-.empty-state {
-    display: flex;
-    justify-content: center;
-    align-items: center;
     min-height: 400px;
 }
 
@@ -138,7 +142,7 @@ const handleRefresh = () => {
     align-items: center;
     gap: 12px;
     padding: 16px;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    background: var(--k-gradient-toolbar);
     border-radius: 8px;
 }
 
@@ -154,29 +158,29 @@ const handleRefresh = () => {
     align-items: center;
     gap: 8px;
     font-size: 14px;
-    color: #606266;
+    color: var(--k-color-text-secondary);
 }
 
 .time-label {
     font-weight: 500;
-    color: #909399;
+    color: var(--k-color-text-tertiary);
 }
 
 .time-value {
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-text);
 }
 
 .refresh-button {
     font-size: 14px;
     padding: 10px 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(64, 158, 255, 0.2);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-primary) 20%, transparent);
     transition: all 0.3s ease;
 }
 
 .refresh-button:hover {
-    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
     transform: translateY(-1px);
 }
 
@@ -193,7 +197,7 @@ const handleRefresh = () => {
 
 .asset-item-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--k-shadow-sm);
 }
 
 .asset-item-content {
@@ -205,7 +209,7 @@ const handleRefresh = () => {
 }
 
 .asset-avatar {
-    border: 2px solid #f0f0f0;
+    border: 2px solid var(--k-color-border-subtle);
     border-radius: 4px;
 }
 
@@ -216,25 +220,20 @@ const handleRefresh = () => {
 .asset-name-zh {
     font-size: 14px;
     font-weight: 600;
-    color: #303133;
+    color: var(--k-color-text);
     margin-bottom: 4px;
     word-break: break-word;
 }
 
 .asset-name-en {
     font-size: 12px;
-    color: #909399;
+    color: var(--k-color-text-tertiary);
     margin-bottom: 8px;
     word-break: break-word;
 }
 
 .asset-quantity {
-    font-size: 15px;
-    font-weight: 600;
-    padding: 6px 12px;
     margin-top: 4px;
-    display: inline-block;
-    box-shadow: 0 2px 4px rgba(103, 194, 58, 0.2);
 }
 
 /* 响应式设计 */

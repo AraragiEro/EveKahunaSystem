@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import KTable from '@/components/k/KTable.vue'
+import KToolbar from '@/components/k/KToolbar.vue'
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Edit, Search, Plus } from '@element-plus/icons-vue'
@@ -256,7 +258,7 @@ onMounted(() => {
       </el-button>
     </div>
 
-    <div class="filter-section">
+    <KToolbar dense bordered density-switch>
       <el-input
         v-model="searchUserName"
         placeholder="请输入用户名进行筛选"
@@ -267,9 +269,9 @@ onMounted(() => {
           <el-icon><Search /></el-icon>
         </template>
       </el-input>
-    </div>
+    </KToolbar>
 
-    <el-table
+    <KTable
       :data="filteredVipStates"
       v-loading="loading"
       stripe
@@ -311,7 +313,7 @@ onMounted(() => {
           </el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </KTable>
 
     <!-- 编辑对话框 -->
     <el-dialog
@@ -468,7 +470,14 @@ onMounted(() => {
 }
 
 .expired-text {
-  color: #f56c6c;
+  color: var(--k-color-danger);
+}
+
+/* 到期时间一旦过期不能只靠红色区分：补一个纯 CSS 的警示符号 */
+.expired-text::before {
+  content: '⚠';
+  margin-right: 4px;
+  font-weight: 600;
 }
 </style>
 

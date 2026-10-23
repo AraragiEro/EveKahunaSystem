@@ -27,6 +27,12 @@ PORT = 7890
 # SECRET_KEY
 SECRET_KEY = "生成一个安全的随机密钥"
 
+# 单批次成本计算超时（秒）。超时后强制 kill 子进程并清空结果，
+# 表现为接口返回「没有成本计算结果」且不写骨架缓存。
+# 大型舰船（勒维亚坦等）全量计算实测可超过 180 秒，默认 300；
+# 若仍频繁超时，可调大（注意会拉长单次请求占用时间）。
+BATCH_TIMEOUT = 300
+
 [GOOGLE]
 # Google 服务账号密钥 JSON 文件路径
 CREDENTIALS = "credentials/google-service-account.json"

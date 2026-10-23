@@ -1,0 +1,197 @@
+/* ============================================================================
+ * 报表表格统一外观（.k-report-table）
+ * ----------------------------------------------------------------------------
+ * 用法：给 el-table 加 class="k-report-table"，并去掉 border 属性。
+ *   <el-table class="k-report-table" :data="rows"> … </el-table>
+ *
+ * 设计规范见 docs/ui-design-guidelines.md，要点：
+ *  - 不画竖向格线，只留极淡行分隔（数据密度靠留白与斑马纹，不靠格子）
+ *  - 表头弱于数据：12px / 次要色 / 字重 600
+ *  - 数字右对齐 + tabular-nums；只给关键数字上语义色
+ *  - 可复制列：hover / 已复制都是「与单元格等大的圆角块」
+ *  - 汇总行弱化，只强调数字
+ * 这里全部用 !important 是因为 theme.css 已用 !important 统一过 td 背景，
+ * 且斑马纹带 tr:nth-child() 权重，普通权重压不住。
+ * ========================================================================== */
+
+.k-report-table {
+  --el-table-border-color: transparent;
+  --el-table-border: none;
+  --el-table-row-hover-bg-color: transparent;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 行分隔：只保留极淡的一根底线 */
+.k-report-table td.el-table__cell,
+.k-report-table th.el-table__cell {
+  border-bottom: 1px solid color-mix(in srgb, var(--k-color-border) 42%, transparent) !important;
+}
+
+/* 表头：小一号 + 次要色，视线让给数据 */
+.k-report-table th.el-table__cell {
+  font-size: var(--k-font-xs);
+  font-weight: 600;
+  color: var(--k-color-text-secondary);
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid color-mix(in srgb, var(--k-color-border) 78%, transparent) !important;
+}
+
+/* 斑马纹：宽表横穿整行时的视觉导轨 */
+.k-report-table .el-table__body tr:nth-child(even) > td.el-table__cell {
+  background: color-mix(in srgb, var(--k-color-surface-soft) 62%, var(--k-color-surface)) !important;
+}
+
+/* 行悬浮 */
+.k-report-table .el-table__body tr:hover > td.el-table__cell {
+  background: color-mix(in srgb, var(--k-color-primary) 12%, var(--k-color-surface)) !important;
+}
+
+/* 汇总行 */
+.k-report-table .el-table__footer-wrapper td.el-table__cell {
+  background: var(--k-color-surface-soft) !important;
+  font-size: var(--k-font-xs);
+  font-weight: 600;
+  color: var(--k-color-text-secondary);
+}
+
+/* ── 数值单元格 ─────────────────────────────────────────────────────────── */
+.k-report-table .num-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.k-report-table .num-danger {
+  color: var(--k-color-danger);
+  font-weight: 600;
+}
+
+.k-report-table .num-good {
+  color: var(--k-color-success);
+}
+
+.k-report-table .num-muted {
+  color: var(--k-color-text-secondary);
+}
+
+/* ── 状态胶囊 ───────────────────────────────────────────────────────────── */
+.k-report-table .status-pill {
+  display: inline-block;
+  min-width: 40px;
+  padding: 1px var(--k-space-2);
+  border-radius: var(--k-radius-pill);
+  font-size: var(--k-font-xs);
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+.k-report-table .status-ok {
+  color: var(--k-color-success);
+  background: color-mix(in srgb, var(--k-color-success) 14%, transparent);
+}
+
+.k-report-table .status-warn {
+  color: var(--k-color-warning);
+  background: color-mix(in srgb, var(--k-color-warning) 16%, transparent);
+}
+
+.k-report-table .status-danger {
+  color: var(--k-color-danger);
+  background: color-mix(in srgb, var(--k-color-danger) 14%, transparent);
+}
+
+/* ── 可复制单元格 ───────────────────────────────────────────────────────── */
+/* 命中区铺满整格：点单元格任何位置都能复制。
+   td 默认 padding: 8px 0、.cell padding: 0 12px，仅靠负 margin 覆盖不到上下 padding，
+   所以把 copy 列的 td 上下 padding 归零，改由内部 div 提供，从而真正铺满整格。 */
+/* td 的高度由整行决定，`.cell` 用百分比高度拿不到，所以让命中区绝对定位铺满 td。
+   注意：只有非冻结列能这样写（position:absolute 会覆盖 sticky）。 */
+.k-report-table td.copy-col {
+  position: relative;
+  padding: 0 !important;
+}
+
+.k-report-table .copyable-cell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--k-cell-x);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* 例外：「一格两块」的布局（文字 + 右侧图标入口，如 FlowView 的物品名 + 价格趋势）。
+   这类 copyable-cell 是 flex 容器里的一项，不能再绝对定位铺满——
+   否则它被钉到格子左边，而同级图标成为唯一在流元素也停在左边，两者叠在一起（文字被图标压住）。
+   判定只用类名，不需要给调用方加标记。 */
+.k-report-table .name-with-trend .copyable-cell {
+  position: static;
+  inset: auto;
+  display: block;
+  padding: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.k-report-table .copyable-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* hover / 已复制：底色画在 td 上才能铺满整格；加圆角避免像硬方块 */
+.k-report-table td.copy-col {
+  cursor: pointer;
+  transition: background-color var(--k-dur-1) var(--k-ease);
+}
+
+/* 选择器要够长：theme.css 的 td 背景、斑马纹 tr:nth-child(even)、行悬浮都是 !important，
+   少一层 tr / el-table__cell 就会被压回去（表现为只有圆角没底色）。 */
+.k-report-table .el-table__body tr td.el-table__cell.copy-col:hover {
+  background: color-mix(in srgb, var(--k-color-primary) 16%, transparent) !important;
+  border-radius: var(--k-radius-sm);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 32%, transparent);
+}
+
+.k-report-table .el-table__body tr td.el-table__cell.copy-col.is-copied {
+  background: color-mix(in srgb, var(--k-color-success) 18%, transparent) !important;
+  border-radius: var(--k-radius-sm);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-success) 34%, transparent);
+}
+
+.k-report-table .el-table__body tr td.el-table__cell.copy-col.is-copied .copyable-text {
+  color: var(--k-color-success);
+}
+
+/* ── 滚动条：表格横向/纵向都要看得见 ───────────────────────────────────
+   EP 把原生滚动条设成 scrollbar-width:none，theme.css 已恢复；这里再把
+   .k-report-table 的滚动条加粗一档并提高拇指对比，避免在深色下几乎不可见。 */
+.k-report-table .el-scrollbar__wrap {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--k-color-text-secondary) 55%, transparent) transparent;
+}
+
+.k-report-table .el-scrollbar__wrap::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.k-report-table .el-scrollbar__wrap::-webkit-scrollbar-thumb {
+  border-radius: var(--k-radius-pill);
+  background: color-mix(in srgb, var(--k-color-text-secondary) 55%, transparent);
+}
+
+.k-report-table .el-scrollbar__wrap::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--k-color-primary) 70%, transparent);
+}
+/* 表头层级要高于冻结列（EP 冻结单元格 z-index:2），否则滚动的行会盖住表头 */
+.k-report-table .el-table__header-wrapper {
+  position: relative;
+  z-index: var(--k-z-sticky);
+}
+
+.k-report-table .el-table__footer-wrapper {
+  position: relative;
+  z-index: 2;
+}

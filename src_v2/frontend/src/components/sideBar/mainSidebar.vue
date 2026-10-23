@@ -53,7 +53,7 @@ const goRoute = (target: string) => {
 
 .menu-item {
   height: 44px;
-  border-radius: 10px;
+  border-radius: var(--k-radius-sm);
   margin-bottom: 8px;
   transition: all 0.2s ease;
 }

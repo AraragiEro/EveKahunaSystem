@@ -197,14 +197,45 @@ class ErrorResponse:
     message: str
 
 
-async def _get_owned_asset_pull_mission(
-    asset_owner_type: str, asset_owner_id: int, user_id: str
-):
-    """按主体取出资产拉取任务并校验归属
+async def _get_main_character_corp_context(user_id: str):
+    """取当前用户主角色的公司上下文
 
-    资产拉取任务只允许任务所有者（或管理员）启停、删除、立即拉取。
-    缺少归属校验时，任何登录用户都可以按 (owner_type, owner_id) 操作他人的任务
-    （安全审计 #6）。
+    Returns:
+        (corporation_id, is_director)：主角色缺失或查询失败时返回 (None, False)
+    """
+    try:
+        main_character_id = await UserManager().get_main_character_id(user_id)
+        if not main_character_id:
+            return None, False
+        main_character = await CharacterManager().get_character_by_character_id(
+            main_character_id
+        )
+        if not main_character:
+            return None, False
+        return main_character.corporation_id, bool(main_character.director)
+    except Exception:
+        logger.warning(
+            f"获取用户 {user_id} 主角色公司信息失败: {traceback.format_exc()}"
+        )
+        return None, False
+
+
+async def _get_owned_asset_pull_mission(
+    asset_owner_type: str,
+    asset_owner_id: int,
+    user_id: str,
+    require_director: bool = False,
+):
+    """按主体取出资产拉取任务并校验操作权限
+
+    权限口径（安全审计 #6）：
+    - 角色任务：只有创建者可以操作（管理员例外）；
+    - 公司任务：任务行是全公司共享的一份，创建者、同公司成员都可以拉取/启停，
+      删除额外要求同公司总监。校验「主角色属于该公司」，仍然无法按 owner_id
+      猜出别人的任务。
+
+    Args:
+        require_director: 是否要求操作者是该公司总监（删除等破坏性操作）
 
     Returns:
         (mission_obj, error_response)：校验通过时 error_response 为 None
@@ -217,14 +248,79 @@ async def _get_owned_asset_pull_mission(
     if not mission_obj:
         return None, response_helper.bad_request("任务不存在")
 
-    if mission_obj.user_name != user_id and not await is_admin_user(user_id):
-        logger.warning(
-            f"用户 {user_id} 尝试操作他人（{mission_obj.user_name}）的资产拉取任务 "
-            f"{asset_owner_type}:{asset_owner_id}，已拒绝"
-        )
-        return None, response_helper.forbidden("无权操作他人的资产拉取任务")
+    if await is_admin_user(user_id):
+        return mission_obj, None
 
-    return mission_obj, None
+    if mission_obj.user_name == user_id:
+        return mission_obj, None
+
+    if asset_owner_type == "corp":
+        corp_id, is_director = await _get_main_character_corp_context(user_id)
+        if corp_id is not None and int(corp_id) == int(asset_owner_id):
+            if require_director and not is_director:
+                logger.warning(
+                    f"用户 {user_id} 不是公司 {asset_owner_id} 的总监，"
+                    f"拒绝删除该公司资产拉取任务"
+                )
+                return None, response_helper.forbidden(
+                    "仅公司总监可以删除公司资产拉取任务"
+                )
+            return mission_obj, None
+        logger.warning(
+            f"用户 {user_id}（主角色公司 {corp_id}）尝试操作公司 "
+            f"{asset_owner_id} 的资产拉取任务，已拒绝"
+        )
+        return None, response_helper.forbidden("无权操作其他公司的资产拉取任务")
+
+    logger.warning(
+        f"用户 {user_id} 尝试操作他人（{mission_obj.user_name}）的资产拉取任务 "
+        f"{asset_owner_type}:{asset_owner_id}，已拒绝"
+    )
+    return None, response_helper.forbidden("无权操作他人的资产拉取任务")
+
+
+async def _annotate_asset_pull_mission_permissions(
+    missions: List[dict], user_id: str
+) -> List[dict]:
+    """为任务列表补充 can_pull / can_delete，供前端置灰按钮
+
+    规则与 _get_owned_asset_pull_mission 保持一致：
+    - 管理员：全部可操作；
+    - 角色任务：仅创建者；
+    - 公司任务：创建者与同公司成员可拉取，删除额外要求同公司总监。
+    """
+    if await is_admin_user(user_id):
+        for mission in missions:
+            mission["can_pull"] = True
+            mission["can_delete"] = True
+        return missions
+
+    corp_id, is_director = await _get_main_character_corp_context(user_id)
+
+    # 列表数据里不带创建者，按主体一次性回查任务归属
+    keys = {
+        (mission.get("subject_type"), int(mission.get("subject_id") or 0))
+        for mission in missions
+    }
+    owner_map: Dict[tuple, Optional[str]] = {key: None for key in keys}
+    if keys:
+        async for mission_obj in await EveAssetPullMissionDBUtils.select_all():
+            key = (mission_obj.asset_owner_type, int(mission_obj.asset_owner_id))
+            if key in owner_map:
+                owner_map[key] = mission_obj.user_name
+
+    for mission in missions:
+        subject_type = mission.get("subject_type")
+        subject_id = int(mission.get("subject_id") or 0)
+        is_creator = owner_map.get((subject_type, subject_id)) == user_id
+        if subject_type == "corp":
+            same_corp = corp_id is not None and int(corp_id) == subject_id
+            mission["can_pull"] = bool(is_creator or same_corp)
+            mission["can_delete"] = bool(is_creator or (same_corp and is_director))
+        else:
+            mission["can_pull"] = bool(is_creator)
+            mission["can_delete"] = bool(is_creator)
+    return missions
 
 
 @api_EVE_asset_bp.route('/container/list', methods=['GET'])
@@ -607,6 +703,34 @@ async def create_asset_pull_mission():
         asset_owner_id = data.get('asset_owner_id')
         active = data.get('active')
 
+        if not asset_owner_type or asset_owner_id is None:
+            return response_helper.bad_request("缺少主体参数")
+        if asset_owner_type not in ("character", "corp"):
+            return response_helper.bad_request("主体类型不合法")
+        try:
+            asset_owner_id = int(asset_owner_id)
+        except (TypeError, ValueError):
+            return response_helper.bad_request("主体 ID 不合法")
+
+        # 公司任务用主角色所在公司的总监 token 拉取，指向别的公司既拉不到也会踩空
+        if asset_owner_type == "corp":
+            main_corp_id, _ = await _get_main_character_corp_context(user_id)
+            if main_corp_id is None or int(main_corp_id) != asset_owner_id:
+                return response_helper.bad_request(
+                    "只能拉取自己主角色所在公司的资产"
+                )
+
+        # 公司任务全公司共享一份，已存在时直接提示，避免抛 KahunaException 变成 500
+        existing_mission = (
+            await EveAssetPullMissionDBUtils.select_mission_by_owner_id_and_owner_type(
+                asset_owner_id, asset_owner_type
+            )
+        )
+        if existing_mission:
+            return response_helper.bad_request(
+                "该主体已有资产拉取任务，可直接在任务列表中拉取"
+            )
+
         await AssetManager().create_asset_pull_mission(user_id, asset_owner_type, asset_owner_id, active)
         return {"status": 200, "message": "创建成功"}
     except KahunaException as e:
@@ -681,6 +805,8 @@ async def get_asset_pull_missions():
             missions = await AssetManager().get_all_asset_pull_mission_list()
         else:
             missions = await AssetManager().get_user_asset_pull_mission_list(user_id)
+
+        missions = await _annotate_asset_pull_mission_permissions(missions, user_id)
 
         return {"status": 200, "data": missions}
     except KahunaException as e:
@@ -858,7 +984,7 @@ async def delete_asset_pull_mission():
         402: 需要ALPHA订阅
             - status: 状态码 (402)
             - message: 错误信息 (string)
-        403: 无权操作他人的资产拉取任务
+        403: 无权删除该资产拉取任务（角色任务需创建者，公司任务需同公司总监）
             - status: 状态码 (403)
             - message: 错误信息 (string)
         500: 服务器错误
@@ -883,10 +1009,10 @@ async def delete_asset_pull_mission():
         asset_owner_type = data.get('asset_owner_type')
         asset_owner_id = data.get('asset_owner_id')
 
-        # 归属校验：只能删除自己创建的资产拉取任务（管理员例外）
-        # 原来的「自己是否为总监」判定与请求里的目标公司无关，见安全审计 #6
+        # 归属校验：角色任务只有创建者能删；公司任务允许同公司总监删除（管理员例外）
+        # 原来只校验「自己的主角色是不是总监」，与请求里的目标公司无关，见安全审计 #6
         mission_obj, error_response = await _get_owned_asset_pull_mission(
-            asset_owner_type, asset_owner_id, user_id)
+            asset_owner_type, asset_owner_id, user_id, require_director=True)
         if error_response is not None:
             return error_response
 

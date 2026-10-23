@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import KTable from '@/components/k/KTable.vue'
+import KCard from '@/components/k/KCard.vue'
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import type { EChartsOption } from 'echarts'
@@ -30,6 +32,7 @@ interface topProduct {
 
 // Props定义：接收的数据可能是对象（字典）或数组
 const props = defineProps<{
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 后端成本表在「数组 / 字典」两种形态间切换，沿用历史契约
     PlanCalculateEIVCostTableView: any
 }>()
 
@@ -244,7 +247,7 @@ const totalCostSum = computed(() => {
     const productTotal = productCostSummary.value.reduce((sum, row) => sum + (row.total_cost || 0), 0)
     // 计入所有产品的税费（蓝图成本已在 productTotal 中）
     const taxTotal = topProducts.value.reduce((sum, p) => {
-        return sum + (p.tax_items || []).reduce((s: number, t: any) => s + (t.tax_amount ?? t.amount ?? 0), 0)
+        return sum + (p.tax_items || []).reduce((s: number, t: NonNullable<topProduct['tax_items']>[number]) => s + (t.tax_amount ?? t.amount ?? 0), 0)
     }, 0)
     return productTotal + taxTotal
 })
@@ -384,7 +387,7 @@ const categoryCostSummary = computed<CategoryCostSummary[]>(() => {
     products.forEach(product => {
         const taxItems = product.tax_items
         if (taxItems && Array.isArray(taxItems)) {
-            taxItems.forEach((item: any) => {
+            taxItems.forEach((item: NonNullable<topProduct['tax_items']>[number]) => {
                 const category = item.category || item.name || ''
                 const amount = item.tax_amount ?? item.amount ?? 0
                 if (category && amount > 0) {
@@ -443,7 +446,7 @@ const getSummaries = (param: { columns: Array<{ property?: string; label?: strin
         if (index === 0) {
             // 第一列：产品名称，显示"合计"
             sums.push('合计')
-        } else if (column.property === 'total_cost' && column.label === '数量') {
+        } else if (column.label === '数量') {
             // 数量列：显示总数量
             sums.push(String(productNumSum.value))
         } else if (column.property === 'expected_profit') {
@@ -453,7 +456,7 @@ const getSummaries = (param: { columns: Array<{ property?: string; label?: strin
             } else {
                 sums.push('')
             }
-        } else if (column.property === 'total_cost' && column.label === '总成本') {
+        } else if (column.label === '总成本') {
             // 总成本列：计算总和
             sums.push(formatNumber(totalCostSum.value))
         } else if (column.property === 'children_cost') {
@@ -473,6 +476,17 @@ const getSummaries = (param: { columns: Array<{ property?: string; label?: strin
     return sums
 }
 
+// 材料分类成本汇总：合计总成本与占比
+const getCategorySummaries = (param: { columns: Array<{ property?: string, label?: string }>, data: Array<Record<string, unknown>> }) => {
+    const { columns, data } = param
+    const total = (data || []).reduce((s: number, row: Record<string, unknown>) => s + (Number(row?.total_cost) || 0), 0)
+    return columns.map((column: { property?: string, label?: string }, index: number) => {
+        if (index === 0) return '合计'
+        if (column.property === 'total_cost') return formatNumber(total)
+        if (column.property === 'percentage') return total > 0 ? '100.00%' : '-'
+        return ''
+    })
+}
 // 图表引用
 const productChartRef = ref<HTMLElement>()
 const categoryChartRef = ref<HTMLElement>()
@@ -506,20 +520,15 @@ const initProductChart = () => {
     const total = data.reduce((sum, item) => sum + item.total_cost, 0)
 
     const option: EChartsOption = {
-        title: {
-            text: '最终产品成本占比',
-            left: 'center',
-            textStyle: {
-                fontSize: 16,
-                color: c.text
-            }
-        },
+        // 同上：标题交给卡片头部，图内只留图形与标签
         tooltip: {
             ...themedTooltip(c),
             trigger: 'item',
-            formatter: (params: any) => {
-                const percentage = ((params.value / total) * 100).toFixed(2)
-                return `${params.name}<br/>成本: ${formatNumber(params.value)}<br/>占比: ${percentage}%`
+            formatter: (params) => {
+                const p = Array.isArray(params) ? params[0] : params
+                const value = Number(p.value)
+                const percentage = ((value / total) * 100).toFixed(2)
+                return `${p.name}<br/>成本: ${formatNumber(value)}<br/>占比: ${percentage}%`
             }
         },
         legend: {
@@ -533,7 +542,7 @@ const initProductChart = () => {
                 name: '产品成本',
                 type: 'pie',
                 radius: ['40%', '70%'],
-                avoidLabelOverlap: false,
+                avoidLabelOverlap: true,
                 itemStyle: {
                     borderRadius: 10,
                     borderColor: c.surface,
@@ -542,8 +551,8 @@ const initProductChart = () => {
                 label: {
                     show: true,
                     color: c.text,
-                    formatter: (params: any) => {
-                        const percentage = ((params.value / total) * 100).toFixed(1)
+                    formatter: (params) => {
+                        const percentage = ((Number(params.value) / total) * 100).toFixed(1)
                         return `${params.name}\n${percentage}%`
                     }
                 },
@@ -591,20 +600,15 @@ const initCategoryChart = () => {
     const total = data.reduce((sum, item) => sum + item.total_cost, 0)
 
     const option: EChartsOption = {
-        title: {
-            text: '材料分类成本占比',
-            left: 'center',
-            textStyle: {
-                fontSize: 16,
-                color: c.text
-            }
-        },
+        // 标题由外层卡片头部提供，图内不再重复画一遍（否则两行标题和扇区标签叠在一起）
         tooltip: {
             ...themedTooltip(c),
             trigger: 'item',
-            formatter: (params: any) => {
-                const percentage = ((params.value / total) * 100).toFixed(2)
-                return `${params.name}<br/>成本: ${formatNumber(params.value)}<br/>占比: ${percentage}%`
+            formatter: (params) => {
+                const p = Array.isArray(params) ? params[0] : params
+                const value = Number(p.value)
+                const percentage = ((value / total) * 100).toFixed(2)
+                return `${p.name}<br/>成本: ${formatNumber(value)}<br/>占比: ${percentage}%`
             }
         },
         legend: {
@@ -618,7 +622,7 @@ const initCategoryChart = () => {
                 name: '分类成本',
                 type: 'pie',
                 radius: ['40%', '70%'],
-                avoidLabelOverlap: false,
+                avoidLabelOverlap: true,
                 itemStyle: {
                     borderRadius: 10,
                     borderColor: c.surface,
@@ -627,8 +631,8 @@ const initCategoryChart = () => {
                 label: {
                     show: true,
                     color: c.text,
-                    formatter: (params: any) => {
-                        const percentage = ((params.value / total) * 100).toFixed(1)
+                    formatter: (params) => {
+                        const percentage = ((Number(params.value) / total) * 100).toFixed(1)
                         return `${params.name}\n${percentage}%`
                     }
                 },
@@ -793,120 +797,109 @@ onUnmounted(() => {
             <!-- 维度1：最终产品维度 -->
             <el-col :span="12">
                 <!-- 图表卡片 -->
-                <el-card class="cost-card">
-                    <template #header>
-                        <div class="card-header">
-                            <span>最终产品成本占比</span>
-                        </div>
-                    </template>
+                <KCard class="cost-card" title="最终产品成本占比">
                     <div ref="productChartRef" style="width: 100%; height: 400px;"></div>
-                </el-card>
+                </KCard>
             </el-col>
             <el-col :span="12">
                 <!-- 图表卡片 -->
-                <el-card class="cost-card">
-                    <template #header>
-                        <div class="card-header">
-                            <span>材料分类成本占比</span>
-                        </div>
-                    </template>
+                <KCard class="cost-card" title="材料分类成本占比">
                     <div ref="categoryChartRef" style="width: 100%; height: 400px;"></div>
-                </el-card>
+                </KCard>
             </el-col>
         </el-row>
         <el-row :gutter="20">
             <el-col :span="17">
                 <!-- 表格卡片 -->
-                <el-card class="cost-card">
-                    <template #header>
-                        <div class="card-header">
-                            <span>最终产品成本汇总</span>
-                        </div>
-                    </template>
-                    <el-table :data="productCostSummary" stripe border style="width: 100%" show-summary :summary-method="getSummaries">
-                        <el-table-column prop="type_name" label="产品名称" width="100" />
-                        <el-table-column prop="total_cost" label="数量" width="75">
+                <KCard class="cost-card" title="最终产品成本汇总">
+                    <KTable class="k-report-table" :data="productCostSummary" style="width: 100%" show-summary :summary-method="getSummaries">
+                        <el-table-column prop="type_name" label="产品名称" min-width="150" show-overflow-tooltip />
+                        <el-table-column prop="product_num" label="数量" width="90" align="right" sortable>
+                        <template #default="{ row }">
+                            {{ row.product_num }}
+                        </template>
+                    </el-table-column>
+                        <el-table-column v-if="hasOmegaSubscription" prop="expected_profit" label="预期利润" width="150" align="right" sortable>
+                        <template #default="{ row }">
+                            <div v-if="row.expected_profit !== undefined" class="cost-cell"
+                                :class="row.expected_profit >= 0 ? 'num-good' : 'num-danger'">
+                                <span class="cost-main">{{ formatNumber(row.expected_profit) }}</span>
+                                <span v-if="row.product_num > 1" class="cost-sub">
+                                    {{ formatNumber(row.expected_profit_per_unit || 0) }}/per
+                                </span>
+                            </div>
+                            <span v-else class="num-muted">加载中...</span>
+                        </template>
+                        <template #summary>
+                            <div v-if="hasOmegaSubscription"
+                                :style="{ color: expectedProfitTotal > 0 ? 'var(--k-color-success)' : expectedProfitTotal < 0 ? 'var(--k-color-danger)' : 'var(--k-color-text-secondary)', fontWeight: 'bold' }">
+                                {{ formatNumber(expectedProfitTotal) }}
+                            </div>
+                            <div v-else></div>
+                        </template>
+                    </el-table-column>
+                        <el-table-column prop="total_cost" label="总成本" width="160" align="right" sortable>
                             <template #default="{ row }">
-                                <strong>{{ row.product_num }}</strong>
-                            </template>
-                        </el-table-column>
-                        <el-table-column v-if="hasOmegaSubscription" prop="expected_profit" label="预期利润" width="150">
-                            <template #default="{ row }">
-                                <div v-if="row.expected_profit !== undefined"
-                                    :style="{ color: row.expected_profit> 0 ? '#008000' : '#FF0000' }">
-                                    <div>
-                                        <strong>{{ formatNumber(row.expected_profit) }}</strong>
-                                    </div>
-
-                                    <div v-if="row.product_num> 1" style="color: #888;">
-                                        {{ formatNumber(row.expected_profit_per_unit || 0) }}/per
-                                    </div>
+                                <div class="cost-cell">
+                                    <span class="cost-main">{{ formatNumber(row.total_cost) }}</span>
+                                    <span class="cost-sub">{{ formatPercentage(row.percentage) }}</span>
+                                    <span v-if="row.product_num > 1" class="cost-sub">
+                                        {{ formatNumber(row.total_cost / row.product_num) }}/per
+                                    </span>
                                 </div>
-                                <div v-else style="color: #999;">加载中...</div>
-                            </template>
-                            <template #summary>
-                                <div v-if="hasOmegaSubscription"
-                                    :style="{ color: expectedProfitTotal> 0 ? '#008000' : expectedProfitTotal < 0 ? '#FF0000' : '#666', fontWeight: 'bold' }">
-                                    {{ formatNumber(expectedProfitTotal) }}
-                                </div>
-                                <div v-else></div>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="total_cost" label="总成本" width="150">
-                            <template #default="{ row }">
-                                <div><strong>{{ formatNumber(row.total_cost) }}</strong> ({{
-                                    formatPercentage(row.percentage) }}) </div>
-                                <div v-if="row.product_num> 1" style="color: #888;">{{ formatNumber(row.total_cost /
-                                    row.product_num) }}/per</div>
-                            </template>
-                        </el-table-column>
-                        <el-table-column prop="children_cost" label="材料成本" width="160">
-                            <template #default="{ row }">
-                                <div>{{ formatNumber(row.children_cost) }}</div>
-                                <div v-if="row.product_num> 1" style="color: #888;">{{ formatNumber(row.children_cost /
-                                    row.product_num) }}/per</div>
-                            </template>
-                        </el-table-column>
-                        <el-table-column prop="eiv_cost" label="EIV成本" width="150">
-                            <template #default="{ row }">
-                                <div>{{ formatNumber(row.eiv_cost) }}</div>
-                                <div v-if="row.product_num> 1" style="color: #888;">{{ formatNumber(row.eiv_cost /
-                                    row.product_num) }}/per</div>
-                            </template>
-                        </el-table-column>
-                        <el-table-column prop="blueprint_cost" label="蓝图成本" width="150">
-                            <template #default="{ row }">
-                                <div>{{ formatNumber(row.blueprint_cost || 0) }}</div>
-                                <div v-if="row.product_num> 1" style="color: #888;">{{ formatNumber((row.blueprint_cost || 0) /
-                                    row.product_num) }}/per</div>
-                            </template>
-                        </el-table-column>
-                    </el-table>
-                </el-card>
+                        <el-table-column prop="children_cost" label="材料成本" width="160" align="right" sortable>
+                        <template #default="{ row }">
+                            <div class="cost-cell">
+                                <span class="cost-main">{{ formatNumber(row.children_cost) }}</span>
+                                <span v-if="row.product_num > 1" class="cost-sub">
+                                    {{ formatNumber(row.children_cost / row.product_num) }}/per
+                                </span>
+                            </div>
+                        </template>
+                    </el-table-column>
+                        <el-table-column prop="eiv_cost" label="EIV成本" width="150" align="right" sortable>
+                        <template #default="{ row }">
+                            <div class="cost-cell">
+                                <span class="cost-main">{{ formatNumber(row.eiv_cost) }}</span>
+                                <span v-if="row.product_num > 1" class="cost-sub">
+                                    {{ formatNumber(row.eiv_cost / row.product_num) }}/per
+                                </span>
+                            </div>
+                        </template>
+                    </el-table-column>
+                        <el-table-column prop="blueprint_cost" label="蓝图成本" width="150" align="right" sortable>
+                        <template #default="{ row }">
+                            <div class="cost-cell">
+                                <span class="cost-main">{{ formatNumber(row.blueprint_cost || 0) }}</span>
+                                <span v-if="row.product_num > 1" class="cost-sub">
+                                    {{ formatNumber((row.blueprint_cost || 0) / row.product_num) }}/per
+                                </span>
+                            </div>
+                        </template>
+                    </el-table-column>
+                    </KTable>
+                </KCard>
             </el-col>
             <!-- 维度2：分类维度 -->
             <el-col :span="7">
                 <!-- 表格卡片 -->
-                <el-card class="cost-card">
-                    <template #header>
-                        <div class="card-header">
-                            <span>材料分类成本汇总</span>
-                        </div>
-                    </template>
-                    <el-table :data="categoryCostSummary" stripe border style="width: 100%">
-                        <el-table-column prop="category" label="分类" width="100" />
-                        <el-table-column prop="total_cost" label="总成本" width="170">
+                <KCard class="cost-card" title="材料分类成本汇总">
+                    <KTable class="k-report-table" :data="categoryCostSummary" style="width: 100%" show-summary :summary-method="getCategorySummaries">
+                        <el-table-column prop="category" label="分类" min-width="110" show-overflow-tooltip />
+                        <el-table-column prop="total_cost" label="总成本" width="170" align="right" sortable>
                             <template #default="{ row }">
-                                <strong>{{ formatNumber(row.total_cost) }}</strong>
+                                <span class="cost-main">{{ formatNumber(row.total_cost) }}</span>
                             </template>
                         </el-table-column>
-                        <el-table-column prop="percentage" label="占比" width="80">
+                        <el-table-column prop="percentage" label="占比" width="100" align="right" sortable>
                             <template #default="{ row }">
                                 {{ formatPercentage(row.percentage) }}
                             </template>
                         </el-table-column>
-                    </el-table>
-                </el-card>
+                    </KTable>
+                </KCard>
             </el-col>
 
 
@@ -924,8 +917,8 @@ onUnmounted(() => {
 }
 
 .card-header {
-    font-size: 16px;
-    font-weight: bold;
+    font-size: var(--k-font-md);
+    font-weight: 600;
 }
 
 :deep(.el-table) {
@@ -933,40 +926,25 @@ onUnmounted(() => {
 }
 
 :deep(.el-table th) {
-    background-color: #f5f7fa;
-    font-weight: bold;
+    font-weight: 600;
 }
 
-/* Theme override */
-.cost-view,
-.cost-card,
-.card-header {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
+/* 成本单元格：主数值 + 副行（占比 / 单价） */
+.cost-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.3;
+    font-variant-numeric: tabular-nums;
 }
 
-:deep(.el-card),
-:deep(.el-card__header),
-:deep(.el-card__body),
-:deep(.el-table),
-:deep(.el-table th.el-table__cell),
-:deep(.el-table td.el-table__cell) {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
+.cost-main {
+    font-weight: 600;
 }
 
-:deep(.el-table th.el-table__cell) {
-    background: var(--k-color-surface-soft) !important;
-}
-
-:deep([style*='color: #888']),
-:deep([style*='color:#888']),
-:deep([style*='color: #999']),
-:deep([style*='color:#999']),
-:deep([style*='color: #666']),
-:deep([style*='color:#666']) {
-    color: var(--k-color-text-secondary) !important;
+.cost-sub {
+    font-size: var(--k-font-xs);
+    color: var(--k-color-text-secondary);
+    opacity: 0.8;
 }
 </style>

@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { http } from '@/http'
+import KTable from '@/components/k/KTable.vue'
 import type { Permission } from '../types'
 
 const permissions = ref<Permission[]>([])
@@ -144,7 +145,8 @@ onMounted(() => {
     <div class="toolbar">
       <el-button type="primary" @click="permissionDialogVisible = true">创建权限</el-button>
     </div>
-    <el-table :data="permissions" border stripe style="width: 100%">
+    <KTable :data="permissions" border stripe style="width: 100%" empty-why="还没有登记任何权限点"
+      empty-hint="点上方「创建权限」新增一条">
       <el-table-column prop="permissionName" label="权限名称" width="250" />
       <el-table-column prop="permissionDescription" label="权限描述" />
       <el-table-column label="操作" width="150" fixed="right">
@@ -152,7 +154,7 @@ onMounted(() => {
           <el-button size="small" type="danger" @click="handleDeletePermission(scope.row)">删除</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </KTable>
 
     <!-- 创建权限对话框 -->
     <el-dialog v-model="permissionDialogVisible" title="创建权限" width="500px">

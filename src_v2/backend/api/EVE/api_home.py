@@ -232,6 +232,8 @@ async def get_overview():
     }
     await rdm().r.set(f"overview_data:{g.current_user['user_id']}", json.dumps(res))
     await rdm().r.expire(f"overview_data:{g.current_user['user_id']}", 60 * 60)
+    # 同步一份五项汇总值，供仪表盘运营统计（不依赖 1h TTL 缓存）
+    await utils_home.record_ops_latest_overview(g.current_user['user_id'], res)
     _recalc_elapsed = _t.monotonic() - _req_start
     logger.info(f"[overview] user={g.current_user['user_id']} 全量计算完成 (总耗时 {_recalc_elapsed:.2f}s)")
     _hist_start = _t.monotonic()
@@ -438,6 +440,16 @@ async def get_dashboard_overview():
         "markedAssetValue": 0.0,
         "unmarkedAssetValue": 0.0
     }
+    # 本接口只刷新钱包/订单/运行中，不应把 VIP overview 已算好的资产价值清零。
+    # 两个接口共用 overview_data:{user} 这一个缓存 key，这里保留已有资产字段。
+    try:
+        cached_overview_str = await rdm().r.get(f"overview_data:{g.current_user['user_id']}")
+        if cached_overview_str:
+            cached_overview = json.loads(cached_overview_str)
+            res["markedAssetValue"] = cached_overview.get("markedAssetValue", 0.0)
+            res["unmarkedAssetValue"] = cached_overview.get("unmarkedAssetValue", 0.0)
+    except Exception:
+        logger.warning("合并已有 overview 资产价值失败: %s", traceback.format_exc())
     await rdm().r.set(f"overview_data:{g.current_user['user_id']}", json.dumps(res))
     await rdm().r.expire(f"overview_data:{g.current_user['user_id']}", 60 * 60)
 

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/* eslint-disable @typescript-eslint/no-explicit-any -- 物流数据沿用后端原始结构（历史 any 契约），P2 只做 KCard/KTable/KEmpty 收敛，未改数据契约 */
+import KTable from '@/components/k/KTable.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
+import KCard from '@/components/k/KCard.vue'
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
@@ -81,16 +85,6 @@ const tableData = computed(() => {
     }))
 })
 
-// 计算总体积总和（基于过滤后的数据）
-const totalVolume = computed(() => {
-    if (!filteredTableData.value || filteredTableData.value.length === 0) {
-        return 0
-    }
-    return filteredTableData.value.reduce((sum, item) => {
-        const volume = item.provide_volume || 0
-        return sum + (typeof volume === 'number' ? volume : parseFloat(volume) || 0)
-    }, 0)
-})
 
 // 筛选状态
 const selectedDeparture = ref<string>('')
@@ -357,6 +351,9 @@ const graphData = computed(() => {
     return { nodes, links }
 })
 
+// 没有可绘制的物流关系时给一句提示，避免图表区域一片空白
+const hasGraphData = computed(() => (graphData.value?.nodes?.length ?? 0) > 0)
+
 // 初始化图表
 const initChart = () => {
     const c = getChartThemeColors()
@@ -376,22 +373,8 @@ const initChart = () => {
     }
 
     // 计算节点坐标范围，用于设置合适的视图
-    const xs = data.nodes.map(n => n.x)
-    const ys = data.nodes.map(n => n.y)
-    const minX = Math.min(...xs)
-    const maxX = Math.max(...xs)
-    const minY = Math.min(...ys)
-    const maxY = Math.max(...ys)
-    const rangeX = maxX - minX || 1
-    const rangeY = maxY - minY || 1
-
     const option: EChartsOption = {
-        title: {
-            text: '物流关系图',
-            left: 'center',
-            top: 10,
-            textStyle: { color: c.text }
-        },
+        // 标题交给卡片头部，图内不再重复画（否则会压在节点/连线标签上）
         tooltip: {
             ...themedTooltip(c),
             trigger: 'item',
@@ -581,13 +564,16 @@ watch(graphData, () => {
     }
 }, { deep: true, immediate: false })
 
-// 监听响应式布局变化，重新调整图表大小
+// 监听响应式布局变化：跨过 1920 断点时图表容器会被 v-if 重建，
+// 旧实例还绑在已销毁的 DOM 上（resize() 无效），必须销毁后重新初始化，否则图会变空白
 watch(isLargeScreen, () => {
     if (chartInstance) {
-        setTimeout(() => {
-            chartInstance?.resize()
-        }, 100)
+        chartInstance.dispose()
+        chartInstance = null
     }
+    setTimeout(() => {
+        initChart()
+    }, 120)
 })
 
 // 组件挂载
@@ -639,11 +625,21 @@ onUnmounted(() => {
     stopDrag()
 })
 
+// footer 汇总：只合计体积列
+const volumeSummary = ({ columns, data }: { columns: any[], data: any[] }) => {
+    return columns.map((col: any, index: number) => {
+        if (index === 0) return '合计'
+        const prop = col.property
+        if (prop !== 'provide_volume') return ''
+        const total = (data || []).reduce((s: number, row: any) => s + (Number(row?.[prop]) || 0), 0)
+        return formatAccounting(total)
+    })
+}
 </script>
 
 <template>
     <div class="logistics-view">
-        <el-card shadow="never">
+        <KCard>
             <template #header>
                 <div class="card-header">
                     <span>物流视图</span>
@@ -654,18 +650,23 @@ onUnmounted(() => {
                 <!-- 大屏幕：图表和表格在同一行，中间有可拖动分割线 -->
                 <div v-if="isLargeScreen" ref="splitContainerRef" class="split-container">
                     <div class="split-pane chart-pane" :style="{ width: `${splitPosition}%` }">
-                        <el-card shadow="never" class="chart-card">
+                        <KCard class="chart-card">
                             <template #header>
-                                <span>星系图</span>
+                                <span>物流关系图</span>
                             </template>
-                            <div ref="graphContainerRef" class="chart-container"></div>
-                        </el-card>
+                            <div class="chart-wrapper">
+                                <div ref="graphContainerRef" class="chart-container"></div>
+                                <div v-if="!hasGraphData" class="chart-empty">
+                                    <KEmpty why="当前计划没有可绘制的物流关系" size="sm" />
+                                </div>
+                            </div>
+                        </KCard>
                     </div>
                     <div class="split-divider" :class="{ dragging: isDragging }" @mousedown="startDrag">
                         <div class="split-handle"></div>
                     </div>
                     <div class="split-pane table-pane" :style="{ width: `${100 - splitPosition}%` }">
-                        <el-card shadow="never" class="table-card">
+                        <KCard class="table-card">
                             <template #header>
                                 <span>运力表</span>
                             </template>
@@ -686,7 +687,7 @@ onUnmounted(() => {
                                     清除筛选
                                 </el-button>
                             </div>
-                            <el-table :data="filteredTableData" :key="`logistics-table-${selectedPlan || 'default'}`"
+                            <KTable class="k-report-table" :data="filteredTableData" show-summary :summary-method="volumeSummary" :key="`logistics-table-${selectedPlan || 'default'}`"
                                 border max-height="80vh">
                                 <el-table-column label="icon" width="70">
                                     <template #default="{ row }">
@@ -710,12 +711,12 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="总体积 (m³)" prop="provide_volume" width="150">
+                                <el-table-column label="总体积 (m³)" prop="provide_volume" width="150" align="right" sortable="custom">
                                     <template #header>
                                         <span>总体积 (m³)</span>
                                         <div
                                             style="font-size: 12px; color: #909399; font-weight: normal; margin-top: 4px;">
-                                            总计: {{ formatAccounting(totalVolume) }}
+            
                                         </div>
                                     </template>
                                     <template #default="{ row }">
@@ -752,23 +753,28 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </el-table-column>
-                            </el-table>
-                        </el-card>
+                            </KTable>
+                        </KCard>
                     </div>
                 </div>
 
                 <!-- 小屏幕：图表和表格各自独占一行 -->
                 <el-row v-else :gutter="20">
                     <el-col :span="24">
-                        <el-card shadow="never" class="chart-card">
+                        <KCard class="chart-card">
                             <template #header>
-                                <span>星系图</span>
+                                <span>物流关系图</span>
                             </template>
-                            <div ref="graphContainerRef" class="chart-container"></div>
-                        </el-card>
+                            <div class="chart-wrapper">
+                                <div ref="graphContainerRef" class="chart-container"></div>
+                                <div v-if="!hasGraphData" class="chart-empty">
+                                    <KEmpty why="当前计划没有可绘制的物流关系" size="sm" />
+                                </div>
+                            </div>
+                        </KCard>
                     </el-col>
                     <el-col :span="24">
-                        <el-card shadow="never" class="table-card">
+                        <KCard class="table-card">
                             <template #header>
                                 <span>运力表</span>
                             </template>
@@ -789,7 +795,7 @@ onUnmounted(() => {
                                     清除筛选
                                 </el-button>
                             </div>
-                            <el-table :data="filteredTableData" :key="`logistics-table-${selectedPlan || 'default'}`"
+                            <KTable class="k-report-table" :data="filteredTableData" show-summary :summary-method="volumeSummary" :key="`logistics-table-${selectedPlan || 'default'}`"
                                 border max-height="600px">
                                 <el-table-column label="icon" width="70">
                                     <template #default="{ row }">
@@ -813,12 +819,12 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="总体积 (m³)" prop="provide_volume" width="150">
+                                <el-table-column label="总体积 (m³)" prop="provide_volume" width="150" align="right" sortable="custom">
                                     <template #header>
                                         <span>总体积 (m³)</span>
                                         <div
                                             style="font-size: 12px; color: #909399; font-weight: normal; margin-top: 4px;">
-                                            总计: {{ formatAccounting(totalVolume) }}
+            
                                         </div>
                                     </template>
                                     <template #default="{ row }">
@@ -855,12 +861,12 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </el-table-column>
-                            </el-table>
-                        </el-card>
+                            </KTable>
+                        </KCard>
                     </el-col>
                 </el-row>
             </div>
-        </el-card>
+        </KCard>
     </div>
 </template>
 
@@ -877,7 +883,7 @@ onUnmounted(() => {
 
 .plan-name {
     font-size: 12px;
-    color: #909399;
+    color: var(--k-color-text-tertiary);
 }
 
 .content-container {
@@ -889,7 +895,7 @@ onUnmounted(() => {
     display: flex;
     width: 100%;
     height: 62vh;
-    min-height: 600px;
+    min-height: 320px;
     position: relative;
 }
 
@@ -911,7 +917,7 @@ onUnmounted(() => {
 /* 分割线样式 */
 .split-divider {
     width: 4px;
-    background-color: #e4e7ed;
+    background-color: var(--k-color-border);
     cursor: col-resize;
     position: relative;
     flex-shrink: 0;
@@ -920,11 +926,11 @@ onUnmounted(() => {
 }
 
 .split-divider:hover {
-    background-color: #409eff;
+    background-color: var(--k-color-primary);
 }
 
 .split-divider.dragging {
-    background-color: #409eff;
+    background-color: var(--k-color-primary);
 }
 
 .split-handle {
@@ -934,8 +940,8 @@ onUnmounted(() => {
     transform: translate(-50%, -50%);
     width: 20px;
     height: 40px;
-    background-color: #c0c4cc;
-    border-radius: 10px;
+    background-color: var(--k-color-border);
+    border-radius: var(--k-radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -947,7 +953,7 @@ onUnmounted(() => {
     position: absolute;
     width: 2px;
     height: 12px;
-    background-color: #909399;
+    background-color: var(--k-color-text-secondary);
     left: 50%;
     transform: translateX(-50%);
 }
@@ -962,14 +968,14 @@ onUnmounted(() => {
 
 .split-divider:hover .split-handle,
 .split-divider.dragging .split-handle {
-    background-color: #409eff;
+    background-color: var(--k-color-primary);
 }
 
 .split-divider:hover .split-handle::before,
 .split-divider:hover .split-handle::after,
 .split-divider.dragging .split-handle::before,
 .split-divider.dragging .split-handle::after {
-    background-color: #fff;
+    background-color: var(--k-color-text-inverse);
 }
 
 .chart-card {
@@ -979,7 +985,7 @@ onUnmounted(() => {
     flex-direction: column;
 }
 
-.chart-card :deep(.el-card__body) {
+.chart-card :deep(.k-card__body) {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -994,7 +1000,7 @@ onUnmounted(() => {
     margin-left: 0;
 }
 
-.table-card :deep(.el-card__body) {
+.table-card :deep(.k-card__body) {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -1016,7 +1022,7 @@ onUnmounted(() => {
         margin-bottom: 20px;
     }
 
-    .chart-card :deep(.el-card__body) {
+    .chart-card :deep(.k-card__body) {
         padding: 20px;
     }
 
@@ -1025,82 +1031,38 @@ onUnmounted(() => {
     }
 
     .chart-container {
-        height: 80vh;
-        min-height: 400px;
+        height: 58vh;
+        min-height: 240px;
     }
+}
+
+/* 图表容器外套一层，用于在无数据时叠一个空态提示 */
+.chart-wrapper {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--k-color-surface);
 }
 
 .chart-container {
     width: 100%;
     height: 100%;
-    min-height: 400px;
+    min-height: 240px;
     flex: 1;
 }
 
 .copyable-cell {
     cursor: pointer;
     user-select: none;
-}
-
-.copyable-cell:hover {
-    color: #409eff;
-    text-decoration: underline;
-}
-
-/* Theme override */
-.logistics-view,
-.content-container,
-.split-pane,
-.chart-card,
-.table-card {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
-}
-
-.plan-name {
-    color: var(--k-color-text-secondary) !important;
-}
-
-.split-divider {
-    background-color: var(--k-color-border) !important;
-}
-
-.split-divider:hover,
-.split-divider.dragging,
-.split-divider:hover .split-handle,
-.split-divider.dragging .split-handle {
-    background-color: var(--k-color-primary) !important;
-}
-
-.split-handle {
-    background-color: color-mix(in srgb, var(--k-color-border) 85%, var(--k-color-surface)) !important;
-}
-
-.split-handle::before,
-.split-handle::after {
-    background-color: var(--k-color-text-secondary) !important;
-}
-
-.copyable-cell:hover {
-    color: var(--k-color-primary) !important;
-}
-
-:deep(.el-card),
-:deep(.el-card__header),
-:deep(.el-card__body),
-:deep(.el-form-item__label),
-:deep(.el-input__wrapper),
-:deep(.el-select__wrapper),
-:deep(.el-table),
-:deep(.el-table th.el-table__cell),
-:deep(.el-table td.el-table__cell) {
-    background: var(--k-color-surface) !important;
-    border-color: var(--k-color-border) !important;
-    color: var(--k-color-text) !important;
-}
-
-:deep(.el-table th.el-table__cell) {
-    background: var(--k-color-surface-soft) !important;
 }
 </style>

@@ -146,6 +146,10 @@ class OverviewHistoryTimer(metaclass=SingletonMeta):
                     # 保存到Redis
                     await rdm().r.set(f"overview_data:{user_name}", json.dumps(overview_data))
                     await rdm().r.expire(f"overview_data:{user_name}", 60 * 60)
+                    # 同步一份五项汇总值，供仪表盘运营统计使用
+                    await utils_home.record_ops_latest_overview(
+                        user_name, overview_data
+                    )
                     logger.info(f"用户 {user_name} 的overview数据已强制刷新并缓存")
 
                     # 使用计算出的数据继续后续流程

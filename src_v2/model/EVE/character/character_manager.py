@@ -99,17 +99,31 @@ class CharacterManager(metaclass=SingletonMeta):
         if character_db_obj and user_name != character_db_obj.owner_user_name:
             raise KahunaException('角色已被其他用户绑定，共享账号是不对的！')
 
-        character_db_obj = M_EveAuthedCharacter(
-            character_id=character_id,
-            owner_user_name=user_name,
-            character_name=character_name,
-            birthday=birthday,
-            access_token=ac_token,
-            refresh_token=refresh_token,
-            expires_time=expires_time,
-            corporation_id=corporation_id
-            # director="Director" in character_roles['roles'] if 'roles' in character_roles else None,
-        )
+        if character_db_obj:
+            # 重新授权/换绑：在已有行上更新 token，并重置 token 失效状态。
+            # 不能用「新建对象 + merge」来更新：merge 只拷贝源对象上显式赋值的列，
+            # 未赋值的 refresh_failure_count / last_refresh_error 会被静默跳过，
+            # 导致重绑后仍判定为永久失效（见 character.py token_permanently_failed）。
+            character_db_obj.character_name = character_name
+            character_db_obj.birthday = birthday
+            character_db_obj.access_token = ac_token
+            character_db_obj.refresh_token = refresh_token
+            character_db_obj.expires_time = expires_time
+            character_db_obj.corporation_id = corporation_id
+            character_db_obj.refresh_failure_count = 0
+            character_db_obj.last_refresh_error = None
+        else:
+            character_db_obj = M_EveAuthedCharacter(
+                character_id=character_id,
+                owner_user_name=user_name,
+                character_name=character_name,
+                birthday=birthday,
+                access_token=ac_token,
+                refresh_token=refresh_token,
+                expires_time=expires_time,
+                corporation_id=corporation_id
+                # director="Director" in character_roles['roles'] if 'roles' in character_roles else None,
+            )
         await EveAuthedCharacterDBUtils.merge(character_db_obj)
         character = Character.from_db_obj(character_db_obj)
         character_roles = await eveesi.characters_character_roles(character.ac_token, character_id)

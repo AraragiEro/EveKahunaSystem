@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import KCard from '@/components/k/KCard.vue'
+import KEmpty from '@/components/k/KEmpty.vue'
+import KStat from '@/components/k/KStat.vue'
 import { ref, computed, onMounted } from 'vue'
-import type { Ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTransition } from '@vueuse/core'
 import {
@@ -10,12 +12,18 @@ import {
   UserFilled,
   Cpu,
   TrendCharts,
+  Tools,
+  Bell,
+  DataLine,
 } from '@element-plus/icons-vue'
 import { http } from '@/http'
 import { handleApiResponse } from '@/utils/apiResponse'
+import { calculateTotalAssets, getNumericValue } from '@/utils/totalAssets'
 import { useAuthStore } from '@/stores/auth'
-import { useAnnouncements, type Announcement } from '@/composables/useAnnouncements'
+import { useAnnouncements } from '@/composables/useAnnouncements'
 import CoefficientMonitor from '@/components/dashboard/CoefficientMonitor.vue'
+import AssetComposition from '@/components/dashboard/AssetComposition.vue'
+import GridShell from '@/components/layout/GridShell.vue'
 
 // ──────────────────── 接口定义 ────────────────────
 
@@ -88,24 +96,6 @@ const formatCompactNumber = (value: number): string => {
   if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M'
   if (value >= 1e3) return (value / 1e3).toFixed(2) + 'K'
   return value.toLocaleString('zh-CN')
-}
-
-const getProgressColor = (percentage: number): string => {
-  if (percentage >= 90) return '#67c23a'
-  if (percentage >= 70) return '#e6a23c'
-  if (percentage >= 50) return '#f56c6c'
-  return '#909399'
-}
-
-const getNumericValue = (value: number | Record<string, number>): number => {
-  if (typeof value === 'number') return value
-  if (typeof value === 'object') {
-    return Object.values(value).reduce(
-      (sum, v) => sum + (typeof v === 'number' ? v : 0),
-      0,
-    )
-  }
-  return 0
 }
 
 const calculateChange = (
@@ -209,6 +199,9 @@ const opsStats = ref<OpsStats | null>(null)
 const loadingOps = ref(false)
 const opsError = ref(false)
 
+/** 已完成任务默认折叠，避免首屏被「已完成 100%」占满 */
+const finishedExpanded = ref(false)
+
 // ──────────────────── 计算属性 ────────────────────
 
 const hasCharacters = computed(() => characterSummaryList.value.length > 0)
@@ -219,12 +212,8 @@ const showWelcome = computed(
 
 const totalValueSource = computed(() => {
   if (!overviewData.value) return 0
-  const data = overviewData.value
-  return (
-    getNumericValue(data.walletValue) +
-    getNumericValue(data.orderValue) +
-    data.runningProcessValue
-  )
+  // 5 项统一口径，见 utils/totalAssets
+  return calculateTotalAssets(overviewData.value)
 })
 
 const historyTotalValue = computed(() => {
@@ -233,11 +222,7 @@ const historyTotalValue = computed(() => {
       ? lastNote7d.value
       : lastNote30d.value
   if (!history) return null
-  return (
-    getNumericValue(history.walletValue) +
-    getNumericValue(history.orderValue) +
-    history.runningProcessValue
-  )
+  return calculateTotalAssets(history)
 })
 
 const totalChange = computed(() =>
@@ -249,27 +234,85 @@ const outputTotalValue = useTransition(totalValueSource, {
   transition: (t: number) => t * (2 - t),
 })
 
-// 按 end_date 升序排列，不做数量限制
-const sortedRunningJobs = computed(() => {
-  return [...runningJobsList.value].sort(
-    (a, b) =>
-      new Date(a.end_date).getTime() - new Date(b.end_date).getTime(),
-  )
+/** hero 右段：五段构成与总资产同源（calculateTotalAssets 的 5 项逐项展开） */
+const compositionItems = computed<Array<{ key: string; label: string; value: number }>>(() => {
+  const data = overviewData.value
+  if (!data) return []
+  return [
+    { key: 'wallet', label: '钱包', value: getNumericValue(data.walletValue) },
+    { key: 'order', label: '订单', value: getNumericValue(data.orderValue) },
+    { key: 'running', label: '运行中', value: data.runningProcessValue ?? 0 },
+    { key: 'marked', label: '标记资产', value: data.markedAssetValue ?? 0 },
+    { key: 'unmarked', label: '非标记资产', value: data.unmarkedAssetValue ?? 0 },
+  ]
 })
 
-// 懒加载
-const VISIBLE_STEP = 8
-const visibleCount = ref(VISIBLE_STEP)
-const jobListRef: Ref<HTMLElement | null> = ref(null)
-const hasMoreJobs = computed(() => visibleCount.value < sortedRunningJobs.value.length)
-const visibleJobs = computed(() => sortedRunningJobs.value.slice(0, visibleCount.value))
+const isJobDone = (job: RunningJobDetail): boolean =>
+  (job.progress_percent ?? 0) >= 100 || new Date(job.end_date).getTime() <= Date.now()
 
-const onJobListScroll = (e: Event) => {
-  const el = e.target as HTMLElement
-  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 20 && hasMoreJobs.value) {
-    visibleCount.value = Math.min(visibleCount.value + VISIBLE_STEP, sortedRunningJobs.value.length)
+// 按 end_date 升序排列，不做数量限制
+const sortedRunningJobs = computed(() =>
+  [...runningJobsList.value].sort(
+    (a, b) => new Date(a.end_date).getTime() - new Date(b.end_date).getTime(),
+  ),
+)
+
+/** 未完成（真正「进行中」）优先，已完成折叠在后 */
+const unfinishedJobs = computed(() => sortedRunningJobs.value.filter((job) => !isJobDone(job)))
+
+const finishedJobs = computed(() => sortedRunningJobs.value.filter(isJobDone))
+
+const nextJob = computed(() => unfinishedJobs.value[0] ?? null)
+
+const finishedValue = computed(() =>
+  finishedJobs.value.reduce((sum, job) => sum + (job.value || 0), 0),
+)
+
+const finishedPreview = computed(() => (finishedExpanded.value ? finishedJobs.value : finishedJobs.value.slice(0, 3)))
+
+const todoTitle = computed(() => {
+  if (unfinishedJobs.value.length > 0) {
+    return `${unfinishedJobs.value.length} 项任务进行中`
   }
+  if (finishedJobs.value.length > 0) {
+    return `${finishedJobs.value.length} 项已产出，等待收成`
+  }
+  return '暂无进行中的任务'
+})
+
+const todoMeta = computed(() => {
+  const parts: string[] = []
+  if (nextJob.value) {
+    parts.push(`下一项：${nextJob.value.product_name_zh} · 剩余 ${formatRemainingTime(nextJob.value.end_date)}`)
+  }
+  if (finishedJobs.value.length > 0) {
+    parts.push(`待收成 ${finishedJobs.value.length} 项 · ${formatCompactNumber(finishedValue.value)} ISK`)
+  }
+  if (parts.length === 0) {
+    return '新建工业计划或启动生产后，这里会显示待办'
+  }
+  return parts.join(' · ')
+})
+
+const todoActionText = computed(() =>
+  nextJob.value ? '查看生产计划' : finishedJobs.value.length > 0 ? '去收取' : '新建工业计划',
+)
+
+const goTodo = () => {
+  router.push('/industry/industryPlan')
 }
+
+const opsItems = computed(() => {
+  const stats = opsStats.value
+  if (!stats) return []
+  return [
+    { key: 'users', label: '注册用户', value: stats.total_users.toLocaleString('zh-CN') },
+    { key: 'vips', label: 'VIP 会员', value: stats.total_vips.toLocaleString('zh-CN') },
+    { key: 'plans', label: '工业计划', value: stats.total_plans.toLocaleString('zh-CN') },
+    { key: 'asset', label: '总资产价值', value: formatCompactNumber(stats.total_asset_value) },
+    { key: 'running', label: '运行中价值', value: formatCompactNumber(stats.total_running_value) },
+  ]
+})
 
 // ──────────────────── 新手指南步骤 ────────────────────
 
@@ -400,11 +443,12 @@ onMounted(() => {
         <p class="page-subtitle">欢迎回来，{{ username }}</p>
       </div>
       <div class="page-header-center" v-if="serverStatus">
-        <span class="status-dot" :class="{'status-online': serverStatus === 'online', 'status-offline': serverStatus === 'offline', 'status-unknown': serverStatus === 'unknown'}"></span>
+        <!-- 状态点只是配色提示，语义在紧邻的文字里；别让读屏重复播报一个没有含义的 span -->
+        <span class="status-dot" aria-hidden="true" :class="{'status-online': serverStatus === 'online', 'status-offline': serverStatus === 'offline', 'status-unknown': serverStatus === 'unknown'}"></span>
         <span class="status-text">{{ serverStatus === 'online' ? 'TQ 在线' : serverStatus === 'offline' ? 'TQ 维护中' : 'TQ 状态未知' }}</span>
       </div>
       <div class="header-actions">
-        <el-button type="primary" @click="router.push('/industry/industryPlan')">
+        <el-button @click="router.push('/industry/industryPlan')">
           <el-icon><Plus /></el-icon>新建工业计划
         </el-button>
         <el-button @click="router.push('/utils/estimator')">
@@ -447,282 +491,283 @@ onMounted(() => {
 
     <!-- ═══════════════ 已认证用户：仪表盘内容 ═══════════════ -->
     <template v-if="!showWelcome">
-      <!-- ═══════════════ ISK 英雄横幅 ═══════════════ -->
-      <div class="hero-banner">
-        <!-- 骨架屏 -->
-        <template v-if="loadingOverview && !overviewData">
-          <div class="data-card-total">
+      <!-- ═══════════════ 首屏 hero：左「总资产 + 趋势」/ 右「资产构成」 ═══════════════ -->
+      <section class="hero">
+        <div class="hero__main">
+          <!-- 骨架屏 -->
+          <template v-if="loadingOverview && !overviewData">
             <el-skeleton animated>
               <template #template>
-                <el-skeleton-item
-                  variant="text"
-                  style="width: 30%; margin: 0 auto 8px"
-                />
-                <el-skeleton-item
-                  variant="text"
-                  style="width: 60%; margin: 0 auto; height: 48px"
-                />
+                <el-skeleton-item variant="text" style="width: 30%; margin-bottom: 12px" />
+                <el-skeleton-item variant="text" style="width: 80%; height: 56px" />
               </template>
             </el-skeleton>
-          </div>
-        </template>
+          </template>
 
-        <!-- 错误状态 -->
-        <template v-else-if="overviewError && !overviewData">
-          <div class="section-empty">
-            <el-empty
-              description="概览数据加载失败，请刷新重试"
-              :image-size="80"
-            />
-          </div>
-        </template>
+          <!-- 错误状态 -->
+          <template v-else-if="overviewError && !overviewData">
+            <KEmpty why="概览数据加载失败，请刷新重试" size="sm" />
+          </template>
 
-        <!-- 真实内容 -->
-        <template v-else>
-          <div class="data-card-total">
-            <div class="total-label">总资产估值</div>
-            <div class="total-value">
-              {{ formatNumber(outputTotalValue) }} ISK
+          <!-- 真实内容 -->
+          <template v-else>
+            <div class="hero__label">总资产估值</div>
+            <div class="hero__value" :title="`${formatNumber(totalValueSource)} ISK`">
+              {{ formatNumber(outputTotalValue) }}<span class="hero__unit">ISK</span>
             </div>
-            <div class="total-change" v-if="totalChange.hasChange">
-              <span
-                :class="
-                  totalChange.diff >= 0 ? 'change-positive' : 'change-negative'
-                "
-              >
-                {{ totalChange.diff >= 0 ? '↑' : '↓' }}
-                {{ formatChange(totalChange) }}
-              </span>
-              <span class="period-label">
-                vs
-                {{
-                  selectedTimeRange === '7d' ? '7天前' : '30天前'
-                }}
-              </span>
+            <!-- 趋势与 7天/30天 分段同一行，不做两端对齐 -->
+            <div class="hero__trend">
+              <template v-if="totalChange.hasChange">
+                <span
+                  class="hero__delta"
+                  :class="totalChange.diff >= 0 ? 'is-up' : 'is-down'"
+                >
+                  {{ totalChange.diff >= 0 ? '↑' : '↓' }}
+                  {{ formatChange(totalChange) }}
+                </span>
+                <span class="hero__period">
+                  vs {{ selectedTimeRange === '7d' ? '7天前' : '30天前' }}
+                </span>
+              </template>
+              <div class="hero__range" role="group" aria-label="趋势对比周期">
+                <button
+                  type="button"
+                  class="hero__range-btn"
+                  :class="{ 'is-active': selectedTimeRange === '7d' }"
+                  :aria-pressed="selectedTimeRange === '7d'"
+                  @click="selectedTimeRange = '7d'"
+                >
+                  7天
+                </button>
+                <button
+                  type="button"
+                  class="hero__range-btn"
+                  :class="{ 'is-active': selectedTimeRange === '30d' }"
+                  :aria-pressed="selectedTimeRange === '30d'"
+                  @click="selectedTimeRange = '30d'"
+                >
+                  30天
+                </button>
+              </div>
             </div>
-            <div class="time-toggle">
-              <el-button
-                :type="selectedTimeRange === '7d' ? 'primary' : 'default'"
-                size="small"
-                @click="selectedTimeRange = '7d'"
-              >
-                7天
+          </template>
+        </div>
+
+        <AssetComposition
+          v-if="overviewData"
+          class="hero__composition"
+          :items="compositionItems"
+          :total="totalValueSource"
+        />
+        <div v-else-if="loadingOverview" class="hero__composition hero__composition--loading">
+          <el-skeleton animated :rows="3" />
+        </div>
+      </section>
+
+      <!-- ═══════════════ 运营状态：一行紧凑小方块（数字统一 ink 色，量级 ≤28px） ═══════════════ -->
+      <KCard class="ops-bar-card" padding="sm">
+        <div class="ops-bar">
+          <div class="ops-bar__title">
+            <el-icon class="section-icon"><DataLine /></el-icon>
+            <span>运营状态</span>
+          </div>
+          <div v-if="opsStats" class="ops-grid">
+            <div v-for="item in opsItems" :key="item.key" class="ops-cell">
+              <KStat :label="item.label" :value="item.value" size="md" />
+            </div>
+          </div>
+          <div v-else-if="loadingOps" class="ops-loading">
+            <el-skeleton animated :rows="1" />
+          </div>
+          <div v-else-if="opsError" class="ops-hint">加载失败</div>
+          <div v-else class="ops-hint">暂无数据</div>
+        </div>
+      </KCard>
+
+      <!-- ═══════════════ 三列仪表盘网格（任务 5 / 公告 4 / 系数 3） ═══════════════ -->
+      <GridShell class="dashboard-grid" gap="16px">
+        <!-- 列 1: 进行中的任务（待办条 + 未完成优先） -->
+        <div class="dashboard-column k-col-5">
+          <KCard class="task-card" padding="none">
+            <template #header>
+              <div class="task-card__title">
+                <el-icon class="section-icon"><Tools /></el-icon>
+                <span>进行中的任务</span>
+                <span
+                  class="count-badge"
+                  :class="{ 'is-muted': unfinishedJobs.length === 0 }"
+                  :title="`未完成 ${unfinishedJobs.length} 项`"
+                >
+                  {{ unfinishedJobs.length }}
+                </span>
+              </div>
+            </template>
+
+            <!-- 首行待办：真实状态 + 唯一主操作 -->
+            <div class="todo-strip">
+              <div class="todo-strip__text">
+                <span class="todo-strip__kicker">下一步</span>
+                <p class="todo-strip__title">{{ todoTitle }}</p>
+                <p class="todo-strip__meta">{{ todoMeta }}</p>
+              </div>
+              <el-button type="primary" size="small" @click="goTodo">
+                {{ todoActionText }}
               </el-button>
-              <el-button
-                :type="selectedTimeRange === '30d' ? 'primary' : 'default'"
-                size="small"
-                @click="selectedTimeRange = '30d'"
-              >
-                30天
-              </el-button>
             </div>
-          </div>
-        </template>
-      </div>
 
-    </template>
-
-    <!-- ═══════════════ 始终可见：四列仪表盘网格 ═══════════════ -->
-    <div class="dashboard-grid">
-      <!-- 列 1: 正在运行的任务 -->
-      <div class="dashboard-column">
-        <div class="section-card">
-          <div class="section-header">
-            <span class="section-title-with-icon">🔧 正在运行的任务</span>
-            <span
-              v-if="sortedRunningJobs.length > 0"
-              class="count-badge"
-            >
-              {{ sortedRunningJobs.length }}
-            </span>
-          </div>
-          <div
-            class="scrollable-job-list"
-            ref="jobListRef"
-            @scroll="onJobListScroll"
-          >
-            <!-- 任务卡片 -->
-            <div
-              v-if="visibleJobs.length > 0"
-              class="job-card-list"
-            >
+            <div class="task-list">
+              <!-- 未完成任务 -->
               <div
-                v-for="job in visibleJobs"
+                v-for="job in unfinishedJobs"
                 :key="`${job.product_type_id}-${job.start_date}`"
-                class="job-card compact"
+                class="task-row"
               >
-                <div class="job-card-header">
+                <div class="task-row__head">
                   <img
                     v-if="job.installer_id"
                     :src="`https://imageserver.eveonline.com/Character/${job.installer_id}_64.jpg`"
-                    class="installer-avatar-sm"
-                    width="24"
-                    height="24"
-                    @error="
-                      (e: Event) => {
-                        ;(e.target as HTMLImageElement).style.display = 'none'
-                      }
-                    "
+                    class="task-avatar"
+                    width="20"
+                    height="20"
+                    alt=""
+                    @error="(e: Event) => { (e.target as HTMLImageElement).style.display = 'none' }"
                   />
-                  <span class="installer-name">{{ job.installer_name }}</span>
-                  <el-tag
-                    :type="
-                      job.activity_type === '制造' ? 'primary' : 'warning'
-                    "
-                    size="small"
-                  >
-                    {{ job.activity_type }}
-                  </el-tag>
+                  <span class="task-row__installer">{{ job.installer_name }}</span>
+                  <span class="task-row__activity">{{ job.activity_type }}</span>
+                  <span class="task-row__value">{{ formatCompactNumber(job.value) }} ISK</span>
                 </div>
-                <div class="job-card-body">
+                <div class="task-row__body">
                   <img
                     :src="`https://imageserver.eveonline.com/types/${job.product_type_id}/icon`"
-                    class="item-icon-sm"
-                    @error="
-                      (e: Event) => {
-                        ;(e.target as HTMLImageElement).style.display = 'none'
-                      }
-                    "
+                    class="task-icon"
+                    alt=""
+                    @error="(e: Event) => { (e.target as HTMLImageElement).style.display = 'none' }"
                   />
-                  <div class="job-info">
-                    <div class="product-name">
-                      {{ job.product_name_zh }}
-                    </div>
-                    <div class="job-progress">
-                      <el-progress
-                        :percentage="job.progress_percent"
-                        :color="getProgressColor(job.progress_percent)"
-                        :stroke-width="6"
+                  <div class="task-row__info">
+                    <div class="task-row__name">{{ job.product_name_zh }}</div>
+                    <div class="task-progress">
+                      <span
+                        class="task-progress__fill"
+                        :style="{ width: `${Math.max(2, Math.min(100, job.progress_percent))}%` }"
                       />
                     </div>
-                    <div class="job-meta">
-                      <span>
-                        {{ job.runs.toLocaleString('zh-CN') }}×{{
-                          job.product_quantity_per_run.toLocaleString(
-                            'zh-CN',
-                          )
-                        }}
-                      </span>
-                      <span class="job-value">
-                        {{ formatNumber(job.value) }} ISK
-                      </span>
-                      <span class="job-time">
-                        {{ formatRemainingTime(job.end_date) }}
-                      </span>
+                    <div class="task-row__meta">
+                      <span>{{ job.runs.toLocaleString('zh-CN') }}×{{ job.product_quantity_per_run.toLocaleString('zh-CN') }}</span>
+                      <span>剩余 {{ formatRemainingTime(job.end_date) }}</span>
                     </div>
                   </div>
                 </div>
               </div>
-              <div v-if="hasMoreJobs" class="load-more-hint">滚动加载更多...</div>
-            </div>
 
-            <!-- 骨架屏 -->
-            <div v-else-if="loadingJobs" class="job-card-list">
-              <div v-for="i in 4" :key="i" class="job-card compact skeleton-card">
-                <el-skeleton animated :rows="3" />
+              <!-- 已完成任务：默认折到 3 条，状态用 chip 而不是再画一遍 100% -->
+              <template v-if="finishedPreview.length > 0">
+                <div
+                  v-for="job in finishedPreview"
+                  :key="`done-${job.product_type_id}-${job.start_date}`"
+                  class="task-row is-done"
+                >
+                  <div class="task-row__head">
+                    <img
+                      v-if="job.installer_id"
+                      :src="`https://imageserver.eveonline.com/Character/${job.installer_id}_64.jpg`"
+                      class="task-avatar"
+                      width="20"
+                      height="20"
+                      alt=""
+                      @error="(e: Event) => { (e.target as HTMLImageElement).style.display = 'none' }"
+                    />
+                    <span class="task-row__installer">{{ job.installer_name }}</span>
+                    <span class="task-row__activity">{{ job.activity_type }}</span>
+                    <span class="task-row__value">{{ formatCompactNumber(job.value) }} ISK</span>
+                  </div>
+                  <div class="task-row__body">
+                    <img
+                      :src="`https://imageserver.eveonline.com/types/${job.product_type_id}/icon`"
+                      class="task-icon"
+                      alt=""
+                      @error="(e: Event) => { (e.target as HTMLImageElement).style.display = 'none' }"
+                    />
+                    <div class="task-row__info">
+                      <div class="task-row__name">{{ job.product_name_zh }}</div>
+                      <div class="task-row__meta">
+                        <span>{{ job.runs.toLocaleString('zh-CN') }}×{{ job.product_quantity_per_run.toLocaleString('zh-CN') }}</span>
+                        <span class="task-row__done-chip">已产出</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  v-if="finishedJobs.length > 3"
+                  type="button"
+                  class="task-fold"
+                  @click="finishedExpanded = !finishedExpanded"
+                >
+                  {{ finishedExpanded ? '收起已完成' : `展开全部已完成（${finishedJobs.length} 项）` }}
+                </button>
+              </template>
+
+              <!-- 骨架屏 -->
+              <template v-if="loadingJobs && sortedRunningJobs.length === 0">
+                <div v-for="i in 4" :key="i" class="task-row is-skeleton">
+                  <el-skeleton animated :rows="2" />
+                </div>
+              </template>
+
+              <!-- 错误状态 -->
+              <div v-else-if="jobsError" class="section-empty">
+                <KEmpty why="任务数据加载失败" size="sm" />
+              </div>
+
+              <!-- 空状态 -->
+              <div v-else-if="!loadingJobs && sortedRunningJobs.length === 0" class="section-empty">
+                <KEmpty why="暂无运行中任务" size="sm" />
               </div>
             </div>
-
-            <!-- 错误状态 -->
-            <div v-else-if="jobsError" class="section-empty">
-              <el-empty
-                description="任务数据加载失败"
-                :image-size="60"
-              />
-            </div>
-
-            <!-- 空状态 -->
-            <div v-else-if="!loadingJobs" class="section-empty">
-              <el-empty description="暂无运行中任务" :image-size="60" />
-            </div>
-          </div>
+          </KCard>
         </div>
-      </div>
 
-      <!-- 列 2: 最新公告 -->
-      <div class="dashboard-column">
-        <div class="section-card" v-if="announcements.length > 0">
-          <div class="section-header">
-            <span class="section-title-with-icon">📢 最新公告</span>
-          </div>
-          <div class="announcement-list">
-            <div
-              v-for="item in announcements"
-              :key="item.filename"
-              class="announcement-item"
-              @click="router.push('/announcements')"
-              role="link"
-              tabindex="0"
-            >
-              <div class="announcement-title">{{ item.title }}</div>
-              <div class="announcement-date">{{ item.published_at }}</div>
-              <div class="announcement-summary">
-                {{ (item.summary || stripMarkdown(item.content).slice(0, 100) || '').slice(0, 100) }}
+        <!-- 列 2: 最新公告 -->
+        <div class="dashboard-column k-col-4">
+          <KCard class="announcement-card" padding="none">
+            <template #header>
+              <div class="task-card__title">
+                <el-icon class="section-icon"><Bell /></el-icon>
+                <span>最新公告</span>
+              </div>
+            </template>
+            <template #actions>
+              <el-button text size="small" @click="router.push('/announcements')">
+                查看全部
+              </el-button>
+            </template>
+            <div class="announcement-list" v-if="announcements.length > 0">
+              <div
+                v-for="item in announcements"
+                :key="item.filename"
+                class="announcement-item"
+                @click="router.push('/announcements')"
+                role="link"
+                tabindex="0"
+              >
+                <div class="announcement-title">{{ item.title }}</div>
+                <div class="announcement-date">{{ item.published_at }}</div>
+                <div class="announcement-summary">
+                  {{ (item.summary || stripMarkdown(item.content).slice(0, 100) || '').slice(0, 100) }}
+                </div>
               </div>
             </div>
-          </div>
+            <div v-else class="section-empty">
+              <KEmpty why="暂无公告" size="sm" />
+            </div>
+          </KCard>
         </div>
-        <div v-else class="section-card">
-          <div class="section-header">
-            <span class="section-title-with-icon">📢 最新公告</span>
-          </div>
-          <el-empty description="暂无公告" :image-size="60" />
+
+        <!-- 列 3: 系数监控 -->
+        <div class="dashboard-column k-col-3">
+          <CoefficientMonitor />
         </div>
-      </div>
-
-      <!-- 列 3: 运营状态 -->
-      <div class="dashboard-column">
-        <div class="section-card">
-          <div class="section-header">
-            <span class="section-title-with-icon">📊 运营状态</span>
-          </div>
-
-          <div v-if="opsStats" class="ops-grid">
-            <div class="ops-item">
-              <span class="ops-value">{{ opsStats.total_users }}</span>
-              <span class="ops-label">注册用户</span>
-            </div>
-            <div class="ops-item">
-              <span class="ops-value">{{ opsStats.total_vips }}</span>
-              <span class="ops-label">VIP 会员</span>
-            </div>
-            <div class="ops-item">
-              <span class="ops-value">{{ opsStats.total_plans }}</span>
-              <span class="ops-label">工业计划</span>
-            </div>
-            <div class="ops-item">
-              <span class="ops-value">{{
-                formatCompactNumber(opsStats.total_asset_value)
-              }}</span>
-              <span class="ops-label">总资产估值</span>
-            </div>
-            <div class="ops-item">
-              <span class="ops-value">{{
-                formatCompactNumber(opsStats.total_running_value)
-              }}</span>
-              <span class="ops-label">运行中价值</span>
-            </div>
-          </div>
-
-          <div v-else-if="loadingOps" class="ops-loading">
-            <el-skeleton animated :rows="3" />
-          </div>
-
-          <div v-else-if="opsError" class="section-empty">
-            <el-empty description="加载失败" :image-size="60" />
-          </div>
-
-          <div v-else class="section-empty">
-            <el-empty description="暂无数据" :image-size="60" />
-          </div>
-        </div>
-      </div>
-
-      <!-- 列 4: 系数监控 -->
-      <div class="dashboard-column">
-        <CoefficientMonitor />
-      </div>
-    </div>
+      </GridShell>
+    </template>
   </div>
 </template>
 
@@ -731,9 +776,11 @@ onMounted(() => {
 .dashboard-root {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* 外层 .main-scroll 已给确定高度；100vh 会多出顶栏/页脚的高度，
+     既导致页面纵向滚动，也让底部卡片被切。 */
+  height: 100%;
   box-sizing: border-box;
-  padding: 24px;
+  padding: var(--k-space-5, 24px);
   background: var(--k-color-surface-soft);
 }
 
@@ -742,15 +789,15 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: var(--k-space-4);
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--k-space-3);
 }
 
 .page-header-left {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--k-space-1);
 }
 
 .page-header-center {
@@ -758,9 +805,10 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   padding: 4px 12px;
-  border-radius: var(--k-radius-md);
-  background: var(--k-color-surface-soft);
-  font-size: 13px;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-surface);
+  border: 1px solid var(--k-color-border-subtle);
+  font-size: var(--k-font-xs);
 }
 
 .page-title {
@@ -773,130 +821,148 @@ onMounted(() => {
 
 .page-subtitle {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--k-font-md);
   color: var(--k-color-text-secondary);
 }
 
-/* ═══════════════ 英雄横幅 ═══════════════ */
-.hero-banner {
+/* ═══════════════ 首屏 hero：横向两段 ═══════════════ */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  align-items: center;
+  gap: var(--k-space-5);
   border-radius: var(--k-radius-lg);
-  padding: 28px 24px 20px;
-  margin-bottom: 0;
+  padding: var(--k-space-5);
+  margin-bottom: var(--k-space-4);
   background:
     radial-gradient(
-      circle at 20% 10%,
+      circle at 18% 10%,
       color-mix(in srgb, var(--k-color-primary) 12%, transparent),
-      transparent 40%
+      transparent 42%
     ),
     radial-gradient(
-      circle at 85% 20%,
+      circle at 88% 18%,
       color-mix(in srgb, var(--k-color-primary) 6%, transparent),
-      transparent 44%
+      transparent 46%
     ),
     var(--k-color-surface);
   border: 1px solid var(--k-color-border);
-  position: relative;
+  min-width: 0;
 }
 
-:root[data-theme='dark'] .hero-banner,
-[data-theme='dark'] .hero-banner {
-  /* dark-mode styles now handled by --k-color-* variables automatically */
+.hero__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-2);
+  min-width: 0;
 }
 
-.data-card-total {
-  text-align: center;
-  padding: 16px 0 24px;
-}
-
-.total-label {
-  font-size: 14px;
+.hero__label {
+  font-size: var(--k-font-sm);
   color: var(--k-color-text-secondary);
-  margin-bottom: 8px;
 }
 
-.total-value {
-  font-size: 48px;
+.hero__value {
+  /* 全页唯一的 40px+ 量级（--k-font-hero = 40→68） */
+  font-size: var(--k-font-hero);
   font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.01em;
   color: var(--k-color-text);
-  line-height: 1.2;
-  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: baseline;
+  gap: var(--k-space-2);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hero__unit {
+  font-size: var(--k-font-sm);
+  font-weight: 600;
+  color: var(--k-color-text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.hero__trend {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-3);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.hero__delta {
+  font-size: var(--k-font-md);
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-.total-change {
-  margin-top: 8px;
-  font-size: 16px;
+.hero__delta.is-up {
+  color: var(--k-color-success);
+}
+
+.hero__delta.is-down {
+  color: var(--k-color-danger);
+}
+
+.hero__period {
+  font-size: var(--k-font-xs);
+  color: var(--k-color-text-secondary);
+}
+
+/* 分段控件：选中态用主色浅底 + 主色描边，不再是实心按钮（页内只留 1 个实心主按钮） */
+.hero__range {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-surface-soft);
+  border: 1px solid var(--k-color-border-subtle);
+}
+
+.hero__range-btn {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 12px;
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: var(--k-color-text-secondary);
+  font-size: var(--k-font-xs);
   font-weight: 600;
+  line-height: 1.6;
+  transition:
+    background var(--k-dur-1) var(--k-ease),
+    color var(--k-dur-1) var(--k-ease);
 }
 
-.change-positive {
-  color: #22c55e;
+.hero__range-btn:hover {
+  color: var(--k-color-text);
 }
 
-.change-negative {
-  color: #f87171;
+.hero__range-btn.is-active {
+  background: var(--k-color-primary-soft);
+  color: var(--k-color-primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k-color-primary) 40%, transparent);
 }
 
-.period-label {
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--k-color-text-secondary);
-  margin-left: 4px;
+.hero__composition {
+  min-width: 0;
 }
 
-.time-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 16px;
+.hero__composition--loading {
+  padding: var(--k-space-3);
 }
 
-/* TQ 服务器状态 */
-.server-status {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 0 4px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.status-online {
-  background: #22c55e;
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
-}
-
-.status-offline {
-  background: #f87171;
-  box-shadow: 0 0 6px rgba(248, 113, 113, 0.5);
-}
-
-.status-unknown {
-  background: #909399;
-  box-shadow: 0 0 6px rgba(144, 147, 153, 0.5);
-}
-
-.status-text {
-  font-size: 12px;
-  color: var(--k-color-text-secondary);
-}
-
-/* ═══════════════ 四列仪表盘网格 ═══════════════ */
+/* ═══════════════ 仪表盘网格 ═══════════════ */
 .dashboard-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  margin-top: 16px;
 }
 
 .dashboard-column {
@@ -906,70 +972,54 @@ onMounted(() => {
   min-height: 0;
 }
 
-.scrollable-job-list {
-  flex: 1;
+/* 运营条：宽屏一行 5 格，≤1199 收成 3 列，≤767 收成 2 列 */
+@media (max-width: 1199px) {
+  .ops-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--k-space-2);
+  }
+
+  .ops-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .ops-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ═══════════════ 卡片标题（KCard header 插槽） ═══════════════ */
+.task-card,
+.announcement-card {
   min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
+  flex: 1 1 auto;
 }
 
-.scrollable-job-list::-webkit-scrollbar {
-  width: 4px;
-}
-
-.scrollable-job-list::-webkit-scrollbar-thumb {
-  background: var(--k-color-border);
-  border-radius: 2px;
-}
-
-.load-more-hint {
-  text-align: center;
-  padding: 12px;
-  color: var(--k-color-text-secondary);
-  font-size: 13px;
-}
-
-/* ═══════════════ 区块卡片 ═══════════════ */
-.section-card {
-  background: var(--k-color-surface);
-  border-radius: var(--k-radius-lg);
-  border: 1px solid var(--k-color-border);
-  box-shadow: var(--k-shadow-sm);
-  overflow: hidden;
+/* KCard 的 body 不是 flex 容器；这里补上，任务/公告列表的 flex:1 + overflow:auto 才会生效 */
+.task-card :deep(.k-card__body),
+.announcement-card :deep(.k-card__body) {
   display: flex;
   flex-direction: column;
-  flex: 1;
   min-height: 0;
 }
 
-.section-header {
+.task-card__title {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--k-color-border);
-}
-
-.section-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
+  gap: var(--k-space-2);
+  min-width: 0;
+  font-size: var(--k-font-md);
   font-weight: 600;
   color: var(--k-color-text);
 }
 
 .section-icon {
-  font-size: 18px;
-}
-
-.section-title-with-icon {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   font-size: 16px;
-  font-weight: 600;
-  color: var(--k-color-text);
+  color: var(--k-color-primary);
+  flex: none;
 }
 
 .count-badge {
@@ -977,132 +1027,255 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   min-width: 22px;
-  height: 22px;
+  height: 20px;
   padding: 0 6px;
-  border-radius: 11px;
-  font-size: 12px;
+  border-radius: var(--k-radius-pill);
+  font-size: var(--k-font-xs);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--k-color-primary-soft);
+  color: var(--k-color-primary);
+}
+
+.count-badge.is-muted {
+  background: var(--k-color-surface-soft);
+  color: var(--k-color-text-tertiary);
+}
+
+/* ═══════════════ 待办条（首行） ═══════════════ */
+.todo-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--k-space-3);
+  padding: var(--k-space-3) var(--k-space-4);
+  margin: var(--k-space-3) var(--k-space-3) 0;
+  border-radius: var(--k-radius-md);
+  background: var(--k-color-surface-soft);
+  border: 1px solid var(--k-color-border-subtle);
+  border-left: 3px solid var(--k-color-primary);
+}
+
+.todo-strip__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.todo-strip__kicker {
+  font-size: var(--k-font-xs);
+  color: var(--k-color-text-tertiary);
+  letter-spacing: 0.08em;
+}
+
+.todo-strip__title {
+  margin: 0;
+  font-size: var(--k-font-md);
+  font-weight: 700;
+  color: var(--k-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-strip__meta {
+  margin: 0;
+  font-size: var(--k-font-xs);
+  color: var(--k-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ═══════════════ 任务列表 ═══════════════ */
+.task-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--k-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-2);
+}
+
+.task-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.task-list::-webkit-scrollbar-thumb {
+  background: var(--k-color-border);
+  border-radius: 2px;
+}
+
+.task-row {
+  padding: var(--k-space-2) var(--k-space-3);
+  border-radius: var(--k-radius-md);
+  border: 1px solid var(--k-color-border-subtle);
+  background: var(--k-color-surface);
+  transition: border-color var(--k-dur-1) var(--k-ease);
+}
+
+.task-row:hover {
+  border-color: var(--k-color-border);
+}
+
+.task-row.is-done {
+  opacity: 0.72;
+  background: var(--k-color-surface-soft);
+}
+
+.task-row.is-skeleton {
+  opacity: 0.8;
+}
+
+.task-row__head {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-2);
+  min-width: 0;
+  margin-bottom: 6px;
+}
+
+.task-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--k-radius-pill);
+  object-fit: cover;
+  flex: none;
+  border: 1px solid var(--k-color-border-subtle);
+}
+
+.task-row__installer {
+  font-size: var(--k-font-xs);
+  font-weight: 600;
+  color: var(--k-color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-row__activity {
+  flex: none;
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-primary-soft);
+  color: var(--k-color-primary);
+  line-height: 1.6;
+}
+
+.task-row__value {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--k-font-xs);
+  font-weight: 600;
+  color: var(--k-color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-row__body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--k-space-2);
+  min-width: 0;
+}
+
+.task-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--k-radius-xs);
+  flex: none;
+}
+
+.task-row__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-row__name {
+  font-size: var(--k-font-sm);
+  font-weight: 600;
+  color: var(--k-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-progress {
+  height: 5px;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-surface-strong);
+  overflow: hidden;
+}
+
+.task-progress__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--k-radius-pill);
   background: var(--k-color-primary);
-  color: #fff;
+  transition: width var(--k-dur-2) var(--k-ease);
+}
+
+.task-row__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-3);
+  font-size: 11px;
+  color: var(--k-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-row__done-chip {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-success-soft);
+  color: var(--k-color-success);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.task-fold {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  margin-top: var(--k-space-1);
+  padding: var(--k-space-2);
+  border-radius: var(--k-radius-sm);
+  background: transparent;
+  color: var(--k-color-text-secondary);
+  font-size: var(--k-font-xs);
+  transition: background var(--k-dur-1) var(--k-ease);
+}
+
+.task-fold:hover {
+  background: var(--k-color-surface-soft);
+  color: var(--k-color-text);
 }
 
 .section-empty {
-  padding: 48px 20px;
+  padding: var(--k-space-6) var(--k-space-4);
   display: flex;
   justify-content: center;
 }
 
-/* ═══════════════ 运行中任务卡片 (紧凑版) ═══════════════ */
-.job-card-list {
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.job-card.compact {
-  background: var(--k-color-surface-soft);
-  border-radius: var(--k-radius-md);
-  padding: 10px 12px;
-  border: 1px solid var(--k-color-border);
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.job-card.compact:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--k-shadow-md);
-}
-
-.job-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.installer-avatar-sm {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: 2px solid var(--k-color-primary);
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.installer-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--k-color-text);
-  flex: 1;
-  margin-left: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.job-card-body {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.item-icon-sm {
-  width: 32px;
-  height: 32px;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.job-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.product-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--k-color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-bottom: 6px;
-}
-
-.job-progress {
-  margin-bottom: 6px;
-}
-
-.job-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--k-color-text-secondary);
-}
-
-.job-meta .job-value {
-  color: #67c23a;
-  font-weight: 600;
-}
-
-.job-meta .job-time {
-  color: var(--k-color-text-secondary);
-}
-
 /* ═══════════════ 公告预览 ═══════════════ */
 .announcement-list {
-  padding: 8px 0;
+  padding: var(--k-space-2) 0;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
 
 .announcement-item {
-  padding: 12px 20px;
+  padding: var(--k-space-3) var(--k-space-4);
   border-bottom: 1px solid var(--k-color-border-subtle);
-  transition: background 0.15s ease;
+  transition: background var(--k-dur-1) var(--k-ease);
 }
 
 .announcement-item:last-child {
@@ -1115,23 +1288,23 @@ onMounted(() => {
 }
 
 .announcement-title {
-  font-size: 14px;
+  font-size: var(--k-font-md);
   font-weight: 600;
   color: var(--k-color-text);
-  margin-bottom: 4px;
+  margin-bottom: var(--k-space-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .announcement-date {
-  font-size: 12px;
+  font-size: var(--k-font-xs);
   color: var(--k-color-text-secondary);
-  margin-bottom: 4px;
+  margin-bottom: var(--k-space-1);
 }
 
 .announcement-summary {
-  font-size: 12px;
+  font-size: var(--k-font-xs);
   color: var(--k-color-text-secondary);
   line-height: 1.5;
   display: -webkit-box;
@@ -1140,60 +1313,66 @@ onMounted(() => {
   overflow: hidden;
 }
 
-/* ═══════════════ 运营统计 ═══════════════ */
-.ops-grid {
-  padding: 16px 20px;
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 14px;
+/* ═══════════════ 运营状态：一行紧凑小方块 ═══════════════ */
+.ops-bar-card {
+  flex: none;
+  margin-bottom: var(--k-space-4);
 }
 
-.ops-item {
+.ops-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  background: var(--k-color-surface-soft);
-  border-radius: var(--k-radius-md);
-  border-left: 3px solid var(--k-color-primary);
+  gap: var(--k-space-4);
+  min-width: 0;
 }
 
-.ops-item:nth-child(2) {
-  border-left-color: #e6a23c;
-}
-
-.ops-item:nth-child(3) {
-  border-left-color: #67c23a;
-}
-
-.ops-item:nth-child(4) {
-  border-left-color: #409eff;
-}
-
-.ops-item:nth-child(5) {
-  border-left-color: #f56c6c;
-}
-
-.ops-value {
-  font-size: 18px;
-  font-weight: 700;
+.ops-bar__title {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-2);
+  flex: none;
+  font-size: var(--k-font-md);
+  font-weight: 600;
   color: var(--k-color-text);
-  font-variant-numeric: tabular-nums;
 }
 
-.ops-label {
-  font-size: 12px;
+.ops-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--k-space-2);
+  min-width: 0;
+}
+
+.ops-cell {
+  padding: var(--k-space-2) var(--k-space-3);
+  border-radius: var(--k-radius-md);
+  background: var(--k-color-surface-soft);
+  border: 1px solid var(--k-color-border-subtle);
+  min-width: 0;
+}
+
+/* 数字统一 ink 色，量级 24px（≤28；全页 40px+ 只留给 hero） */
+.ops-grid :deep(.k-stat__value) {
+  font-size: 24px;
+  color: var(--k-color-text);
+}
+
+.ops-hint {
+  flex: 1;
+  font-size: var(--k-font-xs);
   color: var(--k-color-text-secondary);
 }
 
 .ops-loading {
-  padding: 16px 20px;
+  flex: 1;
+  min-width: 0;
 }
 
 /* ═══════════════ 快捷操作按钮 ═══════════════ */
 .header-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--k-space-2);
   flex-wrap: wrap;
 }
 
@@ -1204,12 +1383,12 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 32px;
+  gap: var(--k-space-6);
 }
 
 .welcome-card {
   text-align: center;
-  padding: 48px 40px;
+  padding: var(--k-space-7) var(--k-space-6);
   background: var(--k-color-surface);
   border-radius: var(--k-radius-lg);
   border: 1px solid var(--k-color-border);
@@ -1219,14 +1398,14 @@ onMounted(() => {
 }
 
 .welcome-card h2 {
-  margin: 0 0 12px;
+  margin: 0 0 var(--k-space-3);
   font-size: 24px;
   font-weight: 700;
   color: var(--k-color-text);
 }
 
 .welcome-card p {
-  margin: 0 0 24px;
+  margin: 0 0 var(--k-space-5);
   font-size: 15px;
   color: var(--k-color-text-secondary);
   line-height: 1.6;
@@ -1234,7 +1413,7 @@ onMounted(() => {
 
 .guide-cards {
   display: flex;
-  gap: 20px;
+  gap: var(--k-space-5);
   max-width: 760px;
   width: 100%;
 }
@@ -1242,14 +1421,14 @@ onMounted(() => {
 .guide-card {
   flex: 1;
   text-align: center;
-  padding: 28px 20px;
+  padding: var(--k-space-5) var(--k-space-4);
   background: var(--k-color-surface);
   border-radius: var(--k-radius-lg);
   border: 1px solid var(--k-color-border);
   box-shadow: var(--k-shadow-sm);
   transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
+    transform var(--k-dur-2) var(--k-ease),
+    box-shadow var(--k-dur-2) var(--k-ease);
 }
 
 .guide-card:hover {
@@ -1259,32 +1438,33 @@ onMounted(() => {
 
 .guide-card .el-icon {
   color: var(--k-color-primary);
-  margin-bottom: 12px;
+  margin-bottom: var(--k-space-3);
 }
 
 .guide-card h3 {
-  margin: 0 0 8px;
+  margin: 0 0 var(--k-space-2);
   font-size: 15px;
   font-weight: 600;
   color: var(--k-color-text);
 }
 
 .guide-card p {
-  margin: 0 0 12px;
-  font-size: 13px;
+  margin: 0 0 var(--k-space-3);
+  font-size: var(--k-font-sm);
   color: var(--k-color-text-secondary);
   line-height: 1.5;
 }
 
-/* ═══════════════ 骨架屏 ═══════════════ */
-.skeleton-card {
-  min-height: 100px;
+/* ═══════════════ 响应式 ═══════════════ */
+@media (max-width: 991px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
-/* ═══════════════ 响应式 ═══════════════ */
 @media (max-width: 768px) {
   .dashboard-root {
-    padding: 12px;
+    padding: var(--k-space-3);
     height: auto;
     min-height: 100vh;
   }
@@ -1298,12 +1478,12 @@ onMounted(() => {
     font-size: 22px;
   }
 
-  .total-value {
-    font-size: 32px;
+  .hero {
+    padding: var(--k-space-4);
   }
 
-  .hero-banner {
-    padding: 16px 12px;
+  .hero__value {
+    font-size: clamp(32px, 9vw, 44px);
   }
 
   .dashboard-grid {
@@ -1315,7 +1495,7 @@ onMounted(() => {
   }
 
   .welcome-card {
-    padding: 32px 24px;
+    padding: var(--k-space-5) var(--k-space-4);
   }
 
   .header-actions {
@@ -1328,9 +1508,23 @@ onMounted(() => {
   }
 }
 
-@media (max-width: 1024px) {
-  .dashboard-grid {
-    grid-template-columns: 1fr 1fr;
+/* ── P2-C ≤640：375 级窄屏的两处内容裁切 ─────────────────────────────
+   1. .hero__value 在 768 档是 clamp(32px, 9vw, 44px)，375 下 33.75px，
+      「154,722,402,002.17」实测被容器裁掉右侧 3 位数字（真的读不到数）。
+      这里只再降一档字号，1280+ 仍走 token 原值。
+   2. .header-actions 在 768 档给按钮 flex:1，三个按钮平分 295px 后
+      「新建工业计划」被压成「新建工业计…」。改成按内容宽度、放不下就换行。 */
+@media (max-width: 640px) {
+  .hero__value {
+    font-size: clamp(17px, 6vw, 26px);
+  }
+
+  .header-actions {
+    width: 100%;
+  }
+
+  .header-actions .el-button {
+    flex: 0 1 auto;
   }
 }
 </style>

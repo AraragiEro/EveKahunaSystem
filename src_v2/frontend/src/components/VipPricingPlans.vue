@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { pricingPlans } from '@/data/pricingPlans'
+import KCard from '@/components/k/KCard.vue'
 
 // Props定义
 const props = withDefaults(defineProps<{
@@ -12,13 +13,14 @@ const props = withDefaults(defineProps<{
 <template>
   <div class="vip-pricing-plans">
     <div class="pricing-grid">
-      <el-card
+      <KCard
         v-for="(plan, index) in pricingPlans"
         :key="index"
-        shadow="hover"
+        hover
+        padding="none"
         :class="['pricing-card', { 'pricing-card-popular': plan.isPopular }]"
       >
-        <div class="pricing-header" :style="{ borderTopColor: plan.color }">
+        <div class="pricing-header" :style="{ '--plan-accent': plan.color }">
           <h3 class="pricing-name">{{ plan.name }}</h3>
           <div class="pricing-price">
             <span class="price-amount">{{ plan.price }}</span>
@@ -45,7 +47,7 @@ const props = withDefaults(defineProps<{
             </ul>
           </div>
         </div>
-      </el-card>
+      </KCard>
     </div>
 
     <div v-if="showContactInfo" class="contact-info">
@@ -68,48 +70,74 @@ const props = withDefaults(defineProps<{
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 32px;
   margin-bottom: 32px;
-  align-items: start;
+  /* 三张卡等高，底部对齐；原来用 start 会参差不齐 */
+  align-items: stretch;
 }
 
 .pricing-card {
-  border-radius: 16px;
-  transition: all 0.3s ease;
+  border-radius: var(--k-radius-lg);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
   overflow: hidden;
   background: var(--k-color-surface);
-  border: 2px solid transparent;
+  border: 1px solid var(--k-color-border);
   position: relative;
+  /* 让卡片内部纵向撑满，内容少的那张也不会矮一截 */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* KCard 默认 body 有 24px 内边距，会把顶部强调条和分区背景隔开，这里清掉 */
+.pricing-card :deep(.k-card__body) {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .pricing-card:hover {
-  transform: translateY(-8px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--k-color-primary) 45%, var(--k-color-border));
+  box-shadow: var(--k-shadow-md);
 }
 
 .pricing-card-popular {
-  border-color: #409eff;
-  box-shadow: 0 8px 24px rgba(64, 158, 255, 0.2);
+  border-color: var(--k-color-primary);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--k-color-primary) 22%, transparent);
 }
 
+/* 「推荐」改成卡片右上角的胶囊徽标，不再用会溢出圆角的斜角丝带 */
 .pricing-card-popular::before {
   content: '推荐';
   position: absolute;
-  top: 16px;
-  right: -32px;
-  background: #409eff;
-  color: white;
-  padding: 4px 40px;
-  font-size: 12px;
+  top: 14px;
+  right: 14px;
+  background: var(--k-color-primary);
+  color: var(--k-color-text-inverse);
+  padding: 2px 10px;
+  border-radius: var(--k-radius-pill);
+  font-size: var(--k-font-xs);
   font-weight: 600;
-  transform: rotate(45deg);
+  letter-spacing: 0.02em;
   z-index: 10;
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-primary) 30%, transparent);
 }
 
 .pricing-header {
+  position: relative;
   padding: 32px 24px;
   text-align: center;
-  border-top: 4px solid;
   background: var(--k-color-surface);
+}
+
+/* 顶部强调色条：用伪元素画，跟着卡片圆角走，不会再悬空成一条线 */
+.pricing-header::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: var(--plan-accent, var(--k-color-primary));
 }
 
 .pricing-name {
@@ -142,14 +170,14 @@ const props = withDefaults(defineProps<{
 
 .pricing-trial {
   display: inline-block;
-  background: linear-gradient(135deg, #e6a23c 0%, #f0c674 100%);
-  color: white;
+  background: linear-gradient(135deg, var(--k-color-warning) 0%, color-mix(in srgb, var(--k-color-warning) 62%, var(--k-color-tint)) 100%);
+  color: #201804;
   padding: 6px 16px;
-  border-radius: 20px;
-  font-size: 13px;
+  border-radius: var(--k-radius-pill);
+  font-size: var(--k-font-sm);
   font-weight: 600;
   margin-top: 8px;
-  box-shadow: 0 2px 8px rgba(230, 162, 60, 0.3);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--k-color-warning) 30%, transparent);
 }
 
 .pricing-note {
@@ -159,17 +187,13 @@ const props = withDefaults(defineProps<{
   line-height: 1.5;
 }
 
-/* 深色模式下卡片背景 */
-[data-theme='dark'] .pricing-card {
-  background: var(--k-color-surface);
-}
-
-[data-theme='dark'] .pricing-card .el-card__body {
-  background: var(--k-color-surface);
-}
+/* 深色模式：KCard 的底/描边/文字全部走 --k-* token，深浅自动切换，
+   原先给 .el-card/.el-card__body 补的两条深色覆盖变成同值重复声明，已删除。 */
 
 .pricing-features {
   padding: 24px;
+  /* 撑满剩余高度，让三张卡的底部对齐 */
+  flex: 1;
 }
 
 .feature-group {
@@ -202,13 +226,15 @@ const props = withDefaults(defineProps<{
   padding: 6px 0;
   padding-left: 20px;
   position: relative;
+  /* 减少中文换行出现单字孤行 */
+  text-wrap: pretty;
 }
 
 .feature-item::before {
   content: '✓';
   position: absolute;
   left: 0;
-  color: #67c23a;
+  color: var(--k-color-success);
   font-weight: 600;
 }
 
@@ -231,9 +257,7 @@ const props = withDefaults(defineProps<{
 
   .pricing-card-popular::before {
     top: 12px;
-    right: -28px;
-    padding: 3px 35px;
-    font-size: 11px;
+    right: 12px;
   }
 
   .price-amount {
